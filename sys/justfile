@@ -1,15 +1,7 @@
-# -----------------------------------------------------------------------------
-# Project settings
-# -----------------------------------------------------------------------------
-
 set working-directory := './'
 
 _default:
     @just --list
-
-# -----------------------------------------------------------------------------
-# Release
-# -----------------------------------------------------------------------------
 
 # Tag a package release and push the tag to origin.
 #
@@ -20,7 +12,7 @@ _default:
 #
 # Usage:
 #   just release atomic v1.2.3
-#   just release atomic 1.2.3      # "v" prefix is added if missing
+# just release atomic 1.2.3      # "v" prefix is added if missing
 [group('release')]
 release package version:
     #!/usr/bin/env bash
