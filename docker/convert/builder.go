@@ -286,7 +286,7 @@ func mergeExistingComposeInternal(doc *converttypes.Document, yamlData []byte) e
 		slices.Sort(names)
 		for _, name := range names {
 			if svc, ok := services[name].(map[string]any); ok {
-				doc.Services[name] = converttypes.Service(svc)
+				doc.Services[name] = svc
 				doc.ServiceOrder = append(doc.ServiceOrder, name)
 			}
 		}

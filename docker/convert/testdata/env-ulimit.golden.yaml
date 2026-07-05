@@ -1,11 +1,11 @@
 services:
-    worker:
-        image: alpine:3.20
-        container_name: worker
-        env_file:
-            - .env
-        command: sleep 30
-        ulimits:
-            nofile:
-                soft: 1024
-                hard: 2048
+  worker:
+    image: alpine:3.20
+    container_name: worker
+    env_file:
+      - .env
+    command: sleep 30
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 2048

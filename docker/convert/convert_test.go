@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	convert "go.getarcane.app/docker/convert"
+	"go.getarcane.app/docker/convert"
 	converttypes "go.getarcane.app/docker/convert/types"
 )
 
