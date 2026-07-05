@@ -1,0 +1,30 @@
+services:
+    web:
+        image: nginx:1.27-alpine
+        container_name: web
+        ports:
+            - 8080:80
+        volumes:
+            - data:/data
+        environment:
+            - FOO=bar
+        restart: unless-stopped
+        working_dir: /srv/app
+        user: 1000:1000
+        entrypoint: /entrypoint.sh
+        command: nginx -g 'daemon off;'
+        stdin_open: true
+        tty: true
+        privileged: true
+        labels:
+            - com.example.role=frontend
+        healthcheck:
+            test: curl -f http://localhost || exit 1
+        deploy:
+            resources:
+                limits:
+                    memory: 512m
+                    cpus: "0.5"
+volumes:
+    data:
+        external: true

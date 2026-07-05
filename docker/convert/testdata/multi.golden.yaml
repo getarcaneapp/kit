@@ -1,0 +1,9 @@
+services:
+    web:
+        image: nginx:alpine
+        container_name: web
+    db:
+        image: postgres:16
+        container_name: db
+        environment:
+            - POSTGRES_PASSWORD=secret
