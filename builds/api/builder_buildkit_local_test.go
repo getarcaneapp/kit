@@ -10,25 +10,25 @@ import (
 	"go.getarcane.app/builds/types"
 )
 
-func TestDockerfileRequiresBuildkitInternal(t *testing.T) {
-	t.Run("syntax directive enables buildkit", func(t *testing.T) {
-		assert.True(t, dockerfileRequiresBuildkitInternal("# syntax=docker/dockerfile:1.7\nFROM alpine:3.20\n"))
+func TestDockerfileRequiresDirectBuildkitSessionInternal(t *testing.T) {
+	t.Run("syntax directive requires direct buildkit session", func(t *testing.T) {
+		assert.True(t, dockerfileRequiresDirectBuildkitSessionInternal("# syntax=docker/dockerfile:1.7\nFROM alpine:3.20\n"))
 	})
 
-	t.Run("run mount enables buildkit", func(t *testing.T) {
-		assert.True(t, dockerfileRequiresBuildkitInternal("FROM oven/bun:alpine\nRUN --mount=type=cache,target=/root/.bun bun install\n"))
+	t.Run("run mount requires direct buildkit session", func(t *testing.T) {
+		assert.True(t, dockerfileRequiresDirectBuildkitSessionInternal("FROM oven/bun:alpine\nRUN --mount=type=cache,target=/root/.bun bun install\n"))
 	})
 
-	t.Run("plain dockerfile stays on classic docker", func(t *testing.T) {
-		assert.False(t, dockerfileRequiresBuildkitInternal("FROM alpine:3.20\nRUN echo hello\n"))
+	t.Run("plain dockerfile uses docker engine buildkit api", func(t *testing.T) {
+		assert.False(t, dockerfileRequiresDirectBuildkitSessionInternal("FROM alpine:3.20\nRUN echo hello\n"))
 	})
 }
 
-func TestRequiresLocalBuildkitInternal_ReadsRequestedDockerfile(t *testing.T) {
+func TestRequiresDirectLocalBuildkitSessionInternal_ReadsRequestedDockerfile(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile.custom"), []byte("FROM alpine:3.20\nRUN --mount=type=cache,target=/tmp/cache echo hi\n"), 0o644))
 
-	required, err := requiresLocalBuildkitInternal(types.BuildRequest{
+	required, err := requiresDirectLocalBuildkitSessionInternal(types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile.custom",
 	})
@@ -36,8 +36,8 @@ func TestRequiresLocalBuildkitInternal_ReadsRequestedDockerfile(t *testing.T) {
 	assert.True(t, required)
 }
 
-func TestRequiresLocalBuildkitInternal_UsesInlineDockerfile(t *testing.T) {
-	required, err := requiresLocalBuildkitInternal(types.BuildRequest{
+func TestRequiresDirectLocalBuildkitSessionInternal_UsesInlineDockerfile(t *testing.T) {
+	required, err := requiresDirectLocalBuildkitSessionInternal(types.BuildRequest{
 		ContextDir:       t.TempDir(),
 		DockerfileInline: "FROM alpine:3.20\nRUN --mount=type=cache,target=/tmp/cache echo hi\n",
 	})

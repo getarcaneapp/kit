@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/moby/go-archive"
+	dockerbuild "github.com/moby/moby/api/types/build"
 	dockercontainer "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/jsonstream"
 	dockerregistry "github.com/moby/moby/api/types/registry"
@@ -422,6 +423,7 @@ func buildDockerImageOptionsInternal(
 	authConfigs map[string]dockerregistry.AuthConfig,
 ) (dockerclient.ImageBuildOptions, error) {
 	buildOpts := dockerclient.ImageBuildOptions{
+		Version:     dockerbuild.BuilderBuildKit,
 		Tags:        req.Tags,
 		Dockerfile:  dockerfileForBuild,
 		Remove:      true,

@@ -10,7 +10,7 @@ Portable Docker and BuildKit image build orchestration for Go applications.
 
 </div>
 
-Arcane Builds is the standalone Go module behind Arcane's image build flow. It provides the build engine, Docker Engine build fallback, local Docker BuildKit integration, Depot BuildKit provider integration, registry auth wiring, build progress events, log capture, and reusable helper packages.
+Arcane Builds is the standalone Go module behind Arcane's image build flow. It provides the build engine, Docker Engine BuildKit integration, direct local BuildKit sessions, Depot BuildKit provider integration, registry auth wiring, build progress events, log capture, and reusable helper packages.
 
 The module can be used directly in non-Arcane Go applications. Arcane-specific build history, activity logging, Git credential lookup, remote Git clone/probe/cleanup, and pagination remain host-application behavior. The build engine expects a local build context directory by the time `BuildImage` is called.
 
@@ -22,7 +22,7 @@ Using Arcane Builds is a small image build flow:
 2. Provide a `SettingsProvider`, a `DockerClientProvider`, and optionally a `RegistryAuthProvider`.
 3. Call `BuildImage` with a `types.BuildRequest`, progress writer, and optional service name.
 4. The service resolves the effective provider from the request override or host settings.
-5. Local builds use Docker Engine build unless the Dockerfile requires BuildKit features.
+5. Local builds use the Docker Engine BuildKit API, with a direct BuildKit session for Dockerfiles that require session-backed features.
 6. BuildKit builds stream status as NDJSON `types.ProgressEvent` payloads and can load, push, or export image results depending on request options.
 7. Registry auth configs are passed through to Docker build, BuildKit sessions, and image push operations.
 8. Results are returned as `types.BuildResult`.

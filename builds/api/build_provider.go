@@ -43,7 +43,7 @@ func (p *depotBuildKitProvider) NewSession(ctx context.Context, req types.BuildR
 	}
 
 	settings := p.settings.BuildSettings()
-	projectID := strings.TrimSpace(settings.DepotProjectId)
+	projectID := strings.TrimSpace(settings.DepotProjectID)
 	token := strings.TrimSpace(settings.DepotToken)
 	if projectID == "" || token == "" {
 		return nil, &types.DepotProjectCredentialsRequiredError{}

@@ -83,11 +83,11 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 	}
 
 	if providerName == "local" {
-		requiresBuildkit, err := requiresLocalBuildkitInternal(req)
+		requiresDirectBuildkitSession, err := requiresDirectLocalBuildkitSessionInternal(req)
 		if err != nil {
 			return nil, err
 		}
-		if requiresBuildkit {
+		if requiresDirectBuildkitSession {
 			session, err := b.newLocalBuildkitSessionInternal(buildCtx)
 			if err != nil {
 				return nil, err

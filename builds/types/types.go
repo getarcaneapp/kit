@@ -11,7 +11,7 @@ import (
 
 // BuildSettings configures build provider behavior.
 type BuildSettings struct {
-	DepotProjectId   string
+	DepotProjectID   string
 	DepotToken       string
 	BuildProvider    string
 	BuildTimeoutSecs int

@@ -43,7 +43,7 @@ func (b *Service) newLocalBuildkitSessionInternal(ctx context.Context) (*buildSe
 	}, nil
 }
 
-func requiresLocalBuildkitInternal(req types.BuildRequest) (bool, error) {
+func requiresDirectLocalBuildkitSessionInternal(req types.BuildRequest) (bool, error) {
 	fsInput, err := prepareBuildFilesystemInputInternal(req)
 	if err != nil {
 		return false, err
@@ -54,7 +54,7 @@ func requiresLocalBuildkitInternal(req types.BuildRequest) (bool, error) {
 		return false, err
 	}
 
-	return dockerfileRequiresBuildkitInternal(contents), nil
+	return dockerfileRequiresDirectBuildkitSessionInternal(contents), nil
 }
 
 func readDockerfileContentsInternal(input buildFilesystemInput) (string, error) {
@@ -70,7 +70,7 @@ func readDockerfileContentsInternal(input buildFilesystemInput) (string, error) 
 	return string(raw), nil
 }
 
-func dockerfileRequiresBuildkitInternal(contents string) bool {
+func dockerfileRequiresDirectBuildkitSessionInternal(contents string) bool {
 	scanner := bufio.NewScanner(strings.NewReader(contents))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

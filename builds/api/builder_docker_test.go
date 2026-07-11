@@ -2,14 +2,15 @@ package api
 
 import (
 	"bufio"
-	dockerregistry "github.com/moby/moby/api/types/registry"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	dockerbuild "github.com/moby/moby/api/types/build"
+	dockerregistry "github.com/moby/moby/api/types/registry"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.getarcane.app/builds/types"
 )
 
@@ -27,7 +28,7 @@ func TestPrepareDockerBuildInputInternal_RejectsMultiPlatform(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not support multi-platform builds")
 }
 
-func TestBuildDockerImageOptionsInternal_IncludesAuthConfigs(t *testing.T) {
+func TestBuildDockerImageOptionsInternal_UsesBuildkitAndIncludesAuthConfigs(t *testing.T) {
 	contextDir := createBuildContextWithDockerfileInternal(t)
 	req := types.BuildRequest{
 		ContextDir: contextDir,
@@ -50,7 +51,7 @@ func TestBuildDockerImageOptionsInternal_IncludesAuthConfigs(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, buildOpts.AuthConfigs)
 	assert.Equal(t, authConfigs, buildOpts.AuthConfigs)
-	assert.Empty(t, buildOpts.Version)
+	assert.Equal(t, dockerbuild.BuilderBuildKit, buildOpts.Version)
 	require.Len(t, buildOpts.Platforms, 1)
 	assert.Equal(t, "linux", buildOpts.Platforms[0].OS)
 	assert.Equal(t, "amd64", buildOpts.Platforms[0].Architecture)
