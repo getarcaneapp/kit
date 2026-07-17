@@ -1,6 +1,6 @@
 module go.getarcane.app/builds
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/depot/depot-go v0.5.2

@@ -5,8 +5,8 @@ import (
 	"context"
 	"io"
 
-	dockerregistry "github.com/moby/moby/api/types/registry"
-	dockerclient "github.com/moby/moby/client"
+	"github.com/moby/moby/api/types/registry"
+	"github.com/moby/moby/client"
 )
 
 // BuildSettings configures build provider behavior.
@@ -74,12 +74,12 @@ type SettingsProvider interface {
 
 // DockerClientProvider provides Docker clients.
 type DockerClientProvider interface {
-	GetClient(ctx context.Context) (*dockerclient.Client, error)
+	GetClient(ctx context.Context) (*client.Client, error)
 }
 
 // RegistryAuthProvider provides registry auth configs for build and push operations.
 type RegistryAuthProvider interface {
-	GetAllRegistryAuthConfigs(ctx context.Context) (map[string]dockerregistry.AuthConfig, error)
+	GetAllRegistryAuthConfigs(ctx context.Context) (map[string]registry.AuthConfig, error)
 }
 
 // Builder builds container images.

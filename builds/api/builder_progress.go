@@ -1,7 +1,7 @@
 package api
 
 import (
-	"encoding/json"
+	json "encoding/json/v2"
 	"io"
 
 	"go.getarcane.app/builds/types"
