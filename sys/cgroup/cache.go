@@ -1,21 +1,18 @@
 package cgroup
 
 import (
-	"sync"
 	"time"
+
+	"github.com/samber/hot"
 )
 
 // Cache memoizes the result of cgroup limit detection for a configurable TTL.
-// A single in-flight refresh is shared across concurrent callers (singleflight
-// semantics via the write lock), so a stampede of samplers never duplicates
-// the work.
+// A single in-flight refresh is shared across concurrent callers, so a
+// stampede of samplers never duplicates the work.
 type Cache struct {
-	mu        sync.RWMutex
-	value     *Limits
-	detected  bool
-	timestamp time.Time
-	ttl       time.Duration
-	detector  func() (*Limits, error)
+	cache    *hot.HotCache[struct{}, *Limits]
+	ttl      time.Duration
+	detector func() (*Limits, error)
 }
 
 // NewCache returns a cache that caches detection results for ttl using the
@@ -27,40 +24,35 @@ func NewCache(ttl time.Duration) *Cache {
 // NewCacheWithDetector returns a cache backed by a custom detector. Useful when
 // callers (e.g. tests) need to control detection behaviour or simulate failures.
 func NewCacheWithDetector(ttl time.Duration, detector func() (*Limits, error)) *Cache {
-	return &Cache{ttl: ttl, detector: detector}
+	cache := &Cache{ttl: ttl, detector: detector}
+	if ttl > 0 {
+		cache.cache = hot.NewHotCache[struct{}, *Limits](hot.LRU, 1).
+			WithTTL(ttl).
+			Build()
+	}
+	return cache
 }
 
 // Get returns the cached cgroup limits, refreshing if the entry is older than the TTL.
 // Returns nil when no cgroup limits have been detected (host is not running under cgroups).
 func (c *Cache) Get() *Limits {
-	c.mu.RLock()
-	value, detected, fresh := c.value, c.detected, time.Since(c.timestamp) < c.ttl
-	c.mu.RUnlock()
-	if fresh {
-		if detected {
-			return value
+	if c.ttl <= 0 {
+		limits, err := c.detector()
+		if err != nil {
+			return nil
 		}
-		return nil
+		return limits
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if time.Since(c.timestamp) < c.ttl {
-		if c.detected {
-			return c.value
+	limits, _, err := c.cache.GetWithLoaders(struct{}{}, func(_ []struct{}) (map[struct{}]*Limits, error) {
+		detected, detectErr := c.detector()
+		if detectErr != nil {
+			return map[struct{}]*Limits{{}: nil}, nil
 		}
-		return nil
-	}
-
-	limits, err := c.detector()
-	c.timestamp = time.Now()
+		return map[struct{}]*Limits{{}: detected}, nil
+	})
 	if err != nil {
-		c.value = nil
-		c.detected = false
 		return nil
 	}
-	c.value = limits
-	c.detected = true
-	return c.value
+	return limits
 }
