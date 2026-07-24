@@ -92,9 +92,9 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 			if err != nil {
 				return nil, err
 			}
-			return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, serviceName, providerName, session)
+			return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, providerName, session)
 		}
-		return b.buildWithDockerInternal(buildCtx, req, progressWriter, serviceName)
+		return b.buildWithDockerInternal(buildCtx, req, progressWriter)
 	}
 
 	if provider == nil {
@@ -106,14 +106,13 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 		return nil, err
 	}
 
-	return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, serviceName, providerName, session)
+	return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, providerName, session)
 }
 
 func (b *Service) buildWithBuildkitSessionInternal(
 	ctx context.Context,
 	req types.BuildRequest,
 	progressWriter io.Writer,
-	serviceName string,
 	providerName string,
 	session *buildSession,
 ) (*types.BuildResult, error) {
@@ -143,26 +142,14 @@ func (b *Service) buildWithBuildkitSessionInternal(
 	statusCh := make(chan *buildkit.SolveStatus, 16)
 	streamErrCh := make(chan error, 1)
 	go func() {
-		streamErrCh <- streamSolveStatusInternal(ctx, statusCh, progressWriter, serviceName)
+		streamErrCh <- streamSolveStatusInternal(ctx, statusCh, progressWriter)
 	}()
-
-	writeProgressEventInternal(progressWriter, types.ProgressEvent{
-		Type:    "build",
-		Phase:   "begin",
-		Service: serviceName,
-		Status:  "build started",
-	})
 
 	resp, err := session.Client.Solve(ctx, nil, solveOpt, statusCh)
 
 	if err != nil {
 		err = wrapBuildkitSolveErrorInternal(err, providerName)
 		buildErr = err
-		writeProgressEventInternal(progressWriter, types.ProgressEvent{
-			Type:    "build",
-			Service: serviceName,
-			Error:   err.Error(),
-		})
 		return nil, err
 	}
 
@@ -173,11 +160,6 @@ func (b *Service) buildWithBuildkitSessionInternal(
 	if loadErrCh != nil {
 		if loadErr := <-loadErrCh; loadErr != nil {
 			buildErr = loadErr
-			writeProgressEventInternal(progressWriter, types.ProgressEvent{
-				Type:    "build",
-				Service: serviceName,
-				Error:   loadErr.Error(),
-			})
 			return nil, loadErr
 		}
 	}
@@ -186,41 +168,19 @@ func (b *Service) buildWithBuildkitSessionInternal(
 		if b.dockerClientProvider == nil {
 			missingClientErr := &types.BuildDockerServiceUnavailableError{}
 			buildErr = missingClientErr
-			writeProgressEventInternal(progressWriter, types.ProgressEvent{
-				Type:    "build",
-				Service: serviceName,
-				Error:   missingClientErr.Error(),
-			})
 			return nil, missingClientErr
 		}
 
 		dockerClient, dockerClientErr := b.dockerClientProvider.GetClient(ctx)
 		if dockerClientErr != nil {
 			buildErr = dockerClientErr
-			writeProgressEventInternal(progressWriter, types.ProgressEvent{
-				Type:    "build",
-				Service: serviceName,
-				Error:   dockerClientErr.Error(),
-			})
 			return nil, dockerClientErr
 		}
-		if pushErr := b.pushDockerImagesInternal(ctx, dockerClient, req.Tags, progressWriter, serviceName); pushErr != nil {
+		if pushErr := b.pushDockerImagesInternal(ctx, dockerClient, req.Tags, progressWriter); pushErr != nil {
 			buildErr = pushErr
-			writeProgressEventInternal(progressWriter, types.ProgressEvent{
-				Type:    "build",
-				Service: serviceName,
-				Error:   pushErr.Error(),
-			})
 			return nil, pushErr
 		}
 	}
-
-	writeProgressEventInternal(progressWriter, types.ProgressEvent{
-		Type:    "build",
-		Phase:   "complete",
-		Service: serviceName,
-		Status:  "build complete",
-	})
 
 	digest := ""
 	if resp != nil {

@@ -221,7 +221,7 @@ func (b *Service) buildLoadExportInternal(ctx context.Context, tags []string) (b
 			return
 		}
 		defer func() { _ = loadResp.Close() }()
-		loadErrCh <- dockerutils.ConsumeJSONMessageStream(loadResp, nil)
+		loadErrCh <- dockerutils.RenderJSONMessageStream(loadResp, io.Discard)
 	}()
 
 	exportAttrs := map[string]string{}
@@ -238,36 +238,3 @@ func (b *Service) buildLoadExportInternal(ctx context.Context, tags []string) (b
 	}, loadErrCh, nil
 }
 
-func streamSolveStatusInternal(ctx context.Context, ch <-chan *buildkit.SolveStatus, w io.Writer, serviceName string) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case status, ok := <-ch:
-			if !ok {
-				return nil
-			}
-			if status == nil {
-				continue
-			}
-			for _, s := range status.Statuses {
-				if s == nil {
-					continue
-				}
-				event := types.ProgressEvent{
-					Type:    "build",
-					Service: serviceName,
-					ID:      s.ID,
-					Status:  s.Name,
-				}
-				if s.Current > 0 || s.Total > 0 {
-					event.ProgressDetail = &types.ProgressDetail{
-						Current: s.Current,
-						Total:   s.Total,
-					}
-				}
-				writeProgressEventInternal(w, event)
-			}
-		}
-	}
-}

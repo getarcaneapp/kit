@@ -50,23 +50,6 @@ type BuildResult struct {
 	Digest   string   `json:"digest,omitempty"`
 }
 
-// ProgressDetail provides byte progress information for stream events.
-type ProgressDetail struct {
-	Current int64 `json:"current,omitempty"`
-	Total   int64 `json:"total,omitempty"`
-}
-
-// ProgressEvent is the standardized NDJSON envelope for build streams.
-type ProgressEvent struct {
-	Type           string          `json:"type,omitempty"`
-	Phase          string          `json:"phase,omitempty"`
-	Service        string          `json:"service,omitempty"`
-	Status         string          `json:"status,omitempty"`
-	ID             string          `json:"id,omitempty"`
-	ProgressDetail *ProgressDetail `json:"progressDetail,omitempty"`
-	Error          string          `json:"error,omitempty"`
-}
-
 // SettingsProvider provides build settings owned by the host application.
 type SettingsProvider interface {
 	BuildSettings() BuildSettings
@@ -83,6 +66,12 @@ type RegistryAuthProvider interface {
 }
 
 // Builder builds container images.
+//
+// progressWriter receives the raw text the docker CLI would print for the
+// build (plain-mode BuildKit progress, jsonmessage-rendered push/load output).
+// Writes to it are serialized by the implementation, so any plain io.Writer
+// is safe to pass. Hosts that need structured framing wrap the writer
+// themselves.
 type Builder interface {
 	BuildImage(ctx context.Context, req BuildRequest, progressWriter io.Writer, serviceName string) (*BuildResult, error)
 }

@@ -3,7 +3,6 @@ package api
 import (
 	"bufio"
 	"context"
-	json "encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"github.com/moby/go-archive"
 	dockerbuild "github.com/moby/moby/api/types/build"
 	dockercontainer "github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/api/types/jsonstream"
 	dockerregistry "github.com/moby/moby/api/types/registry"
 	dockerclient "github.com/moby/moby/client"
 	"github.com/moby/patternmatcher"
@@ -338,16 +336,14 @@ func (b *Service) performDockerBuildInternal(
 	buildContext io.Reader,
 	buildOpts dockerclient.ImageBuildOptions,
 	progressWriter io.Writer,
-	serviceName string,
 ) error {
 	resp, err := dockerClient.ImageBuild(ctx, buildContext, buildOpts)
 	if err != nil {
-		writeProgressEventInternal(progressWriter, types.ProgressEvent{Type: "build", Service: serviceName, Error: err.Error()})
 		return err
 	}
 	defer resp.Body.Close()
 
-	return streamDockerMessagesInternal(ctx, resp.Body, progressWriter, serviceName)
+	return renderDockerBuildStreamInternal(ctx, resp.Body, progressWriter)
 }
 
 func (b *Service) pushDockerImagesInternal(
@@ -355,37 +351,29 @@ func (b *Service) pushDockerImagesInternal(
 	dockerClient *dockerclient.Client,
 	tags []string,
 	progressWriter io.Writer,
-	serviceName string,
 ) error {
+	if progressWriter == nil {
+		progressWriter = io.Discard
+	}
 	for _, tag := range tags {
 		if strings.TrimSpace(tag) == "" {
 			continue
 		}
-		writeProgressEventInternal(progressWriter, types.ProgressEvent{
-			Type:    "build",
-			Service: serviceName,
-			Status:  "pushing " + tag,
-		})
 		pushOptions := dockerclient.ImagePushOptions{}
 		if b.registryAuthProvider != nil {
 			authHeader, authErr := registryAuthHeaderForImageInternal(ctx, b.registryAuthProvider, tag)
 			if authErr != nil {
-				writeProgressEventInternal(progressWriter, types.ProgressEvent{
-					Type:    "build",
-					Service: serviceName,
-					Status:  "registry auth unavailable for " + tag,
-				})
+				_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for "+tag)
 			} else if authHeader != "" {
 				pushOptions.RegistryAuth = authHeader
 			}
 		}
 		pushResp, pushErr := dockerClient.ImagePush(ctx, tag, pushOptions)
 		if pushErr != nil {
-			writeProgressEventInternal(progressWriter, types.ProgressEvent{Type: "build", Service: serviceName, Error: pushErr.Error()})
 			return pushErr
 		}
 		if pushResp != nil {
-			if err := streamDockerMessagesInternal(ctx, pushResp, progressWriter, serviceName); err != nil {
+			if err := dockerutils.RenderJSONMessageStream(pushResp, progressWriter); err != nil {
 				_ = pushResp.Close()
 				return err
 			}
@@ -456,7 +444,7 @@ func buildDockerImageOptionsInternal(
 	return buildOpts, nil
 }
 
-func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRequest, progressWriter io.Writer, serviceName string) (*types.BuildResult, error) {
+func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRequest, progressWriter io.Writer) (*types.BuildResult, error) {
 	if b.dockerClientProvider == nil {
 		return nil, &types.BuildDockerServiceUnavailableError{}
 	}
@@ -466,11 +454,8 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
-	input, reportProgress, err := prepareDockerBuildInputInternal(req)
+	input, _, err := prepareDockerBuildInputInternal(req)
 	if err != nil {
-		if reportProgress {
-			writeProgressEventInternal(progressWriter, types.ProgressEvent{Type: "build", Service: serviceName, Error: err.Error()})
-		}
 		return nil, err
 	}
 
@@ -486,22 +471,13 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 	}
 	defer buildContext.Close()
 
-	writeProgressEventInternal(progressWriter, types.ProgressEvent{
-		Type:    "build",
-		Phase:   "begin",
-		Service: serviceName,
-		Status:  "build started",
-	})
-
 	var authConfigs map[string]dockerregistry.AuthConfig
 	if b.registryAuthProvider != nil {
 		loadedAuthConfigs, authErr := b.registryAuthProvider.GetAllRegistryAuthConfigs(ctx)
 		if authErr != nil {
-			writeProgressEventInternal(progressWriter, types.ProgressEvent{
-				Type:    "build",
-				Service: serviceName,
-				Status:  "registry auth unavailable for build",
-			})
+			if progressWriter != nil {
+				_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for build")
+			}
 		} else {
 			authConfigs = loadedAuthConfigs
 		}
@@ -509,76 +485,23 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 
 	buildOpts, buildOptsErr := buildDockerImageOptionsInternal(req, input, dockerfileForBuild, authConfigs)
 	if buildOptsErr != nil {
-		writeProgressEventInternal(progressWriter, types.ProgressEvent{Type: "build", Service: serviceName, Error: buildOptsErr.Error()})
 		return nil, buildOptsErr
 	}
 
-	if err := b.performDockerBuildInternal(ctx, dockerClient, buildContext, buildOpts, progressWriter, serviceName); err != nil {
+	if err := b.performDockerBuildInternal(ctx, dockerClient, buildContext, buildOpts, progressWriter); err != nil {
 		return nil, err
 	}
 
 	if req.Push {
-		if err := b.pushDockerImagesInternal(ctx, dockerClient, req.Tags, progressWriter, serviceName); err != nil {
+		if err := b.pushDockerImagesInternal(ctx, dockerClient, req.Tags, progressWriter); err != nil {
 			return nil, err
 		}
 	}
-
-	writeProgressEventInternal(progressWriter, types.ProgressEvent{
-		Type:    "build",
-		Phase:   "complete",
-		Service: serviceName,
-		Status:  "build complete",
-	})
 
 	return &types.BuildResult{
 		Provider: "local",
 		Tags:     req.Tags,
 	}, nil
-}
-
-func streamDockerMessagesInternal(ctx context.Context, reader io.Reader, w io.Writer, serviceName string) error {
-	streamErr := dockerutils.ConsumeJSONMessageStream(reader, func(line []byte) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		var msg jsonstream.Message
-		if unmarshalErr := json.Unmarshal(line, &msg); unmarshalErr != nil {
-			return unmarshalErr
-		}
-		status := strings.TrimSpace(msg.Status)
-		if status == "" {
-			status = strings.TrimSpace(msg.Stream)
-		}
-		if status == "" {
-			return nil
-		}
-
-		event := types.ProgressEvent{
-			Type:    "build",
-			Service: serviceName,
-			ID:      strings.TrimSpace(msg.ID),
-			Status:  status,
-		}
-		if msg.Progress != nil {
-			event.ProgressDetail = &types.ProgressDetail{
-				Current: msg.Progress.Current,
-				Total:   msg.Progress.Total,
-			}
-		}
-		writeProgressEventInternal(w, event)
-		return nil
-	})
-	if streamErr != nil {
-		errMsg := strings.TrimSpace(streamErr.Error())
-		if errMsg == "" {
-			errMsg = "docker stream reported an unknown error"
-		}
-		writeProgressEventInternal(w, types.ProgressEvent{Type: "build", Service: serviceName, Error: errMsg})
-		return streamErr
-	}
-	return nil
 }
 
 func readDockerignoreInternal(contextDir string) ([]string, error) {

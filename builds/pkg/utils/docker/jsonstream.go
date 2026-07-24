@@ -1,40 +1,17 @@
 package docker
 
 import (
-	"bufio"
-	json "encoding/json/v2"
 	"io"
 
-	"github.com/moby/moby/api/types/jsonstream"
+	"github.com/moby/moby/client/pkg/jsonmessage"
 )
 
-// ConsumeJSONMessageStream drains a Docker JSON message stream and returns any daemon-reported error.
-// Optional lineHandler receives each raw line before parsing.
-func ConsumeJSONMessageStream(reader io.Reader, lineHandler func([]byte) error) error {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if lineHandler != nil {
-			if err := lineHandler(line); err != nil {
-				return err
-			}
-		}
-
-		var msg jsonstream.Message
-		if err := json.Unmarshal(line, &msg); err != nil {
-			// Keep behavior resilient to any non-JSON line noise.
-			continue
-		}
-		if msg.Error != nil {
-			return msg.Error
-		}
+// RenderJSONMessageStream renders a Docker JSON message stream (image pull,
+// push, build, load) as the raw text the docker CLI prints in non-TTY mode,
+// writing it to out. Any daemon-reported error is returned verbatim.
+func RenderJSONMessageStream(reader io.Reader, out io.Writer) error {
+	if out == nil {
+		out = io.Discard
 	}
-
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	return nil
+	return jsonmessage.DisplayJSONMessagesStream(reader, out, 0, false, nil)
 }
