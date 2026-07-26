@@ -1,0 +1,307 @@
+// Package bytes implements functionality for working with byte sizes.
+//
+// The central type is Capacity, a uint64 count of bytes that knows how to
+// render itself in the "human" form common Linux tools use ("10.4G") and how
+// to parse that form back ("10G", "512Mi"). Capacity implements flag.Value,
+// so it can be bound directly to a command-line flag.
+//
+// Both SI (base 10: K, M, G, T, P, E) and IEC (base 2: Ki, Mi, Gi, Ti, Pi,
+// Ei) suffixes are accepted on input. Output always uses the base 10 units.
+//
+// The fmtFrac and fmtInt helpers used by Capacity.String are adapted from the
+// standard library's time package, which uses the same technique to format
+// Duration without allocating:
+//
+//	Source:  time/format.go (fmtFrac, fmtInt)
+//	License: BSD 3-Clause (https://go.dev/LICENSE)
+//
+// This package depends only on the standard library.
+package bytes
+
+import (
+	"errors"
+	"strconv"
+)
+
+// A Capacity represents a size in bytes.
+type Capacity uint64
+
+const (
+	Byte Capacity = 1
+
+	// base 10 quantities
+	Kilobyte = Byte * 1000
+	Megabyte = Kilobyte * 1000
+	Gigabyte = Megabyte * 1000
+	Terabyte = Gigabyte * 1000
+	Petabyte = Terabyte * 1000
+	Exabyte  = Petabyte * 1000
+
+	// base 2 quantities, binary
+	Kibibyte = Byte << 10
+	Mebibyte = Kibibyte << 10
+	Gibibyte = Mebibyte << 10
+	Tebibyte = Gibibyte << 10
+	Pebibyte = Tebibyte << 10
+	Exbibyte = Pebibyte << 10
+)
+
+// maxCapacity is the largest representable Capacity.
+const maxCapacity = Capacity(^uint64(0))
+
+// ErrInvalidCapacity is returned by ParseCapacity for any input it cannot
+// parse. Errors returned by ParseCapacity wrap it, so callers can test with
+// errors.Is.
+var ErrInvalidCapacity = errors.New("bytes: invalid capacity")
+
+// Bytes returns the capacity as an integer bytes count.
+func (c Capacity) Bytes() uint64 { return uint64(c) }
+
+// Kibibytes returns the capacity as an integer kibibytes count.
+func (c Capacity) Kibibytes() uint64 { return c.Bytes() >> 10 }
+
+// Mebibytes returns the capacity as an integer mebibytes count.
+func (c Capacity) Mebibytes() uint64 { return c.Kibibytes() >> 10 }
+
+// Gibibytes returns the capacity as an integer gibibytes count.
+func (c Capacity) Gibibytes() uint64 { return c.Mebibytes() >> 10 }
+
+// Tebibytes returns the capacity as an integer tebibytes count.
+func (c Capacity) Tebibytes() uint64 { return c.Gibibytes() >> 10 }
+
+// Pebibytes returns the capacity as an integer pebibytes count.
+func (c Capacity) Pebibytes() uint64 { return c.Tebibytes() >> 10 }
+
+// Exbibytes returns the capacity as an integer exbibytes count.
+func (c Capacity) Exbibytes() uint64 { return c.Pebibytes() >> 10 }
+
+// Kilobytes returns the capacity as an integer kilobytes count.
+func (c Capacity) Kilobytes() uint64 { return c.Bytes() / 1000 }
+
+// Megabytes returns the capacity as an integer megabytes count.
+func (c Capacity) Megabytes() uint64 { return c.Kilobytes() / 1000 }
+
+// Gigabytes returns the capacity as an integer gigabytes count.
+func (c Capacity) Gigabytes() uint64 { return c.Megabytes() / 1000 }
+
+// Terabytes returns the capacity as an integer terabytes count.
+func (c Capacity) Terabytes() uint64 { return c.Gigabytes() / 1000 }
+
+// Petabytes returns the capacity as an integer petabytes count.
+func (c Capacity) Petabytes() uint64 { return c.Terabytes() / 1000 }
+
+// Exabytes returns the capacity as an integer exabytes count.
+func (c Capacity) Exabytes() uint64 { return c.Petabytes() / 1000 }
+
+var units = [...]struct {
+	Suffix byte
+	Size   uint64
+}{
+	{'E', uint64(Exabyte)},
+	{'P', uint64(Petabyte)},
+	{'T', uint64(Terabyte)},
+	{'G', uint64(Gigabyte)},
+	{'M', uint64(Megabyte)},
+	{'K', uint64(Kilobyte)},
+}
+
+// unitMapDecimal holds the base 10 (SI) suffixes, e.g. "G" for Gigabyte.
+var unitMapDecimal = map[byte]Capacity{
+	'E': Exabyte,
+	'P': Petabyte,
+	'T': Terabyte,
+	'G': Gigabyte,
+	'M': Megabyte,
+	'K': Kilobyte,
+}
+
+// unitMapBinary holds the base 2 (IEC) suffixes, e.g. "Gi" for Gibibyte. It
+// is keyed on the leading byte only; ParseCapacity has already checked the
+// trailing 'i'.
+var unitMapBinary = map[byte]Capacity{
+	'E': Exbibyte,
+	'P': Pebibyte,
+	'T': Tebibyte,
+	'G': Gibibyte,
+	'M': Mebibyte,
+	'K': Kibibyte,
+}
+
+// String returns a string representing the capacity in the form of "10.4G"
+// representing their base 10 measurement, gigabytes in this example.
+// Capacities are rounded to the nearest 1/10th within the largest
+// unit of granularity. This format is similar to the "human" output from
+// common Linux tools.
+func (c Capacity) String() string {
+	u := uint64(c)
+
+	// If we're less than a kilobyte, we just display the number without a unit
+	if u < uint64(Kilobyte) {
+		if u == 0 {
+			return "0"
+		}
+		// since we're less than a kilobyte, the max size is 3 digits
+		var buf [3]byte
+		w := fmtInt(buf[:], u)
+		return string(buf[w:])
+	}
+
+	// Longest output is "999.9P"; a uint64 caps out at "18.4E". The extra
+	// byte is slack.
+	var buf [len("1023.1P")]byte
+	w := len(buf)
+
+	// Find the largest unit that we can fit into
+	for _, unit := range units {
+		if u == unit.Size {
+			w -= 2
+			buf[w] = '1'
+			buf[w+1] = unit.Suffix
+			break
+		} else if u > unit.Size {
+			w--
+			buf[w] = unit.Suffix
+			w, u = fmtFrac(buf[:w], u, unit.Size)
+			w = fmtInt(buf[:w], u)
+			break
+		}
+	}
+
+	return string(buf[w:])
+}
+
+// Set parses the given string and sets the receiver to the parsed value.
+// It implements flag.Value alongside String.
+func (c *Capacity) Set(s string) error {
+	v, err := ParseCapacity(s)
+	if err != nil {
+		return err
+	}
+	*c = v
+	return nil
+}
+
+// fmtFrac formats the fraction of v/unit (e.g., ".1") into the
+// tail of buf, omitting trailing zeros. It omits the decimal
+// point too when the fraction is 0. It returns the index where the
+// output bytes begin and the value v/unit.
+func fmtFrac(buf []byte, v, unit uint64) (nw int, nv uint64) {
+	w := len(buf)
+	// Every unit in the table is a power of 1000, so unit/100 is exact and
+	// (v%unit)/(unit/100) equals (v%unit)*100/unit without the intermediate
+	// multiply, which would overflow uint64 across most of the exabyte range.
+	frac := (v % unit) / (unit / 100)
+	v /= unit
+
+	// Just round down
+	if frac < 5 {
+		return w, v
+	}
+	// Rounding up to the next whole unit
+	if frac >= 95 {
+		return w, v + 1
+	}
+
+	w -= 2
+	buf[w] = '.'
+	buf[w+1] = byte((frac+5)/10) + '0'
+	return w, v
+}
+
+// fmtInt formats v into the tail of buf.
+// It returns the index where the output begins.
+func fmtInt(buf []byte, v uint64) int {
+	w := len(buf)
+	if v == 0 {
+		w--
+		buf[w] = '0'
+	} else {
+		for v > 0 {
+			w--
+			buf[w] = byte(v%10) + '0'
+			v /= 10
+		}
+	}
+	return w
+}
+
+// ParseCapacity parses a capacity string.
+// A capacity string may only contain whole integers and one unit suffix,
+// such as "10G" or "5T".
+// Valid capacity units are:
+//
+//	"K", "M", "G", "T", "P", "E",
+//	"Ki", "Mi", "Gi", "Ti", "Pi", "Ei"
+//
+// A string with no suffix is taken as a plain bytes count. Every error
+// returned wraps ErrInvalidCapacity.
+func ParseCapacity(s string) (Capacity, error) {
+	if s == "" {
+		return 0, parseError("empty string")
+	}
+	if s == "0" {
+		return 0, nil
+	}
+
+	var c uint64
+	orig := s
+	i := 0
+	for ; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			break
+		}
+		d := uint64(s[i] - '0')
+		// Reject values that would silently wrap around uint64.
+		if c > (uint64(maxCapacity)-d)/10 {
+			return 0, parseError(strconv.Quote(orig) + ": out of range")
+		}
+		c = c*10 + d
+	}
+	if i == 0 {
+		return 0, parseError(strconv.Quote(orig) + ": no digits")
+	}
+	s = s[i:]
+
+	if s == "" {
+		return Capacity(c), nil
+	}
+
+	var unitMap map[byte]Capacity
+	switch len(s) {
+	case 2:
+		if s[1] != 'i' {
+			return 0, parseError(strconv.Quote(orig))
+		}
+		// base 2 unit, e.g. "Gi"
+		unitMap = unitMapBinary
+	case 1:
+		// base 10 unit, e.g. "G"
+		unitMap = unitMapDecimal
+	default:
+		return 0, parseError(strconv.Quote(orig))
+	}
+
+	unit, ok := unitMap[s[0]]
+	if !ok {
+		return 0, parseError(strconv.Quote(orig))
+	}
+	if c > uint64(maxCapacity)/uint64(unit) {
+		return 0, parseError(strconv.Quote(orig) + ": out of range")
+	}
+	return Capacity(c) * unit, nil
+}
+
+// parseError builds an error wrapping ErrInvalidCapacity with detail.
+func parseError(detail string) error {
+	return &capacityError{detail: detail}
+}
+
+type capacityError struct {
+	detail string
+}
+
+func (e *capacityError) Error() string {
+	return ErrInvalidCapacity.Error() + ": " + e.detail
+}
+
+func (e *capacityError) Unwrap() error { return ErrInvalidCapacity }
