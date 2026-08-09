@@ -1,0 +1,51 @@
+version: 2
+
+project_name: acfs
+
+builds:
+  - id: acfs-linux
+    main: ./cmd/acfs
+    binary: acfs
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - "386"
+      - arm
+      - arm64
+      - ppc64le
+      - s390x
+    goarm:
+      - "7"
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - >-
+        -s -w
+        -buildid={{ .Version }}
+        -X go.getarcane.app/acfs/internal/version.Version={{ .Version }}
+        -X go.getarcane.app/acfs/internal/version.Revision={{ .Commit }}
+        -X go.getarcane.app/acfs/internal/version.BuildTime={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: binaries
+    formats:
+      - binary
+    name_template: >-
+      acfs_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+
+checksum:
+  name_template: acfs_checksums.txt
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: getarcaneapp
+    name: acfs

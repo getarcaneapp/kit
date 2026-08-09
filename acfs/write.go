@@ -1,0 +1,127 @@
+package acfs
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path"
+
+	"go.getarcane.app/acfs/pkg/utils"
+)
+
+const temporaryWritePrefix = ".acfs-write-"
+
+type contextReaderInternal struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReaderInternal) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(buffer)
+}
+
+func createTemporaryFileInternal(root *os.Root, parent string) (*os.File, string, error) {
+	var randomBytes [16]byte
+	for range 10 {
+		if _, err := rand.Read(randomBytes[:]); err != nil {
+			return nil, "", fmt.Errorf("generate temporary filename: %w", err)
+		}
+		filename := temporaryWritePrefix + hex.EncodeToString(randomBytes[:])
+		temporaryPath := path.Join(parent, filename)
+		file, err := root.OpenFile(temporaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			return file, temporaryPath, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, "", fmt.Errorf("create temporary file: %w", err)
+		}
+	}
+	return nil, "", errors.New("could not allocate a unique temporary file")
+}
+
+// WriteFrom atomically writes exactly expectedSize bytes from source to a
+// root-confined file. The destination is unchanged when the transfer fails.
+func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Reader, expectedSize int64, mode os.FileMode) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if source == nil {
+		return 0, errors.New("source reader is required")
+	}
+	if expectedSize < 0 {
+		return 0, fmt.Errorf("%w: size must be non-negative", ErrSizeMismatch)
+	}
+	if mode != mode.Perm() {
+		return 0, fmt.Errorf("invalid file mode %v", mode)
+	}
+
+	relativePath, err := utils.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return 0, err
+	}
+	if relativePath == "." {
+		return 0, ErrIsDirectory
+	}
+
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return 0, fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	resolvedParent, base, err := resolveParentInternal(root, relativePath)
+	if err != nil {
+		return 0, err
+	}
+	targetPath := path.Join(resolvedParent, base)
+
+	temporaryFile, temporaryPath, err := createTemporaryFileInternal(root, resolvedParent)
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		_ = temporaryFile.Close()
+		if !committed {
+			_ = root.Remove(temporaryPath)
+		}
+	}()
+
+	reader := contextReaderInternal{ctx: ctx, reader: source}
+	written, err := io.CopyN(temporaryFile, reader, expectedSize)
+	if err != nil {
+		return written, fmt.Errorf("%w: expected %d bytes, received %d: %w", ErrSizeMismatch, expectedSize, written, err)
+	}
+
+	var extra [1]byte
+	extraCount, extraErr := io.ReadFull(reader, extra[:])
+	if extraCount != 0 {
+		return written, fmt.Errorf("%w: input exceeds %d bytes", ErrSizeMismatch, expectedSize)
+	}
+	if extraErr != nil && !errors.Is(extraErr, io.EOF) {
+		return written, fmt.Errorf("check input size: %w", extraErr)
+	}
+
+	if err := temporaryFile.Chmod(mode); err != nil {
+		return written, fmt.Errorf("chmod temporary file: %w", err)
+	}
+	if err := temporaryFile.Sync(); err != nil {
+		return written, fmt.Errorf("sync temporary file: %w", err)
+	}
+	if err := temporaryFile.Close(); err != nil {
+		return written, fmt.Errorf("close temporary file: %w", err)
+	}
+	if err := root.Rename(temporaryPath, targetPath); err != nil {
+		return written, fmt.Errorf("replace %q: %w", logicalPath, err)
+	}
+
+	committed = true
+	return written, nil
+}
