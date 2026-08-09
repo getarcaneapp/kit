@@ -4,7 +4,7 @@ project_name: acfs
 
 builds:
   - id: acfs-linux
-    main: ./cmd/acfs
+    main: ./cmd
     binary: acfs
     env:
       - CGO_ENABLED=0

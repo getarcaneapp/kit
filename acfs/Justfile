@@ -12,8 +12,12 @@ vet:
     go vet ./...
 
 [group('quality')]
-lint:
-    golangci-lint run ./...
+_build-golangci-lint:
+    golangci-lint custom
+
+[group('quality')]
+lint: _build-golangci-lint
+    ./.bin/golangci-lint-custom run -c .github/.golangci.yml ./...
 
 [group('test')]
 test:

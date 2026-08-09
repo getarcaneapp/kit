@@ -26,21 +26,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
       - name: Setup Just
         uses: extractions/setup-just@v4
-      - name: Check formatting
-        run: |
-          just format
-          git diff --exit-code -- .
-      - name: Vet
-        run: just vet
+
       - name: Test with race detector
         run: just test-race
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          args: ./...
+          version: latest
+          args: --config=.github/.golangci.yml ./...
           only-new-issues: false
+
       - name: Check GoReleaser configuration
         uses: goreleaser/goreleaser-action@v7
         with:
