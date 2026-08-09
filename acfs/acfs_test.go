@@ -77,6 +77,9 @@ func TestListAndStat(t *testing.T) {
 	if regular.Path != "/beta file.txt" || regular.Size != 4 || regular.Mode != "-rw-r-----" {
 		t.Errorf("unexpected regular entry: %#v", regular)
 	}
+	if regular.ModTimeUnixNano == 0 {
+		t.Error("regular entry did not preserve nanosecond revision metadata")
+	}
 	directory := findEntry(t, entries, "nested")
 	if !directory.IsDirectory || directory.IsSymlink || !strings.HasPrefix(directory.Mode, "d") {
 		t.Errorf("unexpected directory entry: %#v", directory)
@@ -169,6 +172,12 @@ func TestReadToResolvesOnlyInternalSymlinks(t *testing.T) {
 	if !errors.Is(err, ErrSymlinkLoop) {
 		t.Fatalf("ReadTo(loop) error = %v, want ErrSymlinkLoop", err)
 	}
+	if err := syscall.Mkfifo(filepath.Join(root, "fifo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := OpenRead(context.Background(), root, "/fifo", 0); !errors.Is(err, ErrNotFile) {
+		t.Fatalf("OpenRead(fifo) error = %v, want ErrNotFile", err)
+	}
 }
 
 func TestWalkIsDeterministicAndDoesNotFollowSymlinks(t *testing.T) {
@@ -208,6 +217,53 @@ func TestWalkIsDeterministicAndDoesNotFollowSymlinks(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) || visits != 1 {
 		t.Fatalf("canceled Walk = (visits %d, error %v), want (1, context.Canceled)", visits, err)
+	}
+}
+
+func TestWalkBoundedReportsExactTruncation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "a", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, filepath.Join(root, "a", "nested", "file"), "x", 0o600)
+	writeFixtureFile(t, filepath.Join(root, "root-file"), "x", 0o600)
+
+	var limited []string
+	result, err := WalkBounded(context.Background(), root, "/", acfstypes.WalkOptions{MaxEntries: 2}, func(entry acfstypes.Entry) error {
+		limited = append(limited, entry.Path)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Count != 2 || !result.Truncated || len(limited) != 2 {
+		t.Fatalf("entry-bounded walk = (%#v, %q), want two truncated entries", result, limited)
+	}
+
+	var depthLimited []string
+	result, err = WalkBounded(context.Background(), root, "/", acfstypes.WalkOptions{MaxDepth: 1}, func(entry acfstypes.Entry) error {
+		depthLimited = append(depthLimited, entry.Path)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Truncated || !slices.Equal(depthLimited, []string{"/a", "/root-file"}) {
+		t.Fatalf("depth-bounded walk = (%#v, %q)", result, depthLimited)
+	}
+
+	emptyRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(emptyRoot, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err = WalkBounded(context.Background(), emptyRoot, "/", acfstypes.WalkOptions{MaxDepth: 1}, func(acfstypes.Entry) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Truncated {
+		t.Fatal("empty directory at the depth boundary was incorrectly reported as truncated")
 	}
 }
 
@@ -379,6 +435,24 @@ func TestListToleratesConcurrentRemoval(t *testing.T) {
 		t.Fatalf("List failed while entries were removed: %v", err)
 	}
 	<-removeDone
+}
+
+func TestReservedWriteNamesAreHiddenAndRejected(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	reserved := temporaryWritePrefix + "fixture"
+	writeFixtureFile(t, filepath.Join(root, reserved), "internal", 0o600)
+	entries, err := List(context.Background(), root, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("reserved entry was listed: %#v", entries)
+	}
+	if _, err := WriteFrom(context.Background(), root, "/"+reserved, strings.NewReader("x"), 1, 0o600); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("reserved write error = %v, want ErrInvalidPath", err)
+	}
 }
 
 func BenchmarkList(b *testing.B) {

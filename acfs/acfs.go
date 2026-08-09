@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"slices"
+	"strings"
 
 	"go.getarcane.app/acfs/pkg/utils"
 	acfstypes "go.getarcane.app/acfs/types"
@@ -57,6 +58,9 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 	if err != nil {
 		return err
 	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return err
+	}
 
 	root, err := os.OpenRoot(rootPath)
 	if err != nil {
@@ -75,6 +79,9 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 	}
 
 	for _, name := range names {
+		if strings.HasPrefix(name, temporaryWritePrefix) {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -129,6 +136,9 @@ func Stat(ctx context.Context, rootPath, logicalPath string) (acfstypes.Entry, e
 	if err != nil {
 		return acfstypes.Entry{}, err
 	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return acfstypes.Entry{}, err
+	}
 
 	root, err := os.OpenRoot(rootPath)
 	if err != nil {
@@ -151,35 +161,104 @@ func Stat(ctx context.Context, rootPath, logicalPath string) (acfstypes.Entry, e
 // Walk visits every descendant of a root-confined directory in deterministic
 // depth-first order. It does not follow symbolic links encountered in the tree.
 func Walk(ctx context.Context, rootPath, logicalPath string, visit func(acfstypes.Entry) error) error {
-	if visit == nil {
-		return errors.New("visit callback is required")
+	_, err := WalkBounded(ctx, rootPath, logicalPath, acfstypes.WalkOptions{}, visit)
+	return err
+}
+
+type walkDirectoryInternal struct {
+	path  string
+	depth int
+}
+
+type boundedWalkerInternal struct {
+	ctx      context.Context
+	rootPath string
+	options  acfstypes.WalkOptions
+	visit    func(acfstypes.Entry) error
+	result   acfstypes.WalkResult
+}
+
+func directoryHasEntriesInternal(ctx context.Context, rootPath, logicalPath string) (bool, error) {
+	found := false
+	err := ListEach(ctx, rootPath, logicalPath, func(acfstypes.Entry) error {
+		found = true
+		return fs.SkipAll
+	})
+	if err != nil && !errors.Is(err, fs.SkipAll) {
+		return false, err
+	}
+	return found, nil
+}
+
+func (w *boundedWalkerInternal) visitEntryInternal(current walkDirectoryInternal, childDirectories *[]walkDirectoryInternal, entry acfstypes.Entry) error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	if w.options.MaxEntries > 0 && w.result.Count >= w.options.MaxEntries {
+		w.result.Truncated = true
+		return fs.SkipAll
 	}
 
-	directories := []string{logicalPath}
+	visitErr := w.visit(entry)
+	if visitErr != nil && !errors.Is(visitErr, fs.SkipDir) && !errors.Is(visitErr, fs.SkipAll) {
+		return visitErr
+	}
+	w.result.Count++
+	if errors.Is(visitErr, fs.SkipAll) {
+		return fs.SkipAll
+	}
+	if !entry.IsDirectory || entry.IsSymlink || errors.Is(visitErr, fs.SkipDir) {
+		return nil
+	}
+
+	entryDepth := current.depth + 1
+	if w.options.MaxDepth > 0 && entryDepth >= w.options.MaxDepth {
+		hasEntries, err := directoryHasEntriesInternal(w.ctx, w.rootPath, entry.Path)
+		if err != nil {
+			return err
+		}
+		w.result.Truncated = w.result.Truncated || hasEntries
+		return nil
+	}
+	*childDirectories = append(*childDirectories, walkDirectoryInternal{path: entry.Path, depth: entryDepth})
+	return nil
+}
+
+func (w *boundedWalkerInternal) walkDirectoryInternal(current walkDirectoryInternal) ([]walkDirectoryInternal, error) {
+	childDirectories := make([]walkDirectoryInternal, 0)
+	err := ListEach(w.ctx, w.rootPath, current.path, func(entry acfstypes.Entry) error {
+		return w.visitEntryInternal(current, &childDirectories, entry)
+	})
+	return childDirectories, err
+}
+
+// WalkBounded visits descendants using deterministic sequential traversal and
+// reports whether depth or entry limits omitted any entries.
+func WalkBounded(ctx context.Context, rootPath, logicalPath string, options acfstypes.WalkOptions, visit func(acfstypes.Entry) error) (acfstypes.WalkResult, error) {
+	walker := boundedWalkerInternal{ctx: ctx, rootPath: rootPath, options: options, visit: visit}
+	if visit == nil {
+		return walker.result, errors.New("visit callback is required")
+	}
+	if options.MaxDepth < 0 || options.MaxEntries < 0 {
+		return walker.result, errors.New("walk limits must be non-negative")
+	}
+
+	directories := []walkDirectoryInternal{{path: logicalPath}}
 	for len(directories) > 0 {
 		if err := ctx.Err(); err != nil {
-			return err
+			return walker.result, err
 		}
 
 		last := len(directories) - 1
 		currentDirectory := directories[last]
 		directories = directories[:last]
 
-		childDirectories := make([]string, 0)
-		err := ListEach(ctx, rootPath, currentDirectory, func(entry acfstypes.Entry) error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if err := visit(entry); err != nil {
-				return err
-			}
-			if entry.IsDirectory && !entry.IsSymlink {
-				childDirectories = append(childDirectories, entry.Path)
-			}
-			return nil
-		})
+		childDirectories, err := walker.walkDirectoryInternal(currentDirectory)
+		if errors.Is(err, fs.SkipAll) {
+			return walker.result, nil
+		}
 		if err != nil {
-			return err
+			return walker.result, err
 		}
 
 		for _, childDirectory := range slices.Backward(childDirectories) {
@@ -187,7 +266,7 @@ func Walk(ctx context.Context, rootPath, logicalPath string, visit func(acfstype
 		}
 	}
 
-	return nil
+	return walker.result, nil
 }
 
 // MkdirAll creates a root-confined directory and any missing parents.
@@ -201,6 +280,9 @@ func MkdirAll(ctx context.Context, rootPath, logicalPath string, mode os.FileMod
 
 	relativePath, err := utils.NormalizeLogicalPath(logicalPath)
 	if err != nil {
+		return err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
 		return err
 	}
 
@@ -228,6 +310,9 @@ func RemoveAll(ctx context.Context, rootPath, logicalPath string) error {
 
 	relativePath, err := utils.NormalizeLogicalPath(logicalPath)
 	if err != nil {
+		return err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
 		return err
 	}
 	if relativePath == "." {

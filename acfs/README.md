@@ -37,8 +37,9 @@ err = acfs.Walk(ctx, root, "/logs", func(entry types.Entry) error {
 })
 ```
 
-The root package also provides `Stat`, `ReadTo`, `WriteFrom`, `MkdirAll`, and
-`RemoveAll`. Public filesystem and protocol DTOs live in `types`.
+The root package also provides `WalkBounded`, `Stat`, `ReadTo`, `WriteFrom`,
+`MkdirAll`, `RemoveAll`, and ordered batch `Apply`. Public filesystem and
+protocol DTOs live in `types`.
 
 ## CLI
 
@@ -46,12 +47,13 @@ GoReleaser publishes the static `acfs` Linux binary for every architecture
 used by the Arcane tools image:
 
 ```text
-acfs list|walk|stat|read|write|mkdir|remove|version
+acfs list|walk|stat|read|write|mkdir|remove|apply|version
 ```
 
-`list` and `stat` emit JSON, `walk` emits NDJSON, and `read` emits an `ARCW`
-protocol-v1 header followed by raw file content. Diagnostics are written only
-to stderr.
+`list`, `stat`, and `apply` emit JSON. `walk` emits NDJSON with a mandatory end
+record and supports depth and entry limits. `read` emits an `ARCW` protocol-v2
+header followed by raw file content. Failures are emitted as structured JSON
+only on stderr.
 
 ## Development
 

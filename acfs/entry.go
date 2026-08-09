@@ -19,13 +19,14 @@ func entryFromInfoInternal(root *os.Root, relativePath string, info os.FileInfo)
 	}
 
 	entry := acfstypes.Entry{
-		Name:        name,
-		Path:        logicalPath,
-		Mode:        utils.FormatMode(info.Mode()),
-		Size:        info.Size(),
-		ModTime:     info.ModTime().Truncate(time.Second),
-		IsDirectory: info.IsDir(),
-		IsSymlink:   info.Mode()&os.ModeSymlink != 0,
+		Name:            name,
+		Path:            logicalPath,
+		Mode:            utils.FormatMode(info.Mode()),
+		Size:            info.Size(),
+		ModTime:         info.ModTime().Truncate(time.Second),
+		ModTimeUnixNano: info.ModTime().UnixNano(),
+		IsDirectory:     info.IsDir(),
+		IsSymlink:       info.Mode()&os.ModeSymlink != 0,
 	}
 
 	if !entry.IsSymlink {

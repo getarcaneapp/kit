@@ -39,6 +39,9 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 	if err != nil {
 		return nil, 0, err
 	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return nil, 0, err
+	}
 
 	root, err := os.OpenRoot(rootPath)
 	if err != nil {
@@ -51,27 +54,36 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 		return nil, 0, err
 	}
 
+	info, err := root.Stat(resolvedPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("stat %q: %w", utils.LogicalPath(resolvedPath), err)
+	}
+	if info.IsDir() {
+		return nil, 0, ErrIsDirectory
+	}
+	if !info.Mode().IsRegular() {
+		return nil, 0, ErrNotFile
+	}
+
 	file, err := root.Open(resolvedPath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open %q: %w", utils.LogicalPath(resolvedPath), err)
 	}
-
-	info, err := file.Stat()
+	info, err = file.Stat()
 	if err != nil {
 		_ = file.Close()
 		return nil, 0, fmt.Errorf("stat %q: %w", utils.LogicalPath(resolvedPath), err)
 	}
-	if info.IsDir() {
+	if !info.Mode().IsRegular() {
 		_ = file.Close()
-		return nil, 0, ErrIsDirectory
+		return nil, 0, ErrNotFile
 	}
 
 	size := info.Size()
-	var reader io.Reader = file
 	if maxBytes > 0 && maxBytes < size {
 		size = maxBytes
-		reader = io.LimitReader(file, maxBytes)
 	}
+	reader := io.LimitReader(file, size)
 
 	return &contextReadCloserInternal{ctx: ctx, reader: reader, closer: file}, size, nil
 }

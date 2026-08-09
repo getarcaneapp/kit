@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	acfstypes "go.getarcane.app/acfs/types"
 )
 
 const (
@@ -14,11 +16,11 @@ const (
 
 var streamMagic = [4]byte{'A', 'R', 'C', 'W'}
 
-// WriteStreamHeader writes a protocol-v1 acfs stream header.
+// WriteStreamHeader writes an acfs stream header.
 func WriteStreamHeader(destination io.Writer, payloadLength uint64) error {
 	var header [StreamHeaderSize]byte
 	copy(header[:4], streamMagic[:])
-	header[4] = 1
+	header[4] = byte(acfstypes.ProtocolVersion)
 	binary.BigEndian.PutUint64(header[8:], payloadLength)
 	if _, err := destination.Write(header[:]); err != nil {
 		return fmt.Errorf("write stream header: %w", err)
@@ -26,7 +28,7 @@ func WriteStreamHeader(destination io.Writer, payloadLength uint64) error {
 	return nil
 }
 
-// ReadStreamHeader validates a protocol-v1 acfs stream header and
+// ReadStreamHeader validates an acfs stream header and
 // returns its payload length.
 func ReadStreamHeader(source io.Reader) (uint64, error) {
 	var header [StreamHeaderSize]byte
@@ -36,7 +38,7 @@ func ReadStreamHeader(source io.Reader) (uint64, error) {
 	if string(header[:4]) != string(streamMagic[:]) {
 		return 0, errors.New("invalid stream header magic")
 	}
-	if header[4] != 1 {
+	if header[4] != byte(acfstypes.ProtocolVersion) {
 		return 0, fmt.Errorf("unsupported stream protocol %d", header[4])
 	}
 	if header[5] != 0 || header[6] != 0 || header[7] != 0 {

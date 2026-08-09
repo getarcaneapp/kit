@@ -9,11 +9,23 @@ import (
 	"io"
 	"os"
 	"path"
+	"strings"
 
 	"go.getarcane.app/acfs/pkg/utils"
 )
 
 const temporaryWritePrefix = ".acfs-write-"
+
+const chmodModeMask = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
+
+func rejectReservedPathInternal(relativePath string) error {
+	for component := range strings.SplitSeq(relativePath, "/") {
+		if strings.HasPrefix(component, temporaryWritePrefix) {
+			return fmt.Errorf("%w: %q uses reserved ACFS name", ErrInvalidPath, component)
+		}
+	}
+	return nil
+}
 
 type contextReaderInternal struct {
 	ctx    context.Context
@@ -58,12 +70,15 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 	if expectedSize < 0 {
 		return 0, fmt.Errorf("%w: size must be non-negative", ErrSizeMismatch)
 	}
-	if mode != mode.Perm() {
+	if mode&^chmodModeMask != 0 {
 		return 0, fmt.Errorf("invalid file mode %v", mode)
 	}
 
 	relativePath, err := utils.NormalizeLogicalPath(logicalPath)
 	if err != nil {
+		return 0, err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
 		return 0, err
 	}
 	if relativePath == "." {
@@ -81,6 +96,11 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 		return 0, err
 	}
 	targetPath := path.Join(resolvedParent, base)
+	return writeFromRootInternal(ctx, root, logicalPath, targetPath, source, expectedSize, mode)
+}
+
+func writeFromRootInternal(ctx context.Context, root *os.Root, logicalPath, targetPath string, source io.Reader, expectedSize int64, mode os.FileMode) (int64, error) {
+	resolvedParent := path.Dir(targetPath)
 
 	temporaryFile, temporaryPath, err := createTemporaryFileInternal(root, resolvedParent)
 	if err != nil {

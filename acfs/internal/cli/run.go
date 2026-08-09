@@ -10,8 +10,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"strconv"
+	"strings"
+	"syscall"
 
 	"go.getarcane.app/acfs"
 	"go.getarcane.app/acfs/internal/version"
@@ -29,9 +33,9 @@ type pathFlags struct {
 	path string
 }
 
-func newFlagSet(command string, stderr io.Writer) *flag.FlagSet {
+func newFlagSet(command string) *flag.FlagSet {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(io.Discard)
 	return flags
 }
 
@@ -66,8 +70,8 @@ func encodeJSON(destination io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
-func runList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	flags := newFlagSet("list", stderr)
+func runList(ctx context.Context, args []string, stdout io.Writer) error {
+	flags := newFlagSet("list")
 	values := addPathFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -140,8 +144,8 @@ func runList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	return nil
 }
 
-func runStat(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	flags := newFlagSet("stat", stderr)
+func runStat(ctx context.Context, args []string, stdout io.Writer) error {
+	flags := newFlagSet("stat")
 	values := addPathFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -163,9 +167,11 @@ func runStat(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	})
 }
 
-func runWalk(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	flags := newFlagSet("walk", stderr)
+func runWalk(ctx context.Context, args []string, stdout io.Writer) error {
+	flags := newFlagSet("walk")
 	values := addPathFlags(flags)
+	maxDepth := flags.Int("max-depth", 0, "maximum traversal depth; zero is unlimited")
+	maxEntries := flags.Int("max-entries", 0, "maximum entries to emit; zero is unlimited")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -178,16 +184,28 @@ func runWalk(ctx context.Context, args []string, stdout, stderr io.Writer) error
 
 	encoder := json.NewEncoder(stdout)
 	encoder.SetEscapeHTML(false)
-	return acfs.Walk(ctx, values.root, values.path, func(entry acfstypes.Entry) error {
+	result, err := acfs.WalkBounded(ctx, values.root, values.path, acfstypes.WalkOptions{
+		MaxDepth:   *maxDepth,
+		MaxEntries: *maxEntries,
+	}, func(entry acfstypes.Entry) error {
 		return encoder.Encode(acfstypes.WalkRecord{
 			Version: acfstypes.ProtocolVersion,
-			Entry:   entry,
+			Entry:   &entry,
 		})
+	})
+	if err != nil {
+		return err
+	}
+	return encoder.Encode(acfstypes.WalkRecord{
+		Version:   acfstypes.ProtocolVersion,
+		End:       true,
+		Count:     result.Count,
+		Truncated: result.Truncated,
 	})
 }
 
-func runRead(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	flags := newFlagSet("read", stderr)
+func runRead(ctx context.Context, args []string, stdout io.Writer) error {
+	flags := newFlagSet("read")
 	values := addPathFlags(flags)
 	limit := flags.Int64("limit", 0, "maximum bytes to read; zero reads the complete file")
 	if err := flags.Parse(args); err != nil {
@@ -227,8 +245,8 @@ func runRead(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	return nil
 }
 
-func runWrite(ctx context.Context, args []string, stdin io.Reader, stderr io.Writer) error {
-	flags := newFlagSet("write", stderr)
+func runWrite(ctx context.Context, args []string, stdin io.Reader) error {
+	flags := newFlagSet("write")
 	values := addPathFlags(flags)
 	size := flags.Int64("size", -1, "exact number of bytes to read from stdin")
 	modeValue := flags.String("mode", "0644", "destination mode in octal")
@@ -253,8 +271,8 @@ func runWrite(ctx context.Context, args []string, stdin io.Reader, stderr io.Wri
 	return err
 }
 
-func runMkdir(ctx context.Context, args []string, stderr io.Writer) error {
-	flags := newFlagSet("mkdir", stderr)
+func runMkdir(ctx context.Context, args []string) error {
+	flags := newFlagSet("mkdir")
 	values := addPathFlags(flags)
 	modeValue := flags.String("mode", "0755", "directory mode in octal")
 	if err := flags.Parse(args); err != nil {
@@ -273,8 +291,8 @@ func runMkdir(ctx context.Context, args []string, stderr io.Writer) error {
 	return acfs.MkdirAll(ctx, values.root, values.path, mode)
 }
 
-func runRemove(ctx context.Context, args []string, stderr io.Writer) error {
-	flags := newFlagSet("remove", stderr)
+func runRemove(ctx context.Context, args []string) error {
+	flags := newFlagSet("remove")
 	values := addPathFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -288,8 +306,61 @@ func runRemove(ctx context.Context, args []string, stderr io.Writer) error {
 	return acfs.RemoveAll(ctx, values.root, values.path)
 }
 
-func runVersion(args []string, stdout, stderr io.Writer) error {
-	flags := newFlagSet("version", stderr)
+func runApply(ctx context.Context, args []string, stdout io.Writer) error {
+	flags := newFlagSet("apply")
+	rootPath := flags.String("root", "", "workspace root directory")
+	stagingPath := flags.String("staging", "", "staging root directory")
+	manifestName := flags.String("manifest", "", "manifest filename within the staging root")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("apply does not accept positional arguments")
+	}
+	if *rootPath == "" || *stagingPath == "" || *manifestName == "" {
+		return errors.New("--root, --staging, and --manifest are required")
+	}
+	if path.Base(*manifestName) != *manifestName || *manifestName == "." || *manifestName == ".." || strings.ContainsAny(*manifestName, "/\\\x00") {
+		return fmt.Errorf("%w: manifest must be a filename", acfs.ErrInvalidPath)
+	}
+
+	stagingRoot, err := os.OpenRoot(*stagingPath)
+	if err != nil {
+		return fmt.Errorf("open staging root: %w", err)
+	}
+	manifestFile, err := stagingRoot.Open(*manifestName)
+	if err != nil {
+		_ = stagingRoot.Close()
+		return fmt.Errorf("open apply manifest: %w", err)
+	}
+	decoder := json.NewDecoder(manifestFile)
+	decoder.DisallowUnknownFields()
+	var manifest acfstypes.ApplyManifest
+	decodeErr := decoder.Decode(&manifest)
+	if decodeErr == nil {
+		var extra any
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			decodeErr = errors.New("apply manifest must contain one JSON value")
+		}
+	}
+	closeErr := manifestFile.Close()
+	rootCloseErr := stagingRoot.Close()
+	if decodeErr != nil {
+		return fmt.Errorf("decode apply manifest: %w", decodeErr)
+	}
+	if closeErr != nil || rootCloseErr != nil {
+		return errors.Join(closeErr, rootCloseErr)
+	}
+
+	applied, err := acfs.Apply(ctx, *rootPath, *stagingPath, manifest)
+	if err != nil {
+		return err
+	}
+	return encodeJSON(stdout, acfstypes.ApplyResponse{Version: acfstypes.ProtocolVersion, Applied: applied})
+}
+
+func runVersion(args []string, stdout io.Writer) error {
+	flags := newFlagSet("version")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -305,7 +376,53 @@ func runVersion(args []string, stdout, stderr io.Writer) error {
 }
 
 func printUsage(stderr io.Writer) {
-	_, _ = fmt.Fprintln(stderr, "usage: acfs <list|walk|stat|read|write|mkdir|remove|version> [options]")
+	_, _ = fmt.Fprintln(stderr, "usage: acfs <list|walk|stat|read|write|mkdir|remove|apply|version> [options]")
+}
+
+func errorCodeInternal(err error) acfstypes.ErrorCode {
+	switch {
+	case errors.Is(err, acfs.ErrInvalidPath):
+		return acfstypes.ErrorInvalidPath
+	case errors.Is(err, acfs.ErrOutsideRoot):
+		return acfstypes.ErrorOutsideRoot
+	case errors.Is(err, acfs.ErrSymlink):
+		return acfstypes.ErrorSymlink
+	case errors.Is(err, acfs.ErrSymlinkLoop):
+		return acfstypes.ErrorSymlinkLoop
+	case errors.Is(err, fs.ErrNotExist):
+		return acfstypes.ErrorNotFound
+	case errors.Is(err, acfs.ErrAlreadyExists), errors.Is(err, fs.ErrExist):
+		return acfstypes.ErrorAlreadyExist
+	case errors.Is(err, acfs.ErrNotDirectory), errors.Is(err, syscall.ENOTDIR):
+		return acfstypes.ErrorNotDirectory
+	case errors.Is(err, acfs.ErrNotFile):
+		return acfstypes.ErrorNotFile
+	case errors.Is(err, acfs.ErrNotEmpty), errors.Is(err, syscall.ENOTEMPTY):
+		return acfstypes.ErrorNotEmpty
+	case errors.Is(err, acfs.ErrIsDirectory), errors.Is(err, syscall.EISDIR):
+		return acfstypes.ErrorIsDirectory
+	case errors.Is(err, acfs.ErrSizeMismatch):
+		return acfstypes.ErrorSizeMismatch
+	case errors.Is(err, acfs.ErrRootRemoval):
+		return acfstypes.ErrorRootRemoval
+	default:
+		return acfstypes.ErrorInternal
+	}
+}
+
+func writeErrorInternal(destination io.Writer, operation string, err error) {
+	response := acfstypes.ErrorResponse{
+		Version:   acfstypes.ProtocolVersion,
+		Code:      errorCodeInternal(err),
+		Message:   err.Error(),
+		Operation: operation,
+	}
+	var applyErr *acfstypes.ApplyError
+	if errors.As(err, &applyErr) {
+		response.ChangeIndex = &applyErr.Index
+		response.Path = applyErr.Path
+	}
+	_ = encodeJSON(destination, response)
 }
 
 // Run executes acfs and returns its process exit code.
@@ -319,28 +436,30 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	var err error
 	switch command {
 	case "list":
-		err = runList(ctx, args[1:], stdout, stderr)
+		err = runList(ctx, args[1:], stdout)
 	case "walk":
-		err = runWalk(ctx, args[1:], stdout, stderr)
+		err = runWalk(ctx, args[1:], stdout)
 	case "stat":
-		err = runStat(ctx, args[1:], stdout, stderr)
+		err = runStat(ctx, args[1:], stdout)
 	case "read":
-		err = runRead(ctx, args[1:], stdout, stderr)
+		err = runRead(ctx, args[1:], stdout)
 	case "write":
-		err = runWrite(ctx, args[1:], stdin, stderr)
+		err = runWrite(ctx, args[1:], stdin)
 	case "mkdir":
-		err = runMkdir(ctx, args[1:], stderr)
+		err = runMkdir(ctx, args[1:])
 	case "remove":
-		err = runRemove(ctx, args[1:], stderr)
+		err = runRemove(ctx, args[1:])
+	case "apply":
+		err = runApply(ctx, args[1:], stdout)
 	case "version":
-		err = runVersion(args[1:], stdout, stderr)
+		err = runVersion(args[1:], stdout)
 	default:
 		printUsage(stderr)
 		return exitUsage
 	}
 
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "acfs: %s: %v\n", command, err)
+		writeErrorInternal(stderr, command, err)
 		return exitFailure
 	}
 	return exitSuccess

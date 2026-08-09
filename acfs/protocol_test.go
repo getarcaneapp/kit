@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"testing"
+
+	acfstypes "go.getarcane.app/acfs/types"
 )
 
 func TestStreamHeader(t *testing.T) {
@@ -14,7 +16,7 @@ func TestStreamHeader(t *testing.T) {
 	if err := WriteStreamHeader(&destination, payloadLength); err != nil {
 		t.Fatal(err)
 	}
-	want := []byte{'A', 'R', 'C', 'W', 1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8}
+	want := []byte{'A', 'R', 'C', 'W', byte(acfstypes.ProtocolVersion), 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8}
 	if !bytes.Equal(destination.Bytes(), want) {
 		t.Fatalf("header = %v, want %v", destination.Bytes(), want)
 	}
@@ -32,7 +34,7 @@ func TestReadStreamHeaderRejectsInvalidHeaders(t *testing.T) {
 
 	valid := make([]byte, StreamHeaderSize)
 	copy(valid, "ARCW")
-	valid[4] = 1
+	valid[4] = byte(acfstypes.ProtocolVersion)
 	binary.BigEndian.PutUint64(valid[8:], 42)
 
 	tests := map[string][]byte{
@@ -42,7 +44,7 @@ func TestReadStreamHeaderRejectsInvalidHeaders(t *testing.T) {
 		"reserved": append([]byte(nil), valid...),
 	}
 	tests["magic"][0] = 'X'
-	tests["version"][4] = 2
+	tests["version"][4]++
 	tests["reserved"][7] = 1
 	for name, header := range tests {
 		t.Run(name, func(t *testing.T) {

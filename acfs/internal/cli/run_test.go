@@ -16,6 +16,7 @@ import (
 )
 
 var modTimePattern = regexp.MustCompile(`"modTime":"[^"]+"`)
+var modTimeUnixNanoPattern = regexp.MustCompile(`"modTimeUnixNano":[0-9]+`)
 
 func runCommand(t *testing.T, args []string, stdin string) (int, []byte, string) {
 	t.Helper()
@@ -66,6 +67,7 @@ func TestListAndStatGolden(t *testing.T) {
 				t.Fatalf("Run = (exit %d, stderr %q), want success", exitCode, stderr)
 			}
 			normalized := modTimePattern.ReplaceAllString(string(stdout), `"modTime":"<modtime>"`)
+			normalized = modTimeUnixNanoPattern.ReplaceAllString(normalized, `"modTimeUnixNano":<modtime-ns>`)
 			if normalized != readGolden(t, test.golden) {
 				t.Fatalf("output:\n%s\nwant:\n%s", normalized, readGolden(t, test.golden))
 			}
@@ -134,7 +136,13 @@ func TestWriteMkdirWalkAndRemove(t *testing.T) {
 		if record.Version != acfstypes.ProtocolVersion {
 			t.Fatalf("record version = %d", record.Version)
 		}
-		paths = append(paths, record.Entry.Path)
+		if record.Entry != nil {
+			paths = append(paths, record.Entry.Path)
+			continue
+		}
+		if !record.End || record.Truncated || record.Count != 3 {
+			t.Fatalf("unexpected walk trailer: %#v", record)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
@@ -171,6 +179,13 @@ func TestWriteSizeMismatchKeepsStdoutClean(t *testing.T) {
 			if exitCode == exitSuccess || len(stdout) != 0 || stderr == "" {
 				t.Fatalf("Run = (exit %d, stdout %q, stderr %q), want stderr-only failure", exitCode, stdout, stderr)
 			}
+			var response acfstypes.ErrorResponse
+			if err := json.Unmarshal([]byte(stderr), &response); err != nil {
+				t.Fatalf("decode structured error: %v", err)
+			}
+			if response.Version != acfstypes.ProtocolVersion || response.Code != acfstypes.ErrorSizeMismatch {
+				t.Fatalf("structured error = %#v", response)
+			}
 			contents, err := os.ReadFile(filename)
 			if err != nil {
 				t.Fatal(err)
@@ -179,6 +194,73 @@ func TestWriteSizeMismatchKeepsStdoutClean(t *testing.T) {
 				t.Fatalf("destination changed: %q", contents)
 			}
 		})
+	}
+}
+
+func TestBoundedWalkAndApply(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	staging := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "one"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "two"), []byte("2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exitCode, stdout, stderr := runCommand(t, []string{
+		"walk", "--root", root, "--path", "/", "--max-entries", "1",
+	}, "")
+	if exitCode != exitSuccess || stderr != "" {
+		t.Fatalf("bounded walk = (exit %d, stderr %q)", exitCode, stderr)
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(stdout))
+	var records []acfstypes.WalkRecord
+	for scanner.Scan() {
+		var record acfstypes.WalkRecord
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, record)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || records[0].Entry == nil || !records[1].End || !records[1].Truncated || records[1].Count != 1 {
+		t.Fatalf("bounded walk records = %#v", records)
+	}
+
+	if err := os.WriteFile(filepath.Join(staging, "payload"), []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := acfstypes.ApplyManifest{
+		Version: acfstypes.ProtocolVersion,
+		Changes: []acfstypes.ApplyChange{{
+			Operation:  acfstypes.ApplyCreateFile,
+			Path:       "/created",
+			StagedName: "payload",
+			Size:       7,
+		}},
+	}
+	encodedManifest, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "manifest.json"), encodedManifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exitCode, stdout, stderr = runCommand(t, []string{
+		"apply", "--root", root, "--staging", staging, "--manifest", "manifest.json",
+	}, "")
+	if exitCode != exitSuccess || stderr != "" {
+		t.Fatalf("apply = (exit %d, stdout %q, stderr %q)", exitCode, stdout, stderr)
+	}
+	var response acfstypes.ApplyResponse
+	if err := json.Unmarshal(stdout, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Version != acfstypes.ProtocolVersion || response.Applied != 1 {
+		t.Fatalf("apply response = %#v", response)
 	}
 }
 

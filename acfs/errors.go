@@ -19,4 +19,14 @@ var (
 	ErrSizeMismatch = errors.New("input size does not match declared size")
 	// ErrRootRemoval indicates an attempt to remove the workspace root.
 	ErrRootRemoval = errors.New("cannot remove workspace root")
+	// ErrSymlink indicates that a mutation path contains a symbolic link.
+	ErrSymlink = errors.New("symbolic links are not allowed for mutations")
+	// ErrAlreadyExists indicates that a create or move destination exists.
+	ErrAlreadyExists = errors.New("destination already exists")
+	// ErrNotDirectory indicates that a required directory is not a directory.
+	ErrNotDirectory = errors.New("path is not a directory")
+	// ErrNotFile indicates that a required regular file is not a regular file.
+	ErrNotFile = errors.New("path is not a regular file")
+	// ErrNotEmpty indicates that a non-recursive directory removal was requested.
+	ErrNotEmpty = errors.New("directory is not empty")
 )
