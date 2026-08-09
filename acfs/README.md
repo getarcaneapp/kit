@@ -57,12 +57,8 @@ to stderr.
 
 ```sh
 just format
-just vet
 just test
 just lint
-just snapshot
-just release         # increment the latest patch version
-just release 1.2.3   # release an explicit version
 ```
 
 `release` creates and pushes the version tag; the release workflow runs
