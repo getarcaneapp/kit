@@ -22,6 +22,7 @@ func entryFromInfoInternal(root *os.Root, relativePath string, info os.FileInfo)
 		Name:            name,
 		Path:            logicalPath,
 		Mode:            utils.FormatMode(info.Mode()),
+		UnixMode:        uint32(info.Mode()),
 		Size:            info.Size(),
 		ModTime:         info.ModTime().Truncate(time.Second),
 		ModTimeUnixNano: info.ModTime().UnixNano(),

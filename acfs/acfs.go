@@ -125,9 +125,11 @@ func List(ctx context.Context, rootPath, logicalPath string) ([]acfstypes.Entry,
 	return entries, nil
 }
 
-// Stat returns metadata for a root-confined path without following its final
-// symbolic link.
-func Stat(ctx context.Context, rootPath, logicalPath string) (acfstypes.Entry, error) {
+// Stat returns metadata for a root-confined path. When followFinal is false the
+// final symbolic link is not followed, so the Entry describes the link itself.
+// When it is true the link is resolved and the returned Entry.Path is the fully
+// resolved logical path, making Stat double as a root-confined symlink resolver.
+func Stat(ctx context.Context, rootPath, logicalPath string, followFinal bool) (acfstypes.Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return acfstypes.Entry{}, err
 	}
@@ -146,7 +148,7 @@ func Stat(ctx context.Context, rootPath, logicalPath string) (acfstypes.Entry, e
 	}
 	defer func() { _ = root.Close() }()
 
-	resolvedPath, err := resolvePathInternal(root, relativePath, false)
+	resolvedPath, err := resolvePathInternal(root, relativePath, followFinal)
 	if err != nil {
 		return acfstypes.Entry{}, err
 	}
@@ -156,6 +158,20 @@ func Stat(ctx context.Context, rootPath, logicalPath string) (acfstypes.Entry, e
 	}
 
 	return entryFromInfoInternal(root, resolvedPath, info)
+}
+
+// Exists reports whether a root-confined path exists without following its
+// final symbolic link, so a dangling link still counts as existing. A target
+// missing anywhere along the path is reported as (false, nil); every other
+// failure — including a path that escapes the root — is returned as an error.
+func Exists(ctx context.Context, rootPath, logicalPath string) (bool, error) {
+	if _, err := Stat(ctx, rootPath, logicalPath, false); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // Walk visits every descendant of a root-confined directory in deterministic
@@ -302,7 +318,90 @@ func MkdirAll(ctx context.Context, rootPath, logicalPath string, mode os.FileMod
 	return nil
 }
 
-// RemoveAll removes a root-confined file, symbolic link, or directory tree.
+// Mkdir creates a single root-confined directory whose parent must already
+// exist. An existing target reports ErrAlreadyExists, which also satisfies
+// errors.Is(err, fs.ErrExist) so collision loops can match either sentinel.
+func Mkdir(ctx context.Context, rootPath, logicalPath string, mode os.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if mode != mode.Perm() {
+		return fmt.Errorf("invalid directory mode %v", mode)
+	}
+
+	relativePath, err := utils.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return err
+	}
+	if relativePath == "." {
+		return fmt.Errorf("%w: workspace root: %w", ErrAlreadyExists, fs.ErrExist)
+	}
+
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	resolvedParent, base, err := resolveParentInternal(root, relativePath)
+	if err != nil {
+		return err
+	}
+	if err := root.Mkdir(path.Join(resolvedParent, base), mode); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%w: %q: %w", ErrAlreadyExists, logicalPath, fs.ErrExist)
+		}
+		return fmt.Errorf("create directory %q: %w", logicalPath, err)
+	}
+	return nil
+}
+
+// Remove removes a root-confined file, symbolic link, or empty directory
+// without recursing. A non-empty directory reports ErrNotEmpty.
+//
+// Unlike RemoveAll, Remove does not swallow a missing target: the underlying
+// not-exist error is returned so callers such as bounded empty-parent cleanup
+// loops can stop on the first failure of any kind.
+func Remove(ctx context.Context, rootPath, logicalPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	relativePath, err := utils.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return err
+	}
+	if relativePath == "." {
+		return ErrRootRemoval
+	}
+
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	resolvedParent, base, err := resolveParentInternal(root, relativePath)
+	if err != nil {
+		return err
+	}
+	if err := root.Remove(path.Join(resolvedParent, base)); err != nil {
+		if isDirectoryNotEmptyInternal(err) {
+			return fmt.Errorf("%w: %q", ErrNotEmpty, logicalPath)
+		}
+		return fmt.Errorf("remove %q: %w", logicalPath, err)
+	}
+	return nil
+}
+
+// RemoveAll removes a root-confined file, symbolic link, or directory tree. A
+// missing target is not an error.
 func RemoveAll(ctx context.Context, rootPath, logicalPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err

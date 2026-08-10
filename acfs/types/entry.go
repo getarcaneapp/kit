@@ -16,8 +16,12 @@ type Entry struct {
 	Mode            string    `json:"mode"`
 	LinkTarget      string    `json:"linkTarget,omitempty"`
 	Size            int64     `json:"size"`
-	IsDirectory     bool      `json:"isDirectory"`
-	IsSymlink       bool      `json:"isSymlink"`
+	// UnixMode carries the raw os.FileMode bits of the entry, so callers can
+	// compare or reapply them. Mode is a human-readable rendering meant for
+	// display only.
+	UnixMode    uint32 `json:"unixMode"`
+	IsDirectory bool   `json:"isDirectory"`
+	IsSymlink   bool   `json:"isSymlink"`
 }
 
 // ListResponse is the versioned response emitted by the list command.

@@ -1,6 +1,7 @@
 package acfs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -97,6 +98,19 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 	}
 	targetPath := path.Join(resolvedParent, base)
 	return writeFromRootInternal(ctx, root, logicalPath, targetPath, source, expectedSize, mode)
+}
+
+// WriteFile atomically writes data to a root-confined file, creating it when
+// absent. Like WriteFrom, the write lands on a temporary file in the target's
+// directory that is renamed into place, so a reader never observes a partial
+// file and a failure leaves the previous contents intact.
+//
+// A final component that is a symbolic link is replaced by the new regular
+// file rather than written through. Callers that must honour an existing
+// symlink resolve it themselves first.
+func WriteFile(ctx context.Context, rootPath, logicalPath string, data []byte, mode os.FileMode) error {
+	_, err := WriteFrom(ctx, rootPath, logicalPath, bytes.NewReader(data), int64(len(data)), mode)
+	return err
 }
 
 func writeFromRootInternal(ctx context.Context, root *os.Root, logicalPath, targetPath string, source io.Reader, expectedSize int64, mode os.FileMode) (int64, error) {

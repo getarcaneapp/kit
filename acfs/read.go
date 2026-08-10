@@ -1,6 +1,7 @@
 package acfs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -86,6 +87,22 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 	reader := io.LimitReader(file, size)
 
 	return &contextReadCloserInternal{ctx: ctx, reader: reader, closer: file}, size, nil
+}
+
+// ReadFile returns the complete contents of a root-confined regular file,
+// following its final symbolic link.
+func ReadFile(ctx context.Context, rootPath, logicalPath string) ([]byte, error) {
+	reader, size, err := OpenRead(ctx, rootPath, logicalPath, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+
+	buffer := bytes.NewBuffer(make([]byte, 0, size))
+	if _, err := io.Copy(buffer, reader); err != nil {
+		return nil, fmt.Errorf("read %q: %w", logicalPath, err)
+	}
+	return buffer.Bytes(), nil
 }
 
 // ReadTo streams a root-confined file into destination. A non-positive limit

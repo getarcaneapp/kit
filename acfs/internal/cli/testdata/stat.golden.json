@@ -1,1 +1,1 @@
-{"entry":{"modTime":"<modtime>","modTimeUnixNano":<modtime-ns>,"name":"hello world.txt","path":"/hello world.txt","mode":"-rw-r-----","size":5,"isDirectory":false,"isSymlink":false},"version":2}
+{"entry":{"modTime":"<modtime>","modTimeUnixNano":<modtime-ns>,"name":"hello world.txt","path":"/hello world.txt","mode":"-rw-r-----","size":5,"unixMode":416,"isDirectory":false,"isSymlink":false},"version":2}

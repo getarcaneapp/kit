@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"go.getarcane.app/acfs/pkg/utils"
@@ -15,6 +16,30 @@ const (
 	logicalVolumeRoot = "/volume"
 	maxSymlinkHops    = 40
 )
+
+// LogicalPath translates an absolute host path into the logical workspace path
+// that every ACFS operation on rootPath expects. It is a purely lexical
+// translation — no filesystem access, no symlink resolution — and reports
+// ErrOutsideRoot for a path that does not lexically live under rootPath.
+func LogicalPath(rootPath, absPath string) (string, error) {
+	absoluteRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return "", fmt.Errorf("%w: resolve root %q: %w", ErrInvalidPath, rootPath, err)
+	}
+	absoluteTarget, err := filepath.Abs(absPath)
+	if err != nil {
+		return "", fmt.Errorf("%w: resolve path %q: %w", ErrInvalidPath, absPath, err)
+	}
+
+	relative, err := filepath.Rel(absoluteRoot, absoluteTarget)
+	if err != nil {
+		return "", fmt.Errorf("%w: %q is not relative to %q", ErrOutsideRoot, absPath, rootPath)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("%w: %q is outside %q", ErrOutsideRoot, absPath, rootPath)
+	}
+	return utils.LogicalPath(filepath.ToSlash(relative)), nil
+}
 
 func relativePathInternal(components []string) string {
 	if len(components) == 0 {

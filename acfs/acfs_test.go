@@ -98,7 +98,7 @@ func TestListAndStat(t *testing.T) {
 		t.Errorf("unexpected named pipe: %#v", namedPipe)
 	}
 
-	stat, err := Stat(context.Background(), root, "/relative-link")
+	stat, err := Stat(context.Background(), root, "/relative-link", false)
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestRejectsMalformedAndEscapingPaths(t *testing.T) {
 
 	root := t.TempDir()
 	for _, logicalPath := range []string{"", "relative", "/../outside", "/a/../b", "/a//b", "/a/./b", "/trailing/", "/nul\x00byte"} {
-		_, err := Stat(context.Background(), root, logicalPath)
+		_, err := Stat(context.Background(), root, logicalPath, false)
 		if !errors.Is(err, ErrInvalidPath) {
 			t.Errorf("Stat(%q) error = %v, want ErrInvalidPath", logicalPath, err)
 		}

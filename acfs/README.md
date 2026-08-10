@@ -37,9 +37,15 @@ err = acfs.Walk(ctx, root, "/logs", func(entry types.Entry) error {
 })
 ```
 
-The root package also provides `WalkBounded`, `Stat`, `ReadTo`, `WriteFrom`,
-`MkdirAll`, `RemoveAll`, and ordered batch `Apply`. Public filesystem and
-protocol DTOs live in `types`.
+The root package also provides `WalkBounded`, `Stat`, `Exists`, `ReadFile`,
+`ReadTo`, `WriteFile`, `WriteFrom`, `Mkdir`, `MkdirAll`, `MkdirTemp`, `Rename`,
+`Remove`, `RemoveAll`, `CopyDir`, `MirrorDir`, `LogicalPath`, and ordered batch
+`Apply`. Public filesystem and protocol DTOs live in `types`.
+
+Subpackage `acfs/atomic` provides a crash-safe `WriteFile` for the rare
+destination that has no natural workspace root, such as a user-specified output
+file. Unlike `acfs.WriteFile` it refuses a symlinked destination rather than
+replacing it.
 
 ## CLI
 
@@ -54,17 +60,6 @@ acfs list|walk|stat|read|write|mkdir|remove|apply|version
 record and supports depth and entry limits. `read` emits an `ARCW` protocol-v2
 header followed by raw file content. Failures are emitted as structured JSON
 only on stderr.
-
-## Development
-
-```sh
-just format
-just test
-just lint
-```
-
-`release` creates and pushes the version tag; the release workflow runs
-GoReleaser and publishes the Linux binaries and checksum manifest.
 
 ## License
 

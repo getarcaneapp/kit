@@ -157,7 +157,7 @@ func runStat(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
-	entry, err := acfs.Stat(ctx, values.root, values.path)
+	entry, err := acfs.Stat(ctx, values.root, values.path, false)
 	if err != nil {
 		return err
 	}
