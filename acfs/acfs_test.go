@@ -353,6 +353,75 @@ func TestWriteFromIsExactAndAtomic(t *testing.T) {
 	}
 }
 
+func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	destination := filepath.Join(root, "chunks")
+	writeFixtureFile(t, destination, "", 0o600)
+	ctx := t.Context()
+
+	if err := WriteAt(ctx, root, "/chunks", 8, []byte("tail")); err != nil {
+		t.Fatalf("WriteAt beyond end: %v", err)
+	}
+	if err := WriteAt(ctx, root, "/chunks", 0, []byte("headpart")); err != nil {
+		t.Fatalf("WriteAt at start: %v", err)
+	}
+	contents, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "headparttail" {
+		t.Fatalf("contents = %q, want %q", contents, "headparttail")
+	}
+
+	if err := WriteAt(ctx, root, "/missing", 0, []byte("x")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("WriteAt on missing file error = %v, want fs.ErrNotExist", err)
+	}
+	if err := WriteAt(ctx, root, "/", 0, []byte("x")); !errors.Is(err, ErrIsDirectory) {
+		t.Fatalf("WriteAt on root error = %v, want ErrIsDirectory", err)
+	}
+	if err := WriteAt(ctx, root, "/chunks", -1, nil); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("WriteAt with negative offset error = %v, want ErrInvalidPath", err)
+	}
+}
+
+func TestOpenReadSeekReadsAndRewinds(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "payload"), "seekable-contents", 0o600)
+	ctx := t.Context()
+
+	reader, size, err := OpenReadSeek(ctx, root, "/payload")
+	if err != nil {
+		t.Fatalf("OpenReadSeek: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+	if size != int64(len("seekable-contents")) {
+		t.Fatalf("size = %d, want %d", size, len("seekable-contents"))
+	}
+
+	first, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offset, err := reader.Seek(0, io.SeekStart); err != nil || offset != 0 {
+		t.Fatalf("Seek = %d, %v", offset, err)
+	}
+	second, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != "seekable-contents" || !bytes.Equal(first, second) {
+		t.Fatalf("reads differ: %q vs %q", first, second)
+	}
+
+	if _, _, err := OpenReadSeek(ctx, root, "/"); !errors.Is(err, ErrIsDirectory) {
+		t.Fatalf("OpenReadSeek on directory error = %v, want ErrIsDirectory", err)
+	}
+}
+
 func TestMkdirAndRemoveStayInsideRoot(t *testing.T) {
 	t.Parallel()
 

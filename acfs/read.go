@@ -89,6 +89,77 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 	return &contextReadCloserInternal{ctx: ctx, reader: reader, closer: file}, size, nil
 }
 
+type contextReadSeekCloserInternal struct {
+	ctx  context.Context
+	file *os.File
+}
+
+func (r *contextReadSeekCloserInternal) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.file.Read(buffer)
+}
+
+func (r *contextReadSeekCloserInternal) Seek(offset int64, whence int) (int64, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.file.Seek(offset, whence)
+}
+
+func (r *contextReadSeekCloserInternal) Close() error {
+	return r.file.Close()
+}
+
+// OpenReadSeek opens a root-confined regular file for a seekable read of its
+// complete contents, following its final symbolic link. The returned size is
+// the file size at open time.
+func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSeekCloser, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	relativePath, err := utils.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return nil, 0, err
+	}
+
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	resolvedPath, err := resolvePathInternal(root, relativePath, true)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	file, err := root.Open(resolvedPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open %q: %w", utils.LogicalPath(resolvedPath), err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, 0, fmt.Errorf("stat %q: %w", utils.LogicalPath(resolvedPath), err)
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, 0, ErrIsDirectory
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, 0, ErrNotFile
+	}
+
+	return &contextReadSeekCloserInternal{ctx: ctx, file: file}, info.Size(), nil
+}
+
 // ReadFile returns the complete contents of a root-confined regular file,
 // following its final symbolic link.
 func ReadFile(ctx context.Context, rootPath, logicalPath string) ([]byte, error) {

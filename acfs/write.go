@@ -113,6 +113,60 @@ func WriteFile(ctx context.Context, rootPath, logicalPath string, data []byte, m
 	return err
 }
 
+// WriteAt writes data to an existing root-confined regular file at the given
+// byte offset, growing the file (sparsely) when the offset lies beyond its
+// current end. Unlike WriteFrom, the write is in-place and not atomic; callers
+// coordinate concurrent writers themselves.
+func WriteAt(ctx context.Context, rootPath, logicalPath string, offset int64, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if offset < 0 {
+		return fmt.Errorf("%w: offset must be non-negative", ErrInvalidPath)
+	}
+
+	relativePath, err := utils.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return err
+	}
+	if relativePath == "." {
+		return ErrIsDirectory
+	}
+
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	resolvedPath, err := resolvePathInternal(root, relativePath, true)
+	if err != nil {
+		return err
+	}
+
+	file, err := root.OpenFile(resolvedPath, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open %q: %w", utils.LogicalPath(resolvedPath), err)
+	}
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %q: %w", utils.LogicalPath(resolvedPath), err)
+	}
+	if !info.Mode().IsRegular() {
+		return ErrNotFile
+	}
+
+	if _, err := file.WriteAt(data, offset); err != nil {
+		return fmt.Errorf("write %q at offset %d: %w", logicalPath, offset, err)
+	}
+	return nil
+}
+
 func writeFromRootInternal(ctx context.Context, root *os.Root, logicalPath, targetPath string, source io.Reader, expectedSize int64, mode os.FileMode) (int64, error) {
 	resolvedParent := path.Dir(targetPath)
 
