@@ -13,6 +13,7 @@ import (
 	"github.com/docker/cli/cli/config"
 	configtypes "github.com/docker/cli/cli/config/types"
 	buildkit "github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth/authprovider"
 
 	"go.getarcane.app/builds/types"
@@ -57,7 +58,7 @@ func NewBuilder(settings types.SettingsProvider, dockerClientProvider types.Dock
 	})
 }
 
-func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progressWriter io.Writer, serviceName string) (*types.BuildResult, error) {
+func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progressWriter io.Writer, _ string) (*types.BuildResult, error) {
 	if b.settings == nil {
 		return nil, &types.BuildSettingsProviderUnavailableError{}
 	}
@@ -134,10 +135,7 @@ func (b *Service) buildWithBuildkitSessionInternal(
 	}
 	defer cleanupSolveOpt()
 
-	authProvider := authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
-		AuthConfigProvider: buildkitAuthConfigProviderInternal(authprovider.LoadAuthConfig(config.LoadDefaultConfigFile(os.Stderr)), b.registryAuthProvider),
-	})
-	solveOpt.Session = append(solveOpt.Session, authProvider)
+	solveOpt.Session = append(solveOpt.Session, b.newBuildkitAuthProviderInternal())
 
 	statusCh := make(chan *buildkit.SolveStatus, 16)
 	streamErrCh := make(chan error, 1)
@@ -194,6 +192,12 @@ func (b *Service) buildWithBuildkitSessionInternal(
 		Tags:     req.Tags,
 		Digest:   digest,
 	}, nil
+}
+
+func (b *Service) newBuildkitAuthProviderInternal() session.Attachable {
+	return authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
+		AuthConfigProvider: buildkitAuthConfigProviderInternal(authprovider.LoadAuthConfig(config.LoadDefaultConfigFile(os.Stderr)), b.registryAuthProvider),
+	})
 }
 
 func wrapBuildkitSolveErrorInternal(err error, providerName string) error {

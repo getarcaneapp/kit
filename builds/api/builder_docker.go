@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/moby/buildkit/session"
 	"github.com/moby/go-archive"
 	dockerbuild "github.com/moby/moby/api/types/build"
 	dockercontainer "github.com/moby/moby/api/types/container"
@@ -336,14 +338,33 @@ func (b *Service) performDockerBuildInternal(
 	buildContext io.Reader,
 	buildOpts dockerclient.ImageBuildOptions,
 	progressWriter io.Writer,
-) error {
+) (retErr error) {
+	buildSession, err := session.NewSession(ctx, "")
+	if err != nil {
+		return err
+	}
+	buildSession.Allow(b.newBuildkitAuthProviderInternal())
+	buildOpts.SessionID = buildSession.ID()
+
+	sessionCtx, cancelSession := context.WithCancel(ctx)
+	sessionErrCh := make(chan error, 1)
+	go func() {
+		sessionErrCh <- buildSession.Run(sessionCtx, dockerutils.SessionDialer(dockerClient))
+	}()
+	defer func() {
+		cancelSession()
+		retErr = errors.Join(retErr, buildSession.Close(), <-sessionErrCh)
+	}()
+
 	resp, err := dockerClient.ImageBuild(ctx, buildContext, buildOpts)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
-	return renderDockerBuildStreamInternal(ctx, resp.Body, progressWriter)
+	return errors.Join(
+		renderDockerBuildStreamInternal(ctx, resp.Body, progressWriter),
+		resp.Body.Close(),
+	)
 }
 
 func (b *Service) pushDockerImagesInternal(

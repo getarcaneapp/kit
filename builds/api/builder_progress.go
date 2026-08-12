@@ -39,8 +39,9 @@ func streamSolveStatusInternal(ctx context.Context, ch chan *buildkit.SolveStatu
 	}
 	display, err := progressui.NewDisplay(w, progressui.PlainMode)
 	if err != nil {
-		for range ch {
+		for status := range ch {
 			// Drain so the solve is never blocked on the status channel.
+			_ = status
 		}
 		return err
 	}

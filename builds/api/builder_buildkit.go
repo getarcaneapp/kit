@@ -68,7 +68,6 @@ func parseBuildkitCacheEntriesInternal(values []string) []buildkit.CacheOptionsE
 
 	return entries
 }
-
 func normalizeEntitlementsInternal(entitlements []string, privileged bool) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(entitlements)+1)
@@ -237,4 +236,3 @@ func (b *Service) buildLoadExportInternal(ctx context.Context, tags []string) (b
 		},
 	}, loadErrCh, nil
 }
-
