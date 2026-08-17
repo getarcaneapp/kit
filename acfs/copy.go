@@ -1,6 +1,7 @@
 package acfs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -21,6 +22,7 @@ type copyWalkerInternal struct {
 	record          func(relativePath string)
 	copied          int
 	tolerate        bool
+	mirror          bool
 }
 
 // CopyDir copies the contents of sourceRootPath into destinationRootPath. Both
@@ -38,13 +40,13 @@ func CopyDir(ctx context.Context, sourceRootPath, destinationRootPath string, op
 	}
 
 	record := func(relativePath string) { result.Skipped = append(result.Skipped, relativePath) }
-	copied, err := copyDirectoryContentsInternal(ctx, sourceRootPath, destinationRootPath, options.TolerateUnreadable, record)
+	copied, err := copyDirectoryContentsInternal(ctx, sourceRootPath, destinationRootPath, options.TolerateUnreadable, false, record)
 	result.Copied = copied
 	slices.Sort(result.Skipped)
 	return result, err
 }
 
-func copyDirectoryContentsInternal(ctx context.Context, sourceDir, destinationDir string, tolerate bool, record func(relativePath string)) (int, error) {
+func copyDirectoryContentsInternal(ctx context.Context, sourceDir, destinationDir string, tolerate, mirror bool, record func(relativePath string)) (int, error) {
 	sourceRoot, err := os.OpenRoot(sourceDir)
 	if err != nil {
 		return 0, err
@@ -64,6 +66,7 @@ func copyDirectoryContentsInternal(ctx context.Context, sourceDir, destinationDi
 		destinationRoot: destinationRoot,
 		record:          record,
 		tolerate:        tolerate,
+		mirror:          mirror,
 	}
 	err = filepath.WalkDir(sourceDir, walker.visitInternal)
 	return walker.copied, err
@@ -139,10 +142,23 @@ func (w *copyWalkerInternal) copyRegularFileInternal(relativePath string, entry 
 		return err
 	}
 
+	// In mirror mode, leave an already-identical destination file untouched:
+	// the in-place rewrite would only churn its mtime, and it would fail
+	// outright on a file the process can read but not write (#3625).
+	if w.mirror {
+		if existing, readErr := w.destinationRoot.ReadFile(relativePath); readErr == nil && bytes.Equal(existing, content) {
+			return nil
+		}
+	}
+
 	if err := w.destinationRoot.MkdirAll(filepath.Dir(relativePath), copyDirectoryMode); err != nil {
 		return err
 	}
 	if err := w.destinationRoot.WriteFile(relativePath, content, info.Mode()&chmodModeMask); err != nil {
+		if w.mirror && errors.Is(err, os.ErrPermission) {
+			w.record(relativePath)
+			return nil
+		}
 		return err
 	}
 	w.copied++
@@ -157,13 +173,17 @@ func (w *copyWalkerInternal) copyRegularFileInternal(relativePath string, entry 
 // instead of using the atomic temp-then-rename of WriteFile: rename would
 // replace the inode, and a mirror runs against live project directories whose
 // files may be bind-mounted into running containers. Preserving inodes is the
-// point — do not "fix" this to be atomic.
+// point — do not "fix" this to be atomic. A destination file whose content
+// already matches the source is left entirely untouched (inode and mtime
+// preserved).
 //
 // MirrorOptions.Preserve names destination entries that must survive even
 // though the source omits them; a directory holding a preserved descendant is
 // descended into rather than removed wholesale. The copy phase always tolerates
 // unreadable source entries, because failing half-way through leaves the live
 // directory in a mixed state that is worse than one stale file (#3509, #3085).
+// Destination files the process cannot write are tolerated in the same spirit
+// (#3625): the stale file keeps its old content and the mirror carries on.
 func MirrorDir(ctx context.Context, sourceRootPath, destinationRootPath string, options acfstypes.MirrorOptions) error {
 	if err := validateDistinctRootsInternal(sourceRootPath, destinationRootPath); err != nil {
 		return err
@@ -177,7 +197,7 @@ func MirrorDir(ctx context.Context, sourceRootPath, destinationRootPath string, 
 		return err
 	}
 
-	_, err := copyDirectoryContentsInternal(ctx, sourceRootPath, destinationRootPath, true, func(string) {})
+	_, err := copyDirectoryContentsInternal(ctx, sourceRootPath, destinationRootPath, true, true, func(string) {})
 	return err
 }
 

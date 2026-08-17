@@ -7,6 +7,7 @@ import (
 	"slices"
 	"syscall"
 	"testing"
+	"time"
 
 	acfstypes "go.getarcane.app/acfs/types"
 )
@@ -188,5 +189,80 @@ func TestMirrorDirPreservesListedEntriesAndDestinationInodes(t *testing.T) {
 	}
 	if !os.SameFile(before, after) {
 		t.Fatal("MirrorDir replaced the destination inode instead of updating in place")
+	}
+}
+
+func TestMirrorDirSkipsRewritingIdenticalDestinationFiles(t *testing.T) {
+	t.Parallel()
+
+	source := t.TempDir()
+	destination := t.TempDir()
+	ctx := t.Context()
+
+	writeFixtureFile(t, filepath.Join(source, "app.conf"), "same", 0o640)
+	writeFixtureFile(t, filepath.Join(destination, "app.conf"), "same", 0o640)
+
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(destination, "app.conf"), past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MirrorDir(ctx, source, destination, acfstypes.MirrorOptions{}); err != nil {
+		t.Fatalf("MirrorDir: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(destination, "app.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(past) {
+		t.Fatal("MirrorDir rewrote a destination file whose content already matched the source")
+	}
+}
+
+func TestMirrorDirToleratesUnwritableDestinationFiles(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; file permissions are not enforced")
+	}
+	t.Parallel()
+
+	source := t.TempDir()
+	destination := t.TempDir()
+	ctx := t.Context()
+
+	writeFixtureFile(t, filepath.Join(source, "compose.yaml"), "new", 0o640)
+	if err := os.Mkdir(filepath.Join(source, "secrets"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// The #3625 shape: readable-but-unwritable live files that staging copied
+	// verbatim, so their mirrored content is identical.
+	writeFixtureFile(t, filepath.Join(source, "secrets", "app.env"), "TOKEN=1", 0o640)
+	// And the write-bit-less file whose content genuinely differs: the mirror
+	// must carry on and leave the stale content in place.
+	writeFixtureFile(t, filepath.Join(source, "secrets", "stale.conf"), "fresh", 0o640)
+
+	writeFixtureFile(t, filepath.Join(destination, "compose.yaml"), "old", 0o640)
+	if err := os.Mkdir(filepath.Join(destination, "secrets"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, filepath.Join(destination, "secrets", "app.env"), "TOKEN=1", 0o440)
+	writeFixtureFile(t, filepath.Join(destination, "secrets", "stale.conf"), "stale", 0o440)
+
+	if err := MirrorDir(ctx, source, destination, acfstypes.MirrorOptions{}); err != nil {
+		t.Fatalf("MirrorDir: %v", err)
+	}
+
+	for path, want := range map[string]string{
+		filepath.Join(destination, "compose.yaml"):          "new",
+		filepath.Join(destination, "secrets", "app.env"):    "TOKEN=1",
+		filepath.Join(destination, "secrets", "stale.conf"): "stale",
+	} {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(contents) != want {
+			t.Fatalf("%s = %q, want %q", path, contents, want)
+		}
 	}
 }
