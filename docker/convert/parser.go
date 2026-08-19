@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/mattn/go-shellwords"
-	converttypes "go.getarcane.app/docker/convert/types"
+	"go.getarcane.app/docker/convert/types"
 )
 
 var valueFlags = map[string]string{
@@ -68,18 +68,18 @@ var boolFlags = map[string]string{
 	"--oom-kill-disable": "oom_kill_disable",
 }
 
-func parseCommandsInternal(input string, opts converttypes.ParseOptions) ([]converttypes.RunCommand, error) {
+func Parse(input string, opts types.ParseOptions) ([]types.RunCommand, error) {
 	normalized := normalizeInputInternal(input)
 	if strings.TrimSpace(normalized) == "" {
-		return nil, converttypes.NewParseError("docker command must be a non-empty string")
+		return nil, types.NewParseError("docker command must be a non-empty string")
 	}
 
 	parts := splitCommandsInternal(normalized)
-	commands := make([]converttypes.RunCommand, 0, len(parts))
+	commands := make([]types.RunCommand, 0, len(parts))
 	for _, part := range parts {
 		tokens, err := shellTokensInternal(part)
 		if err != nil {
-			return nil, converttypes.NewParseError("parse command tokens: %v", err)
+			return nil, types.NewParseError("parse command tokens: %v", err)
 		}
 		if len(tokens) == 0 {
 			continue
@@ -87,7 +87,7 @@ func parseCommandsInternal(input string, opts converttypes.ParseOptions) ([]conv
 
 		tokens, ok := trimCommandPrefixInternal(tokens)
 		if !ok {
-			return nil, converttypes.NewParseError("expected docker or podman run/create command")
+			return nil, types.NewParseError("expected docker or podman run/create command")
 		}
 
 		cmd, err := parseRunTokensInternal(tokens)
@@ -98,7 +98,7 @@ func parseCommandsInternal(input string, opts converttypes.ParseOptions) ([]conv
 	}
 
 	if len(commands) == 0 {
-		return nil, converttypes.NewParseError("no docker commands found")
+		return nil, types.NewParseError("no docker commands found")
 	}
 
 	return commands, nil
@@ -215,8 +215,8 @@ func trimCommandPrefixInternal(tokens []string) ([]string, bool) {
 	}
 }
 
-func parseRunTokensInternal(tokens []string) (converttypes.RunCommand, error) {
-	var cmd converttypes.RunCommand
+func parseRunTokensInternal(tokens []string) (types.RunCommand, error) {
+	var cmd types.RunCommand
 	for i := 0; i < len(tokens); i++ {
 		token := tokens[i]
 		if token == "--" {
@@ -243,7 +243,7 @@ func parseRunTokensInternal(tokens []string) (converttypes.RunCommand, error) {
 				if flag == "entrypoint" {
 					cmd.Entrypoint = value
 				}
-				cmd.Flags = append(cmd.Flags, converttypes.Flag{Name: flag, Value: value})
+				cmd.Flags = append(cmd.Flags, types.Flag{Name: flag, Value: value})
 			}
 			i += consumed
 			continue
@@ -255,7 +255,7 @@ func parseRunTokensInternal(tokens []string) (converttypes.RunCommand, error) {
 	}
 
 	if cmd.Image == "" {
-		return cmd, converttypes.NewParseError("no Docker image specified in command")
+		return cmd, types.NewParseError("no Docker image specified in command")
 	}
 
 	return cmd, nil
@@ -272,7 +272,7 @@ func parseFlagInternal(token string, tokens []string, index int) (string, string
 				return mapped, value, 0, nil
 			}
 			if index+1 >= len(tokens) {
-				return "", "", 0, converttypes.NewParseError("missing value for %s flag", name)
+				return "", "", 0, types.NewParseError("missing value for %s flag", name)
 			}
 			return mapped, tokens[index+1], 1, nil
 		}
@@ -287,7 +287,7 @@ func parseFlagInternal(token string, tokens []string, index int) (string, string
 	}
 	if mapped, ok := valueFlags[token]; ok {
 		if index+1 >= len(tokens) {
-			return "", "", 0, converttypes.NewParseError("missing value for %s flag", token)
+			return "", "", 0, types.NewParseError("missing value for %s flag", token)
 		}
 		return mapped, tokens[index+1], 1, nil
 	}
@@ -297,17 +297,17 @@ func parseFlagInternal(token string, tokens []string, index int) (string, string
 	return "ignored", token, 0, nil
 }
 
-func parseShortClusterInternal(token string) ([]converttypes.Flag, bool) {
+func parseShortClusterInternal(token string) ([]types.Flag, bool) {
 	if !strings.HasPrefix(token, "-") || strings.HasPrefix(token, "--") || len(token) <= 2 {
 		return nil, false
 	}
-	var flags []converttypes.Flag
+	var flags []types.Flag
 	for _, r := range token[1:] {
 		mapped, ok := boolFlags["-"+string(r)]
 		if !ok {
 			return nil, false
 		}
-		flags = append(flags, converttypes.Flag{Name: mapped, Value: "true"})
+		flags = append(flags, types.Flag{Name: mapped, Value: "true"})
 	}
 	return flags, len(flags) > 0
 }

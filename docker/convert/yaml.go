@@ -6,17 +6,17 @@ import (
 	"slices"
 	"strconv"
 
-	converttypes "go.getarcane.app/docker/convert/types"
+	"go.getarcane.app/docker/convert/types"
 	"go.yaml.in/yaml/v4"
 )
 
-func marshalYAMLInternal(doc *converttypes.Document, opts converttypes.MarshalOptions) ([]byte, error) {
+func Marshal(doc *types.Document, opts types.MarshalOptions) ([]byte, error) {
 	if doc == nil {
-		return nil, converttypes.NewConversionError("document cannot be nil")
+		return nil, types.NewConversionError("document cannot be nil")
 	}
-	root := mappingNodeInternal()
+	root := new(yaml.Node{Kind: yaml.MappingNode})
 
-	servicesNode := mappingNodeInternal()
+	servicesNode := new(yaml.Node{Kind: yaml.MappingNode})
 	for _, name := range doc.ServiceOrder {
 		service, ok := doc.Services[name]
 		if !ok {
@@ -98,8 +98,8 @@ var serviceKeyOrder = []string{
 	"expose",
 }
 
-func serviceNodeInternal(service converttypes.Service) *yaml.Node {
-	node := mappingNodeInternal()
+func serviceNodeInternal(service types.Service) *yaml.Node {
+	node := new(yaml.Node{Kind: yaml.MappingNode})
 	seen := make(map[string]bool, len(service))
 	for _, key := range serviceKeyOrder {
 		value, ok := service[key]
@@ -128,7 +128,7 @@ func serviceNodeInternal(service converttypes.Service) *yaml.Node {
 }
 
 func resourceNodeInternal(resources map[string]map[string]any) *yaml.Node {
-	node := mappingNodeInternal()
+	node := new(yaml.Node{Kind: yaml.MappingNode})
 	names := make([]string, 0, len(resources))
 	for name := range resources {
 		names = append(names, name)
@@ -146,9 +146,9 @@ func anyNodeInternal(value any) *yaml.Node {
 		return scalarNodeInternal(v)
 	case bool:
 		if v {
-			return boolNodeInternal("true")
+			return &yaml.Node{Kind: yaml.ScalarNode, Value: "true"}
 		}
-		return boolNodeInternal("false")
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: "false"}
 	case int:
 		return scalarNodeInternal(strconv.Itoa(v))
 	case []string:
@@ -159,7 +159,7 @@ func anyNodeInternal(value any) *yaml.Node {
 		return node
 	case map[string]any:
 		return orderedMapNodeInternal(v)
-	case converttypes.Service:
+	case types.Service:
 		return serviceNodeInternal(v)
 	default:
 		return scalarNodeInternal(fmt.Sprintf("%v", v))
@@ -167,7 +167,7 @@ func anyNodeInternal(value any) *yaml.Node {
 }
 
 func orderedMapNodeInternal(values map[string]any) *yaml.Node {
-	node := mappingNodeInternal()
+	node := new(yaml.Node{Kind: yaml.MappingNode})
 	keys := orderedKeysInternal(values)
 	for _, key := range keys {
 		node.Content = append(node.Content, scalarNodeInternal(key), anyNodeInternal(values[key]))
@@ -195,20 +195,12 @@ func orderedKeysInternal(values map[string]any) []string {
 	return append(keys, extras...)
 }
 
-func mappingNodeInternal() *yaml.Node {
-	return &yaml.Node{Kind: yaml.MappingNode}
-}
-
 func scalarNodeInternal(value string) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.ScalarNode, Value: value}
 	if value == "0.5" {
 		node.Style = yaml.DoubleQuotedStyle
 	}
 	return node
-}
-
-func boolNodeInternal(value string) *yaml.Node {
-	return &yaml.Node{Kind: yaml.ScalarNode, Value: value}
 }
 
 func isZeroValueInternal(value any) bool {

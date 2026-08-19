@@ -1,10 +1,10 @@
 module go.getarcane.app/docker/convert
 
-go 1.26
+go 1.27
 
 require (
-	github.com/compose-spec/compose-go/v2 v2.13.0
-	github.com/mattn/go-shellwords v1.0.13
+	github.com/compose-spec/compose-go/v2 v2.14.0
+	github.com/mattn/go-shellwords v1.0.14
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 )
 

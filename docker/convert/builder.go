@@ -7,15 +7,15 @@ import (
 	"strconv"
 	"strings"
 
-	converttypes "go.getarcane.app/docker/convert/types"
+	"go.getarcane.app/docker/convert/types"
 	"go.yaml.in/yaml/v4"
 )
 
 var serviceNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
 
-func buildDocumentInternal(commands []converttypes.RunCommand, opts converttypes.Options) (*converttypes.Document, error) {
-	doc := &converttypes.Document{
-		Services: make(map[string]converttypes.Service),
+func Build(commands []types.RunCommand, opts types.Options) (*types.Document, error) {
+	doc := &types.Document{
+		Services: make(map[string]types.Service),
 		Networks: make(map[string]map[string]any),
 		Volumes:  make(map[string]map[string]any),
 	}
@@ -40,8 +40,8 @@ func buildDocumentInternal(commands []converttypes.RunCommand, opts converttypes
 	return doc, nil
 }
 
-func mapServiceInternal(cmd converttypes.RunCommand, doc *converttypes.Document) (converttypes.Service, error) {
-	service := converttypes.Service{"image": cmd.Image}
+func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Service, error) {
+	service := types.Service{"image": cmd.Image}
 	if cmd.Name != "" {
 		service["container_name"] = cmd.Name
 	}
@@ -86,7 +86,7 @@ func mapServiceInternal(cmd converttypes.RunCommand, doc *converttypes.Document)
 		case "logging.options":
 			key, value, ok := strings.Cut(flag.Value, "=")
 			if !ok {
-				return nil, converttypes.NewConversionError("invalid log option %q", flag.Value)
+				return nil, types.NewConversionError("invalid log option %q", flag.Value)
 			}
 			logging := ensureMapInternal(service, "logging")
 			options := ensureNestedMapInternal(logging, "options")
@@ -102,7 +102,7 @@ func mapServiceInternal(cmd converttypes.RunCommand, doc *converttypes.Document)
 				appendStringInternal(service, "gpus", flag.Value)
 			}
 		case "ignored":
-			doc.Warnings = append(doc.Warnings, converttypes.Warning{Message: "ignored unsupported Docker flag " + flag.Value})
+			doc.Warnings = append(doc.Warnings, types.Warning{Message: "ignored unsupported Docker flag " + flag.Value})
 		}
 	}
 
@@ -131,7 +131,7 @@ func quoteCommandArgInternal(arg string) string {
 	return "'" + strings.ReplaceAll(arg, "'", "'\"'\"'") + "'"
 }
 
-func appendStringInternal(service converttypes.Service, key, value string) {
+func appendStringInternal(service types.Service, key, value string) {
 	if value == "" {
 		return
 	}
@@ -140,7 +140,7 @@ func appendStringInternal(service converttypes.Service, key, value string) {
 	service[key] = values
 }
 
-func ensureMapInternal(service converttypes.Service, key string) map[string]any {
+func ensureMapInternal(service types.Service, key string) map[string]any {
 	if existing, ok := service[key].(map[string]any); ok {
 		return existing
 	}
@@ -158,17 +158,17 @@ func ensureNestedMapInternal(parent map[string]any, key string) map[string]any {
 	return next
 }
 
-func setResourceLimitInternal(service converttypes.Service, key, value string) {
+func setResourceLimitInternal(service types.Service, key, value string) {
 	deploy := ensureMapInternal(service, "deploy")
 	resources := ensureNestedMapInternal(deploy, "resources")
 	limits := ensureNestedMapInternal(resources, "limits")
 	limits[key] = value
 }
 
-func setUlimitInternal(service converttypes.Service, value string) error {
+func setUlimitInternal(service types.Service, value string) error {
 	name, limit, ok := strings.Cut(value, "=")
 	if !ok || name == "" || limit == "" {
-		return converttypes.NewConversionError("invalid ulimit %q", value)
+		return types.NewConversionError("invalid ulimit %q", value)
 	}
 	softText, hardText, ok := strings.Cut(limit, ":")
 	if !ok {
@@ -177,18 +177,18 @@ func setUlimitInternal(service converttypes.Service, value string) error {
 	}
 	soft, err := strconv.Atoi(softText)
 	if err != nil {
-		return converttypes.NewConversionError("invalid ulimit soft value %q: %v", softText, err)
+		return types.NewConversionError("invalid ulimit soft value %q: %v", softText, err)
 	}
 	hard, err := strconv.Atoi(hardText)
 	if err != nil {
-		return converttypes.NewConversionError("invalid ulimit hard value %q: %v", hardText, err)
+		return types.NewConversionError("invalid ulimit hard value %q: %v", hardText, err)
 	}
 	ulimits := ensureMapInternal(service, "ulimits")
 	ulimits[name] = map[string]any{"soft": soft, "hard": hard}
 	return nil
 }
 
-func registerVolumeInternal(doc *converttypes.Document, value string) {
+func registerVolumeInternal(doc *types.Document, value string) {
 	source := value
 	if strings.HasPrefix(value, "type=") {
 		for part := range strings.SplitSeq(value, ",") {
@@ -208,7 +208,7 @@ func registerVolumeInternal(doc *converttypes.Document, value string) {
 	doc.Volumes[source] = map[string]any{"external": true}
 }
 
-func serviceNameInternal(cmd converttypes.RunCommand) string {
+func serviceNameInternal(cmd types.RunCommand) string {
 	if cmd.Name != "" {
 		return sanitizeServiceNameInternal(cmd.Name)
 	}
@@ -235,7 +235,7 @@ func sanitizeServiceNameInternal(name string) string {
 	return strings.ToLower(name)
 }
 
-func uniqueServiceNameInternal(name string, services map[string]converttypes.Service) string {
+func uniqueServiceNameInternal(name string, services map[string]types.Service) string {
 	if _, ok := services[name]; !ok {
 		return name
 	}
@@ -247,7 +247,7 @@ func uniqueServiceNameInternal(name string, services map[string]converttypes.Ser
 	}
 }
 
-func envFileInternal(commands []converttypes.RunCommand) []byte {
+func envFileInternal(commands []types.RunCommand) []byte {
 	var lines []string
 	for _, cmd := range commands {
 		for _, flag := range cmd.Flags {
@@ -262,20 +262,20 @@ func envFileInternal(commands []converttypes.RunCommand) []byte {
 	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
-func serviceResultsInternal(doc *converttypes.Document) []converttypes.ServiceResult {
-	results := make([]converttypes.ServiceResult, 0, len(doc.ServiceOrder))
+func serviceResultsInternal(doc *types.Document) []types.ServiceResult {
+	results := make([]types.ServiceResult, 0, len(doc.ServiceOrder))
 	for _, name := range doc.ServiceOrder {
 		service := doc.Services[name]
 		image, _ := service["image"].(string)
-		results = append(results, converttypes.ServiceResult{Name: name, Image: image})
+		results = append(results, types.ServiceResult{Name: name, Image: image})
 	}
 	return results
 }
 
-func mergeExistingComposeInternal(doc *converttypes.Document, yamlData []byte) error {
+func mergeExistingComposeInternal(doc *types.Document, yamlData []byte) error {
 	var existing map[string]any
 	if err := yaml.Unmarshal(yamlData, &existing); err != nil {
-		return converttypes.NewConversionError("parse existing compose YAML: %v", err)
+		return types.NewConversionError("parse existing compose YAML: %v", err)
 	}
 
 	if services, ok := existing["services"].(map[string]any); ok {

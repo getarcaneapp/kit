@@ -73,19 +73,19 @@ func main() {
 For more control, use the individual stages:
 
 ```go
-commands, err := convert.ParseCommands(input, converttypes.ParseOptions{})
+commands, err := convert.Parse(input, converttypes.ParseOptions{})
 if err != nil {
 	return err
 }
 
-doc, err := convert.BuildDocument(commands, converttypes.Options{
+doc, err := convert.Build(commands, converttypes.Options{
 	ExistingComposeYAML: existingComposeYAML,
 })
 if err != nil {
 	return err
 }
 
-yamlData, err := convert.MarshalYAML(doc, converttypes.MarshalOptions{
+yamlData, err := convert.Marshal(doc, converttypes.MarshalOptions{
 	RenderWarnings: true,
 })
 ```

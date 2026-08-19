@@ -96,20 +96,20 @@ func TestConvertDoesNotExecuteShellExpansion(t *testing.T) {
 	}
 }
 
-func TestBuildDocumentMergesExistingCompose(t *testing.T) {
-	commands, err := convert.ParseCommands("docker run --name web nginx:alpine", converttypes.ParseOptions{})
+func TestBuildMergesExistingCompose(t *testing.T) {
+	commands, err := convert.Parse("docker run --name web nginx:alpine", converttypes.ParseOptions{})
 	if err != nil {
-		t.Fatalf("ParseCommands returned error: %v", err)
+		t.Fatalf("Parse returned error: %v", err)
 	}
 
-	doc, err := convert.BuildDocument(commands, converttypes.Options{ExistingComposeYAML: []byte("services:\n  api:\n    image: caddy:2\n")})
+	doc, err := convert.Build(commands, converttypes.Options{ExistingComposeYAML: []byte("services:\n  api:\n    image: caddy:2\n")})
 	if err != nil {
-		t.Fatalf("BuildDocument returned error: %v", err)
+		t.Fatalf("Build returned error: %v", err)
 	}
 
-	out, err := convert.MarshalYAML(doc, converttypes.MarshalOptions{})
+	out, err := convert.Marshal(doc, converttypes.MarshalOptions{})
 	if err != nil {
-		t.Fatalf("MarshalYAML returned error: %v", err)
+		t.Fatalf("Marshal returned error: %v", err)
 	}
 
 	yaml := string(out)

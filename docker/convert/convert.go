@@ -5,32 +5,32 @@ import (
 	"fmt"
 
 	"github.com/compose-spec/compose-go/v2/loader"
-	composegotypes "github.com/compose-spec/compose-go/v2/types"
-	converttypes "go.getarcane.app/docker/convert/types"
+	compose "github.com/compose-spec/compose-go/v2/types"
+	"go.getarcane.app/docker/convert/types"
 )
 
-func Convert(input string, opts converttypes.Options) (*converttypes.Result, error) {
-	commands, err := ParseCommands(input, converttypes.ParseOptions{})
+func Convert(input string, opts types.Options) (*types.Result, error) {
+	commands, err := Parse(input, types.ParseOptions{})
 	if err != nil {
 		return nil, err
 	}
 
-	doc, err := BuildDocument(commands, opts)
+	doc, err := Build(commands, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	yamlData, err := MarshalYAML(doc, converttypes.MarshalOptions{RenderWarnings: opts.RenderWarnings})
+	yamlData, err := Marshal(doc, types.MarshalOptions{RenderWarnings: opts.RenderWarnings})
 	if err != nil {
 		return nil, err
 	}
 
 	project, err := loadComposeProjectInternal(yamlData)
 	if err != nil {
-		return nil, converttypes.NewConversionError("validate generated compose: %v", err)
+		return nil, types.NewConversionError("validate generated compose: %v", err)
 	}
 
-	return &converttypes.Result{
+	return &types.Result{
 		YAML:     yamlData,
 		Project:  project,
 		Services: serviceResultsInternal(doc),
@@ -39,22 +39,10 @@ func Convert(input string, opts converttypes.Options) (*converttypes.Result, err
 	}, nil
 }
 
-func ParseCommands(input string, opts converttypes.ParseOptions) ([]converttypes.RunCommand, error) {
-	return parseCommandsInternal(input, opts)
-}
-
-func BuildDocument(commands []converttypes.RunCommand, opts converttypes.Options) (*converttypes.Document, error) {
-	return buildDocumentInternal(commands, opts)
-}
-
-func MarshalYAML(doc *converttypes.Document, opts converttypes.MarshalOptions) ([]byte, error) {
-	return marshalYAMLInternal(doc, opts)
-}
-
-func loadComposeProjectInternal(yamlData []byte) (*composegotypes.Project, error) {
-	details := composegotypes.ConfigDetails{
+func loadComposeProjectInternal(yamlData []byte) (*compose.Project, error) {
+	details := compose.ConfigDetails{
 		WorkingDir: ".",
-		ConfigFiles: []composegotypes.ConfigFile{
+		ConfigFiles: []compose.ConfigFile{
 			{Filename: "compose.yaml", Content: yamlData},
 		},
 		Environment: map[string]string{},
