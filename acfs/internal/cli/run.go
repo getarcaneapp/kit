@@ -417,8 +417,7 @@ func writeErrorInternal(destination io.Writer, operation string, err error) {
 		Message:   err.Error(),
 		Operation: operation,
 	}
-	var applyErr *acfstypes.ApplyError
-	if errors.As(err, &applyErr) {
+	if applyErr, ok := errors.AsType[*acfstypes.ApplyError](err); ok {
 		response.ChangeIndex = &applyErr.Index
 		response.Path = applyErr.Path
 	}
