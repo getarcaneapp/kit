@@ -4,6 +4,7 @@ use (
 	.
 	./acfs
 	./builds
+	./docker/convert
 	./streams
 	./sys/bytes
 	./sys/cgroup

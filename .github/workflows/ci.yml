@@ -60,6 +60,9 @@ jobs:
           - name: builds
             dir: builds
             args: --config=../.github/.golangci.yml
+          - name: docker-convert
+            dir: docker/convert
+            args: --config=../../.github/.golangci.yml
           - name: streams
             dir: streams
             args: --config=../.github/.golangci.yml
