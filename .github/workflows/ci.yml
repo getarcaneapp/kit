@@ -60,6 +60,9 @@ jobs:
           - name: builds
             dir: builds
             args: --config=../.github/.golangci.yml
+          - name: updater
+            dir: updater
+            args: --config=../.github/.golangci.yml
     steps:
       - name: Checkout
         uses: actions/checkout@v6

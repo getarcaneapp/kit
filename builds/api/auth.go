@@ -3,12 +3,12 @@ package api
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	ref "github.com/distribution/reference"
 	dockerauthconfig "github.com/moby/moby/api/pkg/authconfig"
 	dockerregistry "github.com/moby/moby/api/types/registry"
+	"go.getarcane.app/kit/pkg/utils/registryhost"
 )
 
 func registryAuthConfigForHostInternal(ctx context.Context, provider RegistryAuthProvider, host string) (dockerregistry.AuthConfig, bool, error) {
@@ -21,7 +21,7 @@ func registryAuthConfigForHostInternal(ctx context.Context, provider RegistryAut
 		return dockerregistry.AuthConfig{}, false, err
 	}
 
-	for _, key := range registryLookupKeysInternal(host) {
+	for _, key := range registryhost.LookupKeys(host) {
 		if cfg, ok := authConfigs[key]; ok {
 			return cfg, true, nil
 		}
@@ -62,42 +62,4 @@ func registryAddressInternal(imageRef string) (string, error) {
 		return "index.docker.io", nil
 	}
 	return addr, nil
-}
-
-func normalizeRegistryForComparisonInternal(url string) string {
-	url = strings.TrimSpace(strings.ToLower(url))
-	url = strings.TrimPrefix(url, "https://")
-	url = strings.TrimPrefix(url, "http://")
-	url = strings.TrimSuffix(url, "/")
-
-	if slash := strings.Index(url, "/"); slash != -1 {
-		url = url[:slash]
-	}
-
-	if url == "docker.io" || url == "registry-1.docker.io" || url == "index.docker.io" {
-		return "docker.io"
-	}
-	return url
-}
-
-func registryLookupKeysInternal(url string) []string {
-	normalizedHost := normalizeRegistryForComparisonInternal(url)
-	if normalizedHost == "" {
-		return nil
-	}
-
-	keys := map[string]struct{}{
-		normalizedHost: {},
-	}
-	if normalizedHost == "docker.io" {
-		keys["registry-1.docker.io"] = struct{}{}
-		keys["index.docker.io"] = struct{}{}
-	}
-
-	out := make([]string, 0, len(keys))
-	for key := range keys {
-		out = append(out, key)
-	}
-	sort.Strings(out)
-	return out
 }
