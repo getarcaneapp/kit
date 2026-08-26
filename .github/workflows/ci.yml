@@ -60,6 +60,9 @@ jobs:
           - name: builds
             dir: builds
             args: --config=../.github/.golangci.yml
+          - name: streams
+            dir: streams
+            args: --config=../.github/.golangci.yml
           - name: updater
             dir: updater
             args: --config=../.github/.golangci.yml

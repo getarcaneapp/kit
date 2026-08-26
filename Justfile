@@ -1,6 +1,6 @@
 set working-directory := './'
 
-modules := '. ./acfs ./builds ./updater'
+modules := '. ./acfs ./builds ./streams ./updater'
 
 _default:
     @just --list
