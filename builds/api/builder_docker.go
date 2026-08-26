@@ -19,7 +19,7 @@ import (
 	dockerclient "github.com/moby/moby/client"
 	"github.com/moby/patternmatcher"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	dockerutils "go.getarcane.app/builds/pkg/utils/docker"
+	dockerutils "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
 )
 

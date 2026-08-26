@@ -2,15 +2,16 @@ package api
 
 import (
 	"context"
-	moby "github.com/moby/moby/client"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	moby "github.com/moby/moby/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.getarcane.app/builds/types"
 )
@@ -98,7 +99,7 @@ func TestBuildSolveOptInternal_LocalPushAndLoadUsesSingleMobyExporter(t *testing
 
 func TestBuildSolveOptInternal_NonLocalLoadKeepsDockerExporter(t *testing.T) {
 	contextDir := createBuildkitTestContext(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1.54/images/load" {
 			http.NotFound(w, r)
 			return
@@ -107,9 +108,13 @@ func TestBuildSolveOptInternal_NonLocalLoadKeepsDockerExporter(t *testing.T) {
 		_ = r.Body.Close()
 		_, _ = w.Write([]byte("{}\n"))
 	}))
-	defer server.Close()
+	httpClient := server.Client()
 
-	client, err := moby.NewClientWithOpts(moby.WithHost(server.URL), moby.WithVersion("1.54"))
+	client, err := moby.New(
+		moby.WithHost(server.URL),
+		moby.WithHTTPClient(httpClient),
+		moby.WithAPIVersion("1.54"),
+	)
 	require.NoError(t, err)
 
 	b := &Service{dockerClientProvider: testDockerClientProvider{client: client}}

@@ -5,7 +5,6 @@
 Portable Docker and BuildKit image build orchestration for Go applications.
 
 <a href="https://pkg.go.dev/go.getarcane.app/builds"><img src="https://pkg.go.dev/badge/go.getarcane.app/builds.svg" alt="Go Reference"></a>
-<a href="https://goreportcard.com/report/go.getarcane.app/builds"><img src="https://goreportcard.com/badge/go.getarcane.app/builds" alt="Go Report Card"></a>
 <a href="https://github.com/getarcaneapp/builds/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License"></a>
 
 </div>
@@ -30,6 +29,8 @@ Using Arcane Builds is a small image build flow:
 The build engine does not own durable persistence, Git repository credentials, remote Git checkout, user notifications, scheduling, or build history. Those can be added by the host application around the service.
 
 ## Getting started
+
+Arcane Builds requires Go 1.27 or newer.
 
 ```sh
 go get go.getarcane.app/builds@latest
@@ -59,14 +60,14 @@ result, err := svc.BuildImage(ctx, types.BuildRequest{
 }, progressWriter, "app")
 ```
 
-For remote Git build contexts, parse the source with `pkg/utils/contextsource`, clone or prepare the repository in the host application, then pass the resolved local directory to `BuildImage`.
+For remote Git build contexts, parse the source with `pkg/contextsource`, clone or prepare the repository in the host application, then pass the resolved local directory to `BuildImage`.
 
 ## Package layout
 
 - `api`: public build service, adapter interfaces, provider selection, build execution, and log capture.
 - `types`: stable public DTOs for build settings, requests, results, progress events, and build-specific errors.
-- `pkg/utils/contextsource`: Git build context parsing, validation, repository URL normalization, and probe detection helpers.
-- `pkg/utils/docker`: Docker BuildKit client options and Docker JSON message stream draining.
+- `pkg/contextsource`: Git build context parsing, validation, repository URL normalization, and probe detection helpers.
+- `pkg/docker`: Docker BuildKit client options and Docker JSON message stream draining.
 
 ## Development
 

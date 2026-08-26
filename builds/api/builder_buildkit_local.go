@@ -9,7 +9,7 @@ import (
 	"time"
 
 	buildkitclient "github.com/moby/buildkit/client"
-	docker "go.getarcane.app/builds/pkg/utils/docker"
+	docker "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
 )
 

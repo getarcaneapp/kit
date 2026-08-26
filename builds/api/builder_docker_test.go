@@ -116,7 +116,7 @@ func TestPerformDockerBuildInternal_KeepsSessionActiveForRegistryAuth(t *testing
 			sessionIDCh := make(chan string, 1)
 			credentialsCh := make(chan *sessionauth.CredentialsResponse, 1)
 			serverErrCh := make(chan error, 2)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case strings.HasSuffix(r.URL.Path, "/session"):
 					if handleErr := sessionManager.HandleHTTPRequest(managerCtx, w, r); handleErr != nil {
@@ -156,11 +156,11 @@ func TestPerformDockerBuildInternal_KeepsSessionActiveForRegistryAuth(t *testing
 					http.NotFound(w, r)
 				}
 			}))
-			defer server.Close()
+			server.Start()
 
-			dockerClient, err := dockerclient.NewClientWithOpts(
+			dockerClient, err := dockerclient.New(
 				dockerclient.WithHost("tcp://"+server.Listener.Addr().String()),
-				dockerclient.WithVersion("1.54"),
+				dockerclient.WithAPIVersion("1.54"),
 			)
 			require.NoError(t, err)
 			defer dockerClient.Close()
@@ -207,7 +207,7 @@ func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
 
 	sessionIDCh := make(chan string, 1)
 	serverErrCh := make(chan error, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/session"):
 			if handleErr := sessionManager.HandleHTTPRequest(managerCtx, w, r); handleErr != nil {
@@ -236,11 +236,11 @@ func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer server.Close()
+	server.Start()
 
-	dockerClient, err := dockerclient.NewClientWithOpts(
+	dockerClient, err := dockerclient.New(
 		dockerclient.WithHost("tcp://"+server.Listener.Addr().String()),
-		dockerclient.WithVersion("1.54"),
+		dockerclient.WithAPIVersion("1.54"),
 	)
 	require.NoError(t, err)
 	defer dockerClient.Close()

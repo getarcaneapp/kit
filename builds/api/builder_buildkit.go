@@ -9,7 +9,7 @@ import (
 
 	buildkit "github.com/moby/buildkit/client"
 	"github.com/tonistiigi/fsutil"
-	dockerutils "go.getarcane.app/builds/pkg/utils/docker"
+	dockerutils "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
 )
 
