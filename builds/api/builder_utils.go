@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"go.getarcane.app/builds/types"
-	"go.getarcane.app/kit/pkg/utils/strutil"
+	"go.getarcane.app/kit/pkg/utils"
 )
 
 func normalizeBuildRequestInternal(req types.BuildRequest, providerName string) types.BuildRequest {
@@ -71,16 +71,16 @@ func unsupportedBuildOptionsInternal(req types.BuildRequest, providerName string
 
 	switch providerName {
 	case "local":
-		if strutil.HasNonEmpty(req.CacheTo) {
+		if utils.HasNonEmpty(req.CacheTo) {
 			unsupported = append(unsupported, "cacheTo")
 		}
-		if strutil.HasNonEmpty(req.Entitlements) {
+		if utils.HasNonEmpty(req.Entitlements) {
 			unsupported = append(unsupported, "entitlements")
 		}
 		if req.Privileged {
 			unsupported = append(unsupported, "privileged")
 		}
-		if strutil.CountNonEmpty(req.Platforms) > 1 {
+		if utils.CountNonEmpty(req.Platforms) > 1 {
 			unsupported = append(unsupported, "platforms")
 		}
 	case "depot":
@@ -96,7 +96,7 @@ func unsupportedBuildOptionsInternal(req types.BuildRequest, providerName string
 		if len(req.Ulimits) > 0 {
 			unsupported = append(unsupported, "ulimits")
 		}
-		if strutil.HasNonEmpty(req.ExtraHosts) {
+		if utils.HasNonEmpty(req.ExtraHosts) {
 			unsupported = append(unsupported, "extraHosts")
 		}
 	}

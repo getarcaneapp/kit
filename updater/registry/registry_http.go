@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"go.getarcane.app/kit/pkg/utils/registryhost"
+	kitregistry "go.getarcane.app/kit/pkg/registry"
 )
 
 const (
@@ -149,7 +149,7 @@ func authorizedManifestHeaders(ctx context.Context, httpClient *http.Client, met
 }
 
 func manifestRequest(ctx context.Context, httpClient *http.Client, method, registryHost, repository, tag, authHeader string) (*http.Response, error) {
-	registryHost = registryhost.Normalize(registryHost)
+	registryHost = kitregistry.Normalize(registryHost)
 	if registryHost == "docker.io" {
 		registryHost = defaultRegistryHost
 	}

@@ -1,6 +1,6 @@
-// Package strutil provides focused helpers for working with string slices
+// Package utils provides focused helpers for working with string slices
 // whose entries may be blank.
-package strutil
+package utils
 
 import (
 	"sort"

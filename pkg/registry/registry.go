@@ -1,6 +1,6 @@
-// Package registryhost canonicalizes container registry hosts so that image
+// Package registry canonicalizes container registry hosts so that image
 // references and credential lookups agree on what "the same registry" means.
-package registryhost
+package registry
 
 import (
 	"net/url"

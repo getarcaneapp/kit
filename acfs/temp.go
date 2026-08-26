@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 const (
@@ -47,7 +47,7 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 		return "", err
 	}
 
-	relativeDir, err := filesystem.NormalizeLogicalPath(logicalDir)
+	relativeDir, err := kitfs.NormalizeLogicalPath(logicalDir)
 	if err != nil {
 		return "", err
 	}
@@ -74,7 +74,7 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 		candidate := relativePathInternal([]string{resolvedDir, prefix + hex.EncodeToString(randomBytes[:]) + suffix})
 		err := root.Mkdir(candidate, temporaryDirectoryMode)
 		if err == nil {
-			return filesystem.LogicalPath(candidate), nil
+			return kitfs.LogicalPath(candidate), nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
 			return "", fmt.Errorf("create temporary directory in %q: %w", logicalDir, err)

@@ -1,6 +1,6 @@
 // Package registryhost resolves the registry hosts the Docker daemon expects
 // for authentication. Canonicalizing hosts for equality checks lives in
-// go.getarcane.app/kit/pkg/utils/registryhost.
+// go.getarcane.app/kit/pkg/registry.
 package registryhost
 
 import (

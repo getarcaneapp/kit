@@ -63,6 +63,15 @@ jobs:
           - name: streams
             dir: streams
             args: --config=../.github/.golangci.yml
+          - name: sys-bytes
+            dir: sys/bytes
+            args: --config=../../.github/.golangci.yml
+          - name: sys-cgroup
+            dir: sys/cgroup
+            args: --config=../../.github/.golangci.yml
+          - name: sys-crypto
+            dir: sys/crypto
+            args: --config=../../.github/.golangci.yml
           - name: updater
             dir: updater
             args: --config=../.github/.golangci.yml

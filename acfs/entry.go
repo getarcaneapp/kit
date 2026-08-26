@@ -8,11 +8,11 @@ import (
 	"time"
 
 	acfstypes "go.getarcane.app/acfs/types"
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 func entryFromInfoInternal(root *os.Root, relativePath string, info os.FileInfo) (acfstypes.Entry, error) {
-	logicalPath := filesystem.LogicalPath(relativePath)
+	logicalPath := kitfs.LogicalPath(relativePath)
 	name := path.Base(relativePath)
 	if relativePath == "." {
 		name = "/"
@@ -21,7 +21,7 @@ func entryFromInfoInternal(root *os.Root, relativePath string, info os.FileInfo)
 	entry := acfstypes.Entry{
 		Name:            name,
 		Path:            logicalPath,
-		Mode:            filesystem.FormatMode(info.Mode()),
+		Mode:            kitfs.FormatMode(info.Mode()),
 		UnixMode:        uint32(info.Mode()),
 		Size:            info.Size(),
 		ModTime:         info.ModTime().Truncate(time.Second),

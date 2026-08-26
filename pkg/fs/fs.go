@@ -1,5 +1,5 @@
-// Package filesystem contains focused filesystem helpers shared by Arcane Go modules.
-package filesystem
+// Package fs contains focused filesystem helpers shared by Arcane Go modules.
+package fs
 
 import (
 	"errors"

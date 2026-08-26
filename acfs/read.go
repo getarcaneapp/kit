@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 type contextReadCloserInternal struct {
@@ -36,7 +36,7 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 		return nil, 0, err
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -57,7 +57,7 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 
 	info, err := root.Stat(resolvedPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("stat %q: %w", filesystem.LogicalPath(resolvedPath), err)
+		return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
 	if info.IsDir() {
 		return nil, 0, ErrIsDirectory
@@ -68,12 +68,12 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 
 	file, err := root.Open(resolvedPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("open %q: %w", filesystem.LogicalPath(resolvedPath), err)
+		return nil, 0, fmt.Errorf("open %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
 	info, err = file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, 0, fmt.Errorf("stat %q: %w", filesystem.LogicalPath(resolvedPath), err)
+		return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
 	if !info.Mode().IsRegular() {
 		_ = file.Close()
@@ -120,7 +120,7 @@ func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSee
 		return nil, 0, err
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -141,12 +141,12 @@ func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSee
 
 	file, err := root.Open(resolvedPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("open %q: %w", filesystem.LogicalPath(resolvedPath), err)
+		return nil, 0, fmt.Errorf("open %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, 0, fmt.Errorf("stat %q: %w", filesystem.LogicalPath(resolvedPath), err)
+		return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
 	if info.IsDir() {
 		_ = file.Close()

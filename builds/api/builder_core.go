@@ -17,7 +17,7 @@ import (
 	"github.com/moby/buildkit/session/auth/authprovider"
 
 	"go.getarcane.app/builds/types"
-	"go.getarcane.app/kit/pkg/utils/strutil"
+	"go.getarcane.app/kit/pkg/utils"
 )
 
 const defaultBuildTimeout = 30 * time.Minute
@@ -78,7 +78,7 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 	defer cancel()
 
 	req = normalizeBuildRequestInternal(req, providerName)
-	req.Tags = strutil.NormalizeSet(req.Tags)
+	req.Tags = utils.NormalizeSet(req.Tags)
 
 	if err := validateBuildRequestInternal(req, providerName); err != nil {
 		return nil, err

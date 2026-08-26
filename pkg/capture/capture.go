@@ -1,6 +1,6 @@
-// Package logcapture provides a bounded, concurrency-safe capture buffer for
+// Package capture provides a bounded, concurrency-safe capture buffer for
 // streamed output such as build or process logs.
-package logcapture
+package capture
 
 import (
 	"bytes"

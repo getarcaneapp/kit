@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 // isDirectoryNotEmptyInternal reports whether a removal or rename failed
@@ -20,7 +20,7 @@ func isDirectoryNotEmptyInternal(err error) bool {
 }
 
 func resolveRenameEndpointInternal(root *os.Root, logicalPath string) (string, error) {
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return "", err
 	}

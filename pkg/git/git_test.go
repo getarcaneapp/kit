@@ -1,4 +1,4 @@
-package giturl
+package git
 
 import "testing"
 

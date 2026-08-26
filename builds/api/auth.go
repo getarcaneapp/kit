@@ -8,7 +8,7 @@ import (
 	ref "github.com/distribution/reference"
 	dockerauthconfig "github.com/moby/moby/api/pkg/authconfig"
 	dockerregistry "github.com/moby/moby/api/types/registry"
-	"go.getarcane.app/kit/pkg/utils/registryhost"
+	"go.getarcane.app/kit/pkg/registry"
 )
 
 func registryAuthConfigForHostInternal(ctx context.Context, provider RegistryAuthProvider, host string) (dockerregistry.AuthConfig, bool, error) {
@@ -21,7 +21,7 @@ func registryAuthConfigForHostInternal(ctx context.Context, provider RegistryAut
 		return dockerregistry.AuthConfig{}, false, err
 	}
 
-	for _, key := range registryhost.LookupKeys(host) {
+	for _, key := range registry.LookupKeys(host) {
 		if cfg, ok := authConfigs[key]; ok {
 			return cfg, true, nil
 		}

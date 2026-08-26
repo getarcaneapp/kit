@@ -9,7 +9,7 @@ import (
 
 	ref "github.com/distribution/reference"
 	"github.com/opencontainers/go-digest"
-	"go.getarcane.app/kit/pkg/utils/registryhost"
+	"go.getarcane.app/kit/pkg/registry"
 )
 
 // Reference is a normalized Docker image reference.
@@ -32,7 +32,7 @@ func NormalizeReference(imageRef string) (*Reference, error) {
 		return nil, fmt.Errorf("invalid image reference %q: %w", imageRef, err)
 	}
 
-	registryHost := registryhost.Normalize(ref.Domain(named))
+	registryHost := registry.Normalize(ref.Domain(named))
 	repository := ref.Path(named)
 
 	tag := "latest"

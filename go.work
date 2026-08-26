@@ -1,9 +1,12 @@
-go 1.27.0
+go 1.27
 
 use (
 	.
 	./acfs
 	./builds
 	./streams
+	./sys/bytes
+	./sys/cgroup
+	./sys/crypto
 	./updater
 )

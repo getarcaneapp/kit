@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 const (
@@ -38,7 +38,7 @@ func LogicalPath(rootPath, absPath string) (string, error) {
 	if relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("%w: %q is outside %q", ErrOutsideRoot, absPath, rootPath)
 	}
-	return filesystem.LogicalPath(filepath.ToSlash(relative)), nil
+	return kitfs.LogicalPath(filepath.ToSlash(relative)), nil
 }
 
 func relativePathInternal(components []string) string {
@@ -82,7 +82,7 @@ func resolvePathInternal(root *os.Root, relativePath string, followFinal bool) (
 		candidate := relativePathInternal(append(resolved, component))
 		info, err := root.Lstat(candidate)
 		if err != nil {
-			return "", fmt.Errorf("lstat %q: %w", filesystem.LogicalPath(candidate), err)
+			return "", fmt.Errorf("lstat %q: %w", kitfs.LogicalPath(candidate), err)
 		}
 
 		isFinal := len(pending) == 0
@@ -98,7 +98,7 @@ func resolvePathInternal(root *os.Root, relativePath string, followFinal bool) (
 
 		target, err := root.Readlink(candidate)
 		if err != nil {
-			return "", fmt.Errorf("readlink %q: %w", filesystem.LogicalPath(candidate), err)
+			return "", fmt.Errorf("readlink %q: %w", kitfs.LogicalPath(candidate), err)
 		}
 
 		if strings.HasPrefix(target, "/") {
@@ -108,7 +108,7 @@ func resolvePathInternal(root *os.Root, relativePath string, followFinal bool) (
 			case strings.HasPrefix(target, logicalVolumeRoot+"/"):
 				target = strings.TrimPrefix(target, logicalVolumeRoot+"/")
 			default:
-				return "", fmt.Errorf("%w: symlink %q targets %q", ErrOutsideRoot, filesystem.LogicalPath(candidate), target)
+				return "", fmt.Errorf("%w: symlink %q targets %q", ErrOutsideRoot, kitfs.LogicalPath(candidate), target)
 			}
 			resolved = resolved[:0]
 		}

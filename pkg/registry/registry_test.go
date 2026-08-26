@@ -1,4 +1,4 @@
-package registryhost
+package registry
 
 import (
 	"slices"

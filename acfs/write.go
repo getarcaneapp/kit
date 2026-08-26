@@ -12,7 +12,7 @@ import (
 	"path"
 	"strings"
 
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 const temporaryWritePrefix = ".acfs-write-"
@@ -75,7 +75,7 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 		return 0, fmt.Errorf("invalid file mode %v", mode)
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return 0, err
 	}
@@ -125,7 +125,7 @@ func WriteAt(ctx context.Context, rootPath, logicalPath string, offset int64, da
 		return fmt.Errorf("%w: offset must be non-negative", ErrInvalidPath)
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return err
 	}
@@ -149,13 +149,13 @@ func WriteAt(ctx context.Context, rootPath, logicalPath string, offset int64, da
 
 	file, err := root.OpenFile(resolvedPath, os.O_WRONLY, 0)
 	if err != nil {
-		return fmt.Errorf("open %q: %w", filesystem.LogicalPath(resolvedPath), err)
+		return fmt.Errorf("open %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
 	defer func() { _ = file.Close() }()
 
 	info, err := file.Stat()
 	if err != nil {
-		return fmt.Errorf("stat %q: %w", filesystem.LogicalPath(resolvedPath), err)
+		return fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
 	if !info.Mode().IsRegular() {
 		return ErrNotFile

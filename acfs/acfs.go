@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	acfstypes "go.getarcane.app/acfs/types"
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 const directoryReadBatchSize = 256
@@ -54,7 +54,7 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 		return err
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			return fmt.Errorf("stat %q: %w", filesystem.LogicalPath(entryPath), err)
+			return fmt.Errorf("stat %q: %w", kitfs.LogicalPath(entryPath), err)
 		}
 
 		entry, err := entryFromInfoInternal(root, entryPath, info)
@@ -134,7 +134,7 @@ func Stat(ctx context.Context, rootPath, logicalPath string, followFinal bool) (
 		return acfstypes.Entry{}, err
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return acfstypes.Entry{}, err
 	}
@@ -294,7 +294,7 @@ func MkdirAll(ctx context.Context, rootPath, logicalPath string, mode os.FileMod
 		return fmt.Errorf("invalid directory mode %v", mode)
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func Mkdir(ctx context.Context, rootPath, logicalPath string, mode os.FileMode) 
 		return fmt.Errorf("invalid directory mode %v", mode)
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ func Remove(ctx context.Context, rootPath, logicalPath string) error {
 		return err
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return err
 	}
@@ -407,7 +407,7 @@ func RemoveAll(ctx context.Context, rootPath, logicalPath string) error {
 		return err
 	}
 
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return err
 	}

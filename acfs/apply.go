@@ -13,7 +13,7 @@ import (
 	"syscall"
 
 	acfstypes "go.getarcane.app/acfs/types"
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 )
 
 func normalizeMutationPathInternal(logicalPath string) (string, error) {
-	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
 		return "", err
 	}
@@ -45,10 +45,10 @@ func inspectMutationPathInternal(root *os.Root, relativePath string) (os.FileInf
 			return nil, err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("%w: %s", ErrSymlink, filesystem.LogicalPath(current))
+			return nil, fmt.Errorf("%w: %s", ErrSymlink, kitfs.LogicalPath(current))
 		}
 		if index < len(components)-1 && !info.IsDir() {
-			return nil, fmt.Errorf("%w: %s", ErrNotDirectory, filesystem.LogicalPath(current))
+			return nil, fmt.Errorf("%w: %s", ErrNotDirectory, kitfs.LogicalPath(current))
 		}
 		if index == len(components)-1 {
 			return info, nil
@@ -69,7 +69,7 @@ func ensureMutationParentInternal(root *os.Root, relativePath string, create boo
 		info, err := root.Lstat(current)
 		if errors.Is(err, fs.ErrNotExist) && create {
 			if err := root.Mkdir(current, applyDirectoryMode); err != nil && !errors.Is(err, fs.ErrExist) {
-				return "", fmt.Errorf("create parent %q: %w", filesystem.LogicalPath(current), err)
+				return "", fmt.Errorf("create parent %q: %w", kitfs.LogicalPath(current), err)
 			}
 			info, err = root.Lstat(current)
 		}
@@ -77,10 +77,10 @@ func ensureMutationParentInternal(root *os.Root, relativePath string, create boo
 			return "", err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("%w: %s", ErrSymlink, filesystem.LogicalPath(current))
+			return "", fmt.Errorf("%w: %s", ErrSymlink, kitfs.LogicalPath(current))
 		}
 		if !info.IsDir() {
-			return "", fmt.Errorf("%w: %s", ErrNotDirectory, filesystem.LogicalPath(current))
+			return "", fmt.Errorf("%w: %s", ErrNotDirectory, kitfs.LogicalPath(current))
 		}
 	}
 	return parent, nil

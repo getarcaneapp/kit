@@ -3,12 +3,12 @@ package acfs
 import (
 	"errors"
 
-	"go.getarcane.app/kit/pkg/utils/filesystem"
+	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
 var (
 	// ErrInvalidPath indicates that a logical workspace path is malformed.
-	ErrInvalidPath = filesystem.ErrInvalidPath
+	ErrInvalidPath = kitfs.ErrInvalidPath
 	// ErrOutsideRoot indicates that a path or symlink escapes the workspace root.
 	ErrOutsideRoot = errors.New("path escapes workspace root")
 	// ErrSymlinkLoop indicates that symlink resolution exceeded its safe limit.

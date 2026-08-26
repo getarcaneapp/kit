@@ -1,4 +1,4 @@
-package logcapture
+package capture
 
 import (
 	"sync"

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"go.getarcane.app/builds/types"
-	"go.getarcane.app/kit/pkg/utils/giturl"
+	"go.getarcane.app/kit/pkg/git"
 )
 
 type GitBuildContextSource struct {
@@ -23,7 +23,7 @@ func ParseGitBuildContextSource(raw string) (*GitBuildContextSource, bool, error
 
 	repositoryURL, fragment, hasFragment := strings.Cut(trimmed, "#")
 	repositoryURL = strings.TrimSpace(repositoryURL)
-	if !giturl.IsSupportedRepositoryURL(repositoryURL) {
+	if !git.IsSupportedRepositoryURL(repositoryURL) {
 		return nil, false, nil
 	}
 
@@ -74,7 +74,7 @@ func NormalizeGitBuildContextSourceForMatch(raw string) string {
 	if err != nil || !ok || source == nil {
 		return ""
 	}
-	return giturl.NormalizeForMatch(source.RepositoryURL)
+	return git.NormalizeForMatch(source.RepositoryURL)
 }
 
 func IsPotentialRemoteBuildContextSource(raw string) bool {
@@ -83,5 +83,5 @@ func IsPotentialRemoteBuildContextSource(raw string) bool {
 		return false
 	}
 
-	return giturl.IsSupportedRepositoryURL(trimmed)
+	return git.IsSupportedRepositoryURL(trimmed)
 }

@@ -1,7 +1,7 @@
-// Package giturl provides helpers for recognizing and normalizing Git
+// Package git provides helpers for recognizing and normalizing Git
 // repository URLs across the schemes Git supports (scp-like git@, git, ssh,
 // http, and https).
-package giturl
+package git
 
 import (
 	"net/url"

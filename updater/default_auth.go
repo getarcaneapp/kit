@@ -12,7 +12,7 @@ import (
 	dockerauthconfig "github.com/moby/moby/api/pkg/authconfig"
 	dockerregistry "github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
-	kitregistryhost "go.getarcane.app/kit/pkg/utils/registryhost"
+	kitregistry "go.getarcane.app/kit/pkg/registry"
 	"go.getarcane.app/updater/internal/registryhost"
 	updaterregistry "go.getarcane.app/updater/registry"
 )
@@ -65,7 +65,7 @@ func defaultDockerConfigRegistryAuthConfig(ctx context.Context, imageRef string)
 	if err != nil {
 		return dockerregistry.AuthConfig{}, false, fmt.Errorf("get registry address: %w", err)
 	}
-	if kitregistryhost.Normalize(server) == "docker.io" {
+	if kitregistry.Normalize(server) == "docker.io" {
 		server = "docker.io"
 	}
 
