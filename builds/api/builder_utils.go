@@ -1,0 +1,106 @@
+package api
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"go.getarcane.app/builds/types"
+	"go.getarcane.app/kit/pkg/utils/strutil"
+)
+
+func normalizeBuildRequestInternal(req types.BuildRequest, providerName string) types.BuildRequest {
+	if !req.Push && !req.Load {
+		if providerName == "depot" {
+			req.Push = true
+		} else {
+			req.Load = true
+		}
+	}
+	return req
+}
+
+func validateBuildRequestInternal(req types.BuildRequest, providerName string) error {
+	if strings.TrimSpace(req.ContextDir) == "" {
+		return &types.BuildContextDirRequiredError{}
+	}
+
+	contextDir := filepath.Clean(req.ContextDir)
+	if _, err := os.Stat(contextDir); err != nil {
+		return fmt.Errorf("build context not found: %w", err)
+	}
+
+	if strings.TrimSpace(req.Dockerfile) != "" && strings.TrimSpace(req.DockerfileInline) != "" {
+		return &types.DockerfileAndInlineMutuallyExclusiveError{}
+	}
+
+	if providerName == "depot" && !req.Push {
+		return &types.DepotBuildPushRequiredError{}
+	}
+
+	if unsupported := unsupportedBuildOptionsInternal(req, providerName); len(unsupported) > 0 {
+		return fmt.Errorf("unsupported build options for provider %s: %s", providerName, strings.Join(unsupported, ", "))
+	}
+
+	if len(req.Tags) == 0 && (req.Push || req.Load) {
+		return &types.BuildTagsRequiredError{}
+	}
+
+	dockerfilePath := strings.TrimSpace(req.Dockerfile)
+	if strings.TrimSpace(req.DockerfileInline) != "" {
+		return nil
+	}
+	if dockerfilePath == "" {
+		dockerfilePath = "Dockerfile"
+	}
+	fullDockerfilePath := dockerfilePath
+	if !filepath.IsAbs(dockerfilePath) {
+		fullDockerfilePath = filepath.Join(contextDir, dockerfilePath)
+	}
+	if _, err := os.Stat(fullDockerfilePath); err != nil {
+		return fmt.Errorf("dockerfile not found: %w", err)
+	}
+
+	return nil
+}
+
+func unsupportedBuildOptionsInternal(req types.BuildRequest, providerName string) []string {
+	unsupported := make([]string, 0, 5)
+
+	switch providerName {
+	case "local":
+		if strutil.HasNonEmpty(req.CacheTo) {
+			unsupported = append(unsupported, "cacheTo")
+		}
+		if strutil.HasNonEmpty(req.Entitlements) {
+			unsupported = append(unsupported, "entitlements")
+		}
+		if req.Privileged {
+			unsupported = append(unsupported, "privileged")
+		}
+		if strutil.CountNonEmpty(req.Platforms) > 1 {
+			unsupported = append(unsupported, "platforms")
+		}
+	case "depot":
+		if strings.TrimSpace(req.Network) != "" {
+			unsupported = append(unsupported, "network")
+		}
+		if strings.TrimSpace(req.Isolation) != "" {
+			unsupported = append(unsupported, "isolation")
+		}
+		if req.ShmSize > 0 {
+			unsupported = append(unsupported, "shmSize")
+		}
+		if len(req.Ulimits) > 0 {
+			unsupported = append(unsupported, "ulimits")
+		}
+		if strutil.HasNonEmpty(req.ExtraHosts) {
+			unsupported = append(unsupported, "extraHosts")
+		}
+	}
+
+	sort.Strings(unsupported)
+	return unsupported
+}

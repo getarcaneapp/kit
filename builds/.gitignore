@@ -2,12 +2,14 @@
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
 # Binaries for programs and plugins
-.DS_Store
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+
+.idea/
+inspections/
 
 # Test binary, built with `go test -c`
 *.test
@@ -21,15 +23,13 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# GoReleaser output
-dist/
+# Go workspace file
+go.work
+go.work.sum
 
 # env file
 .env
 
-# Local tool binaries (custom golangci-lint build)
-.bin/
-
 # Editor/IDE
-.idea/
-.vscode/
+# .idea/
+# .vscode/
