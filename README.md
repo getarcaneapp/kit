@@ -1,48 +1,45 @@
+<div align="center">
+
 # kit
 
-Shared Go packages for Arcane, plus independently versioned nested modules.
+Shared Go packages and nested modules for Arcane.
 
-## Layout
+<a href="https://pkg.go.dev/go.getarcane.app/kit"><img src="https://pkg.go.dev/badge/go.getarcane.app/kit.svg" alt="Go Reference"></a>
+<a href="https://github.com/getarcaneapp/kit/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License"></a>
 
-This repository hosts two Go modules:
+</div>
 
-| Path | Module | Purpose |
-| --- | --- | --- |
-| `.` | `go.getarcane.app/kit` | Shared leaf packages usable by any Arcane Go module. |
-| `acfs` | `go.getarcane.app/acfs` | Arcane Container File System library and CLI (see [acfs/README.md](acfs/README.md)). |
+The root module `go.getarcane.app/kit` holds small, focused leaf packages that
+any Arcane Go module can depend on, such as
+`go.getarcane.app/kit/pkg/utils/filesystem`. Larger projects live alongside it
+as independently versioned nested modules — [`acfs`](acfs/README.md) is
+`go.getarcane.app/acfs`, released with `acfs/vX.Y.Z` tags.
 
-## Rules
-
-- **Dependency direction.** Nested modules may depend on `go.getarcane.app/kit`. The root
-  module must never import a nested module.
-- **Shared packages are leaf packages.** Code moves into the root module only when it has a
-  concrete, module-independent contract (for example
-  `go.getarcane.app/kit/pkg/utils/filesystem`). No catch-all `utils` package, no speculative
-  helpers.
-- **Modules stay independently valid.** Each module builds, tests, and tags on its own.
-  Nested modules pin published `kit` versions in their `go.mod`; filesystem `replace`
-  directives are never committed.
+Nested modules may import kit, never the other way around, and shared code is
+only added to the root when it has a concrete contract that more than one
+module needs.
 
 ## Development
 
-`go ./...` commands do not cross nested module boundaries, so repository-wide tasks run per
-module through the root [Justfile](Justfile):
+The committed `go.work` ties the modules together, so nested modules always
+build against the checked-out kit packages. Because `./...` does not cross
+module boundaries, repository-wide tasks run per module through the root
+Justfile:
 
-```
-just format     # gofmt every module
-just vet        # go vet every module
-just lint       # custom golangci-lint over every module
-just test       # go test every module
-just test-race  # go test -race every module
-```
-
-The committed [go.work](go.work) makes nested modules build and test against the checked-out
-root packages, both locally and in CI. To verify a module standalone, exactly as consumers
-see it (requires the pinned `kit` version to be published), disable the workspace:
-
-```
-GOWORK=off go test ./...
+```sh
+just format
+just lint
+just vet
+just test
+just test-race
 ```
 
-Module-specific tasks (benchmarks, GoReleaser) live in each module's own Justfile, for
-example [acfs/Justfile](acfs/Justfile).
+Module-specific tasks such as ACFS benchmarks (`just benchmark-acfs`) and
+GoReleaser (`just release-check`, `just snapshot`) live there as well.
+Releases are cut per module with `just release acfs` or `just release kit`,
+which derive the version bump from conventional commits via git-cliff, update
+the module changelog, and push the `acfs/vX.Y.Z` or `vX.Y.Z` tag.
+
+## License
+
+kit is released under the BSD 3-Clause License.
