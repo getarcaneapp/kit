@@ -21,13 +21,19 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
+# The repository workspace (go.work) is committed so nested modules build
+# against the in-repo kit packages; only the local sum file is ignored.
 go.work.sum
+
+# GoReleaser output
+dist/
 
 # env file
 .env
 
+# Local tool binaries (custom golangci-lint build)
+.bin/
+
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/

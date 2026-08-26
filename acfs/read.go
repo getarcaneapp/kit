@@ -1,0 +1,196 @@
+package acfs
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"go.getarcane.app/kit/pkg/utils/filesystem"
+)
+
+type contextReadCloserInternal struct {
+	ctx    context.Context
+	reader io.Reader
+	closer io.Closer
+}
+
+func (r *contextReadCloserInternal) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(buffer)
+}
+
+func (r *contextReadCloserInternal) Close() error {
+	return r.closer.Close()
+}
+
+// OpenRead opens a file for a root-confined streaming read. The returned size
+// is the number of bytes available after applying maxBytes; a non-positive
+// limit reads the complete file.
+func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64) (io.ReadCloser, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return nil, 0, err
+	}
+
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	resolvedPath, err := resolvePathInternal(root, relativePath, true)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	info, err := root.Stat(resolvedPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("stat %q: %w", filesystem.LogicalPath(resolvedPath), err)
+	}
+	if info.IsDir() {
+		return nil, 0, ErrIsDirectory
+	}
+	if !info.Mode().IsRegular() {
+		return nil, 0, ErrNotFile
+	}
+
+	file, err := root.Open(resolvedPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open %q: %w", filesystem.LogicalPath(resolvedPath), err)
+	}
+	info, err = file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, 0, fmt.Errorf("stat %q: %w", filesystem.LogicalPath(resolvedPath), err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, 0, ErrNotFile
+	}
+
+	size := info.Size()
+	if maxBytes > 0 && maxBytes < size {
+		size = maxBytes
+	}
+	reader := io.LimitReader(file, size)
+
+	return &contextReadCloserInternal{ctx: ctx, reader: reader, closer: file}, size, nil
+}
+
+type contextReadSeekCloserInternal struct {
+	ctx  context.Context
+	file *os.File
+}
+
+func (r *contextReadSeekCloserInternal) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.file.Read(buffer)
+}
+
+func (r *contextReadSeekCloserInternal) Seek(offset int64, whence int) (int64, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.file.Seek(offset, whence)
+}
+
+func (r *contextReadSeekCloserInternal) Close() error {
+	return r.file.Close()
+}
+
+// OpenReadSeek opens a root-confined regular file for a seekable read of its
+// complete contents, following its final symbolic link. The returned size is
+// the file size at open time.
+func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSeekCloser, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	relativePath, err := filesystem.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return nil, 0, err
+	}
+
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	resolvedPath, err := resolvePathInternal(root, relativePath, true)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	file, err := root.Open(resolvedPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open %q: %w", filesystem.LogicalPath(resolvedPath), err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, 0, fmt.Errorf("stat %q: %w", filesystem.LogicalPath(resolvedPath), err)
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, 0, ErrIsDirectory
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, 0, ErrNotFile
+	}
+
+	return &contextReadSeekCloserInternal{ctx: ctx, file: file}, info.Size(), nil
+}
+
+// ReadFile returns the complete contents of a root-confined regular file,
+// following its final symbolic link.
+func ReadFile(ctx context.Context, rootPath, logicalPath string) ([]byte, error) {
+	reader, size, err := OpenRead(ctx, rootPath, logicalPath, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+
+	buffer := bytes.NewBuffer(make([]byte, 0, size))
+	if _, err := io.Copy(buffer, reader); err != nil {
+		return nil, fmt.Errorf("read %q: %w", logicalPath, err)
+	}
+	return buffer.Bytes(), nil
+}
+
+// ReadTo streams a root-confined file into destination. A non-positive limit
+// reads the complete file.
+func ReadTo(ctx context.Context, rootPath, logicalPath string, destination io.Writer, maxBytes int64) (int64, error) {
+	if destination == nil {
+		return 0, errors.New("destination writer is required")
+	}
+	reader, _, err := OpenRead(ctx, rootPath, logicalPath, maxBytes)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = reader.Close() }()
+
+	written, err := io.Copy(destination, reader)
+	if err != nil {
+		return written, fmt.Errorf("read %q: %w", logicalPath, err)
+	}
+	return written, nil
+}
