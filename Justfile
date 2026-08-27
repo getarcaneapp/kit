@@ -225,6 +225,7 @@ release module *args:
 
     # Generate changelog
     echo "Generating changelog..."
+    touch "$CHANGELOG_FILE"
     git cliff $CLIFF_VERBOSE "${CLIFF_ARGS[@]}" --prepend "$CHANGELOG_FILE"
     git add "$CHANGELOG_FILE"
 
