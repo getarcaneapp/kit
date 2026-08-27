@@ -10,3 +10,5 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 )
+
+retract v0.4.1 // published without agg/hub.go; breaks consumers of agg.Hub
