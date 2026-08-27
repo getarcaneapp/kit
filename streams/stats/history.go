@@ -242,12 +242,14 @@ func calculateMemoryPercentInternal(stats dockercontainer.StatsResponse) float64
 
 func calculateMemoryUsageInternal(stats dockercontainer.StatsResponse) uint64 {
 	usage := stats.MemoryStats.Usage
-	inactiveFile := stats.MemoryStats.Stats["inactive_file"]
-	if usage <= inactiveFile {
-		return 0
+	if totalInactiveFile, ok := stats.MemoryStats.Stats["total_inactive_file"]; ok && totalInactiveFile < usage {
+		return usage - totalInactiveFile
+	}
+	if inactiveFile, ok := stats.MemoryStats.Stats["inactive_file"]; ok && inactiveFile < usage {
+		return usage - inactiveFile
 	}
 
-	return usage - inactiveFile
+	return usage
 }
 
 func percentToTenthsInternal(value float64) uint16 {
