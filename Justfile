@@ -80,6 +80,7 @@ release module *args:
     set -euo pipefail
 
     TEST=false
+    YES=false
     FORCE_BUMP=""
     VERBOSE=false
     EXPLICIT_VERSION=""
@@ -88,6 +89,9 @@ release module *args:
         case "$arg" in
         --test)
             TEST=true
+            ;;
+        --yes)
+            YES=true
             ;;
         --patch|--minor|--major)
             if [ -n "$FORCE_BUMP" ]; then
@@ -129,7 +133,7 @@ release module *args:
                 module="kit"
             fi
             echo "Releasing $module..."
-            just release "$module" "$@"
+            just release "$module" --yes "$@"
         done
         exit 0
     fi
@@ -237,7 +241,7 @@ release module *args:
 
     if [ "$TEST" == true ]; then
         echo "Test mode enabled: no files will be modified, no commits/tags/pushes/releases will be created."
-    else
+    elif [ "$YES" != true ]; then
         # Confirm release creation
         read -p "This will create a new $RELEASE_TYPE release with tag $TAG. Do you want to proceed? (y/n) " CONFIRM
         if [[ "$CONFIRM" != "y" ]]; then
@@ -256,7 +260,7 @@ release module *args:
         echo "----- END CHANGELOG PREVIEW -----"
         echo "Would commit: release({{ module }}): $NEW_VERSION"
         echo "Would tag and push: $TAG"
-        echo "Would create GitHub draft release $TAG"
+        echo "Would publish GitHub release $TAG"
         echo "Test mode complete. No changes were written."
         exit 0
     fi
@@ -285,8 +289,8 @@ release module *args:
         exit 1
     fi
 
-    # Create the draft release on GitHub
-    echo "Creating GitHub draft release..."
-    gh release create "$TAG" --title "$TAG" --notes "$CHANGELOG" --draft
+    # Publish the release on GitHub
+    echo "Publishing GitHub release..."
+    gh release create "$TAG" --title "$TAG" --notes "$CHANGELOG"
 
     echo "Release process complete. New version: $NEW_VERSION"
