@@ -21,11 +21,11 @@ total_inactive_file 786432
 	require.NoError(t, os.WriteFile(path, []byte(memoryStat), 0o600))
 
 	// Exact key match: inactive_file must not be shadowed by total_inactive_file.
-	value, err := readMemoryStatValue(path, "inactive_file")
+	value, err := readMemoryStatValueInternal(path, "inactive_file")
 	require.NoError(t, err)
 	require.Equal(t, int64(524288), value)
 
-	value, err = readMemoryStatValue(path, "total_inactive_file")
+	value, err = readMemoryStatValueInternal(path, "total_inactive_file")
 	require.NoError(t, err)
 	require.Equal(t, int64(786432), value)
 }
@@ -34,7 +34,7 @@ func TestReadMemoryStatValue_MissingKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memory.stat")
 	require.NoError(t, os.WriteFile(path, []byte("anon 1048576\n"), 0o600))
 
-	_, err := readMemoryStatValue(path, "inactive_file")
+	_, err := readMemoryStatValueInternal(path, "inactive_file")
 	require.Error(t, err)
 }
 

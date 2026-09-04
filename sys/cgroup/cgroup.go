@@ -115,7 +115,7 @@ func detectCgroupV2Limits(limits *Limits) (*Limits, error) {
 	if memUsage, err := readCgroupV2Int64("/sys/fs/cgroup/memory.current"); err == nil {
 		// memory.current includes reclaimable page cache; subtract inactive_file
 		// to match what `docker stats` reports as usage.
-		if inactiveFile, err := readMemoryStatValue("/sys/fs/cgroup/memory.stat", "inactive_file"); err == nil {
+		if inactiveFile, err := readMemoryStatValueInternal("/sys/fs/cgroup/memory.stat", "inactive_file"); err == nil {
 			memUsage = max(memUsage-inactiveFile, 0)
 		}
 		limits.MemoryUsage = memUsage
@@ -160,7 +160,7 @@ func detectCgroupV1Limits(limits *Limits) (*Limits, error) {
 		// memory.usage_in_bytes includes reclaimable page cache; subtract
 		// total_inactive_file (from memory.stat) to match `docker stats`.
 		memoryStatPath := filepath.Join("/sys/fs/cgroup/memory", cgroupPath, "memory.stat")
-		if inactiveFile, err := readMemoryStatValue(memoryStatPath, "total_inactive_file"); err == nil {
+		if inactiveFile, err := readMemoryStatValueInternal(memoryStatPath, "total_inactive_file"); err == nil {
 			memUsage = max(memUsage-inactiveFile, 0)
 		}
 		limits.MemoryUsage = memUsage
@@ -220,9 +220,9 @@ func readCgroupV1Int64(path string) (int64, error) {
 	return value, nil
 }
 
-// readMemoryStatValue reads a single "key value" line from a cgroup memory.stat
+// readMemoryStatValueInternal reads a single "key value" line from a cgroup memory.stat
 // file and returns the value for the given key.
-func readMemoryStatValue(path, key string) (int64, error) {
+func readMemoryStatValueInternal(path, key string) (int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -232,8 +232,11 @@ func readMemoryStatValue(path, key string) (int64, error) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 || fields[0] != key {
+		if len(fields) == 0 || fields[0] != key {
 			continue
+		}
+		if len(fields) != 2 {
+			return 0, fmt.Errorf("invalid %q entry in %s", key, path)
 		}
 		return strconv.ParseInt(fields[1], 10, 64)
 	}
