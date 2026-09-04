@@ -1,3 +1,13 @@
+## sys/cgroup/v0.2.3
+
+### Bug fixes
+
+* add missing dependency([5a4c59c](https://github.com/getarcaneapp/kit/commit/5a4c59cac1b786b8d1aaccdb565cb68b5334ce38) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.2.2...sys/cgroup/v0.2.3
+
 ## sys/cgroup/v0.2.2
 
 ### Bug fixes
