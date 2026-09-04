@@ -64,7 +64,7 @@ snapshot:
 
 # Create a new release for a module (use --test to dry-run without writing anything).
 # The bump is derived from conventional commits since the module's latest tag:
-# feat -> minor, fix -> patch, --major forces a major release. An explicit
+# feat -> minor, fix -> patch; --patch, --minor, or --major forces a bump. An explicit
 # version skips the bump detection, e.g. when a module moved in already tagged.
 # Nested modules tag as <module>/vX.Y.Z, the root kit module as vX.Y.Z.
 #
@@ -72,13 +72,15 @@ snapshot:
 #   just release acfs
 #   just release acfs 1.2.3
 #   just release kit --test --verbose
+#   just release all --patch --test
+#   just release all --minor
 [group('release')]
 release module *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
     TEST=false
-    FORCE_MAJOR=false
+    FORCE_BUMP=""
     VERBOSE=false
     EXPLICIT_VERSION=""
     set -- {{ args }}
@@ -87,13 +89,21 @@ release module *args:
         --test)
             TEST=true
             ;;
-        --major)
-            FORCE_MAJOR=true
+        --patch|--minor|--major)
+            if [ -n "$FORCE_BUMP" ]; then
+                echo "Specify only one bump flag." >&2
+                exit 1
+            fi
+            FORCE_BUMP="${arg#--}"
             ;;
         --verbose)
             VERBOSE=true
             ;;
         [0-9]*.[0-9]*.[0-9]*|v[0-9]*.[0-9]*.[0-9]*)
+            if [ -n "$EXPLICIT_VERSION" ]; then
+                echo "Specify only one explicit version." >&2
+                exit 1
+            fi
             EXPLICIT_VERSION="${arg#v}"
             ;;
         *)
@@ -102,6 +112,27 @@ release module *args:
             ;;
         esac
     done
+
+    if [ -n "$EXPLICIT_VERSION" ] && [ -n "$FORCE_BUMP" ]; then
+        echo "An explicit version cannot be combined with a bump flag." >&2
+        exit 1
+    fi
+
+    if [ "{{ module }}" == "all" ]; then
+        if [ -n "$EXPLICIT_VERSION" ]; then
+            echo "Use a bump flag with all; explicit versions are only supported for a single module." >&2
+            exit 1
+        fi
+        for module in {{ modules }}; do
+            module="${module#./}"
+            if [ "$module" == "." ]; then
+                module="kit"
+            fi
+            echo "Releasing $module..."
+            just release "$module" "$@"
+        done
+        exit 0
+    fi
 
     CLIFF_VERBOSE=""
     if [ "$VERBOSE" == true ]; then
@@ -119,8 +150,15 @@ release module *args:
             PREFIX="v"
             TAG_PATTERN="^v[0-9]"
             CHANGELOG_FILE="CHANGELOG.md"
-            CLIFF_PATH_ARGS=(--exclude-path "acfs/**")
-            PATHSPEC=(-- . ':(exclude)acfs')
+            CLIFF_PATH_ARGS=()
+            PATHSPEC=(-- .)
+            for module in {{ modules }}; do
+                if [ "$module" != "." ]; then
+                    module="${module#./}"
+                    CLIFF_PATH_ARGS+=(--exclude-path "$module/**")
+                    PATHSPEC+=(":(exclude)$module")
+                fi
+            done
             ;;
         *)
             if [ ! -f "{{ module }}/go.mod" ]; then
@@ -160,8 +198,8 @@ release module *args:
     # Determine the release type
     if [ -n "$EXPLICIT_VERSION" ]; then
         RELEASE_TYPE="explicit"
-    elif [ "$FORCE_MAJOR" == true ]; then
-        RELEASE_TYPE="major"
+    elif [ -n "$FORCE_BUMP" ]; then
+        RELEASE_TYPE="$FORCE_BUMP"
     elif [ -z "$LATEST_TAG" ]; then
         RELEASE_TYPE="minor"
     else

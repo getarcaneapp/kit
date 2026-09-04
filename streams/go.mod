@@ -2,7 +2,7 @@ module go.getarcane.app/streams
 
 go 1.27
 
-require github.com/moby/moby/api v1.55.0
+require github.com/moby/moby/api v1.56.0
 
 require (
 	github.com/docker/go-units v0.5.0 // indirect
