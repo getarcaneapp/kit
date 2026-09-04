@@ -1,3 +1,13 @@
+## streams/v0.4.3
+
+### Bug fixes
+
+* bump deps([652777f](https://github.com/getarcaneapp/kit/commit/652777f47422cf07e595f5169e8479e63ce7d5bd) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/streams/v0.4.2...streams/v0.4.3
+
 ## streams/v0.4.2
 
 ### Bug fixes
