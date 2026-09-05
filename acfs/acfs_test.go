@@ -178,6 +178,27 @@ func TestReadToResolvesOnlyInternalSymlinks(t *testing.T) {
 	if _, _, err := OpenRead(context.Background(), root, "/fifo", 0); !errors.Is(err, ErrNotFile) {
 		t.Fatalf("OpenRead(fifo) error = %v, want ErrNotFile", err)
 	}
+	externalTarget := filepath.Join(t.TempDir(), "external.env")
+	writeFixtureFile(t, externalTarget, "ENV=value", 0o600)
+	if err := os.Symlink(externalTarget, filepath.Join(root, "env")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Stat(t.Context(), root, "/env", true); !errors.Is(err, ErrOutsideRoot) {
+		t.Fatalf("Stat external env = %v, want ErrOutsideRoot", err)
+	}
+	volumeRoot := filepath.VolumeName(root) + string(filepath.Separator)
+	logicalEnv, err := LogicalPath(volumeRoot, filepath.Join(root, "env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedEnv, err := Stat(t.Context(), volumeRoot, logicalEnv, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEnv, err := filepath.EvalSymlinks(externalTarget)
+	if err != nil || filepath.Join(volumeRoot, filepath.FromSlash(resolvedEnv.Path)) != wantEnv {
+		t.Fatalf("Stat filesystem root path = %q, want %q (%v)", resolvedEnv.Path, wantEnv, err)
+	}
 }
 
 func TestWalkIsDeterministicAndDoesNotFollowSymlinks(t *testing.T) {
@@ -326,6 +347,13 @@ func TestWriteFromIsExactAndAtomic(t *testing.T) {
 	if info.Mode().Perm() != 0o640 {
 		t.Errorf("mode = %o, want 640", info.Mode().Perm())
 	}
+	if err := Write(t.Context(), root, "/destination", []byte("replacement"), WriteOptions{Mode: 0o640}); err != nil {
+		t.Fatalf("atomic Write: %v", err)
+	}
+	replaced, err := os.Stat(destination)
+	if err != nil || os.SameFile(info, replaced) {
+		t.Fatalf("atomic Write did not replace inode: %v", err)
+	}
 
 	for name, reader := range map[string]io.Reader{
 		"short":       strings.NewReader("tiny"),
@@ -383,6 +411,63 @@ func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
 	}
 	if err := WriteAt(ctx, root, "/chunks", -1, nil); !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("WriteAt with negative offset error = %v, want ErrInvalidPath", err)
+	}
+	before, err := os.Stat(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(ctx, root, "/chunks", []byte("short"), WriteOptions{Mode: 0o640, InPlace: true}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err = os.ReadFile(destination)
+	if err != nil || string(contents) != "short" || !os.SameFile(before, after) || after.Mode().Perm() != 0o640 {
+		t.Fatalf("in-place Write failed inode, contents, or mode preservation: contents=%q, err=%v", contents, err)
+	}
+	if err := os.Chmod(destination, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(ctx, root, "/chunks", []byte("short"), WriteOptions{Mode: 0o400, InPlace: true}); err != nil {
+		t.Fatalf("identical read-only file: %v", err)
+	}
+	if err := Write(ctx, root, "/created", []byte("new"), WriteOptions{Mode: 0o750, InPlace: true}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := os.Stat(filepath.Join(root, "created"))
+	if err != nil || created.Mode().Perm() != 0o750 {
+		t.Fatalf("created file mode = %v, err=%v", created, err)
+	}
+	if err := os.Symlink("chunks", filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(ctx, root, "/link", []byte("changed"), WriteOptions{Mode: 0o600, InPlace: true}); !errors.Is(err, ErrSymlink) {
+		t.Fatalf("in-place Write symlink = %v, want ErrSymlink", err)
+	}
+	contents, err = os.ReadFile(destination)
+	if err != nil || string(contents) != "short" {
+		t.Fatalf("symlink target changed: %q, %v", contents, err)
+	}
+	if err := Write(ctx, root, "/.acfs-write-reserved", nil, WriteOptions{Mode: 0o600, InPlace: true}); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("in-place Write reserved path = %v, want ErrInvalidPath", err)
+	}
+	cancelCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := Write(cancelCtx, root, "/created", []byte("cancelled"), WriteOptions{Mode: 0o600, InPlace: true}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("in-place Write cancelled = %v, want context.Canceled", err)
+	}
+	if err := Write(ctx, root, "/link", []byte("regular replacement"), WriteOptions{Mode: 0o600}); err != nil {
+		t.Fatalf("atomic Write should replace final symlink: %v", err)
+	}
+	linkInfo, err := os.Lstat(filepath.Join(root, "link"))
+	if err != nil || !linkInfo.Mode().IsRegular() {
+		t.Fatalf("atomic Write destination is not regular: %v", err)
+	}
+	contents, err = os.ReadFile(destination)
+	if err != nil || string(contents) != "short" {
+		t.Fatalf("atomic Write changed symlink target: %q, %v", contents, err)
 	}
 }
 

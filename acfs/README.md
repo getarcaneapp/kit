@@ -38,14 +38,24 @@ err = acfs.Walk(ctx, root, "/logs", func(entry types.Entry) error {
 ```
 
 The root package also provides `WalkBounded`, `Stat`, `Exists`, `ReadFile`,
-`ReadTo`, `WriteFile`, `WriteFrom`, `Mkdir`, `MkdirAll`, `MkdirTemp`, `Rename`,
+`ReadTo`, `Write`, `WriteFrom`, `Mkdir`, `MkdirAll`, `MkdirTemp`, `Rename`,
 `Remove`, `RemoveAll`, `CopyDir`, `MirrorDir`, `LogicalPath`, and ordered batch
 `Apply`. Public filesystem and protocol DTOs live in `types`.
 
 Subpackage `acfs/atomic` provides a crash-safe `WriteFile` for the rare
 destination that has no natural workspace root, such as a user-specified output
-file. Unlike `acfs.WriteFile` it refuses a symlinked destination rather than
+file. Unlike the default `acfs.Write` it refuses a symlinked destination rather than
 replacing it.
+
+Use typed options to choose how a byte-slice write replaces a file:
+
+```go
+err = acfs.Write(ctx, root, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644})
+err = acfs.Write(ctx, root, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644, InPlace: true})
+```
+
+Writes are atomic by default. `InPlace` preserves existing file inodes for bind
+mounts and refuses final symlinks; callers must handle partial writes on failure.
 
 ## CLI
 

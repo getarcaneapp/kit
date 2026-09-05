@@ -1,6 +1,6 @@
 // Package atomic provides crash-safe atomic file writes at an absolute path.
 //
-// It is the unrooted counterpart to the root package: acfs.WriteFile confines
+// It is the unrooted counterpart to the root package: acfs.Write confines
 // every write to a workspace root and replaces a symlinked destination, while
 // atomic.WriteFile takes any absolute path and refuses a symlinked destination.
 // The two symlink policies live in separate namespaces on purpose — reach for

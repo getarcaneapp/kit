@@ -17,6 +17,14 @@ import (
 
 const temporaryWritePrefix = ".acfs-write-"
 
+// WriteOptions configures the permissions and replacement behavior of a write.
+type WriteOptions struct {
+	Mode os.FileMode
+	// InPlace preserves existing regular-file inodes and refuses final symlinks.
+	// The default uses an atomic replacement; in-place writes can be partial on failure.
+	InPlace bool
+}
+
 const chmodModeMask = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
 
 func rejectReservedPathInternal(relativePath string) error {
@@ -100,17 +108,110 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 	return writeFromRootInternal(ctx, root, logicalPath, targetPath, source, expectedSize, mode)
 }
 
-// WriteFile atomically writes data to a root-confined file, creating it when
-// absent. Like WriteFrom, the write lands on a temporary file in the target's
-// directory that is renamed into place, so a reader never observes a partial
-// file and a failure leaves the previous contents intact.
-//
-// A final component that is a symbolic link is replaced by the new regular
-// file rather than written through. Callers that must honour an existing
-// symlink resolve it themselves first.
-func WriteFile(ctx context.Context, rootPath, logicalPath string, data []byte, mode os.FileMode) error {
-	_, err := WriteFrom(ctx, rootPath, logicalPath, bytes.NewReader(data), int64(len(data)), mode)
+// Write writes data to a root-confined file, creating it when absent. By default
+// it atomically replaces the destination, including a final symbolic link.
+// With InPlace enabled it preserves regular-file inodes, leaves identical files
+// untouched, and refuses final symlinks. In-place writes are not atomic; callers
+// coordinate writers and provide recovery if partial writes must be rolled back.
+func Write(ctx context.Context, rootPath, logicalPath string, data []byte, options WriteOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if options.Mode&^chmodModeMask != 0 {
+		return fmt.Errorf("invalid file mode %v", options.Mode)
+	}
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return err
+	}
+	if err := rejectReservedPathInternal(relativePath); err != nil {
+		return err
+	}
+	if relativePath == "." {
+		return ErrIsDirectory
+	}
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	parent, base, err := resolveParentInternal(root, relativePath)
+	if err != nil {
+		return err
+	}
+	targetPath := path.Join(parent, base)
+	if err := rejectReservedPathInternal(targetPath); err != nil {
+		return err
+	}
+	if options.InPlace {
+		return writeFileInPlaceInternal(ctx, root, targetPath, data, options.Mode)
+	}
+	_, err = writeFromRootInternal(ctx, root, logicalPath, targetPath, bytes.NewReader(data), int64(len(data)), options.Mode)
 	return err
+}
+
+func writeFileInPlaceInternal(ctx context.Context, root *os.Root, targetPath string, data []byte, mode os.FileMode) (retErr error) {
+	info, err := root.Lstat(targetPath)
+	flags := os.O_WRONLY
+	identical := false
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		flags |= os.O_CREATE | os.O_EXCL
+	case err != nil:
+		return fmt.Errorf("inspect %q: %w", kitfs.LogicalPath(targetPath), err)
+	case info.Mode()&os.ModeSymlink != 0:
+		return ErrSymlink
+	case info.IsDir():
+		return ErrIsDirectory
+	case !info.Mode().IsRegular():
+		return ErrNotFile
+	default:
+		existing, err := root.ReadFile(targetPath)
+		if err != nil {
+			return fmt.Errorf("read %q: %w", kitfs.LogicalPath(targetPath), err)
+		}
+		identical = bytes.Equal(existing, data)
+		if identical && info.Mode()&chmodModeMask == mode {
+			return ctx.Err()
+		}
+	}
+
+	file, err := root.OpenFile(targetPath, flags, mode)
+	if err != nil {
+		return fmt.Errorf("open %q: %w", kitfs.LogicalPath(targetPath), err)
+	}
+	defer func() { retErr = errors.Join(retErr, file.Close()) }()
+	opened, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat opened file: %w", err)
+	}
+	live, err := root.Lstat(targetPath)
+	if err != nil {
+		return fmt.Errorf("stat destination: %w", err)
+	}
+	if live.Mode()&os.ModeSymlink != 0 {
+		return ErrSymlink
+	}
+	if !opened.Mode().IsRegular() || !live.Mode().IsRegular() || !os.SameFile(opened, live) || (info != nil && !os.SameFile(info, opened)) {
+		return fmt.Errorf("%w: destination changed before writing", ErrNotFile)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !identical {
+		if err := file.Truncate(0); err != nil {
+			return fmt.Errorf("truncate %q: %w", kitfs.LogicalPath(targetPath), err)
+		}
+		if _, err := file.Write(data); err != nil {
+			return fmt.Errorf("write %q: %w", kitfs.LogicalPath(targetPath), err)
+		}
+	}
+	if !identical || opened.Mode()&chmodModeMask != mode {
+		if err := file.Chmod(mode); err != nil {
+			return fmt.Errorf("chmod %q: %w", kitfs.LogicalPath(targetPath), err)
+		}
+	}
+	return nil
 }
 
 // WriteAt writes data to an existing root-confined regular file at the given

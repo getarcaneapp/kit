@@ -101,8 +101,15 @@ func resolvePathInternal(root *os.Root, relativePath string, followFinal bool) (
 			return "", fmt.Errorf("readlink %q: %w", kitfs.LogicalPath(candidate), err)
 		}
 
-		if strings.HasPrefix(target, "/") {
+		if filepath.IsAbs(target) {
 			switch {
+			case filepath.Clean(root.Name()) == filepath.VolumeName(root.Name())+string(filepath.Separator):
+				// An explicitly filesystem-wide root can resolve host-absolute links.
+				relativeTarget, err := filepath.Rel(root.Name(), target)
+				if err != nil {
+					return "", fmt.Errorf("%w: symlink %q targets %q", ErrOutsideRoot, kitfs.LogicalPath(candidate), target)
+				}
+				target = filepath.ToSlash(relativeTarget)
 			case target == logicalVolumeRoot:
 				target = ""
 			case strings.HasPrefix(target, logicalVolumeRoot+"/"):

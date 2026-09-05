@@ -22,11 +22,11 @@
 //
 // # Writes
 //
-// Writes are atomic by default: WriteFile and WriteFrom stage the content in a
+// Writes are atomic by default: Write and WriteFrom stage the content in a
 // temporary file inside the target's directory and rename it into place, so a
-// reader never observes a torn file. The one exception is MirrorDir, which
-// rewrites destination files in place to preserve their inodes for live bind
-// mounts; its documentation explains why.
+// reader never observes a torn file. Write with WriteOptions.InPlace and
+// MirrorDir rewrite destination files in place to preserve their inodes for
+// live bind mounts. In-place writes can leave partial contents on failure.
 //
 // Temporary files created during a write use the reserved ".acfs-write-"
 // name prefix. Paths containing a component with that prefix are rejected, and

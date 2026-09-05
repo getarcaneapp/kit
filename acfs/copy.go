@@ -170,7 +170,7 @@ func (w *copyWalkerInternal) copyRegularFileInternal(relativePath string, entry 
 // differs, are removed first, then the source is copied over the result.
 //
 // The copy phase deliberately truncates and rewrites existing destination files
-// instead of using the atomic temp-then-rename of WriteFile: rename would
+// instead of using the default atomic temp-then-rename of Write: rename would
 // replace the inode, and a mirror runs against live project directories whose
 // files may be bind-mounted into running containers. Preserving inodes is the
 // point — do not "fix" this to be atomic. A destination file whose content
