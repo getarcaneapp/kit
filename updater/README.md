@@ -17,9 +17,6 @@ It works out of the box against the local Docker environment. Persistence, notif
 > [!IMPORTANT]
 > This module is in early development. The API is not stable and may change without notice.
 
-> [!NOTE]
-> This module uses the experimental `encoding/json/v2` package. Build and test with `GOEXPERIMENT=jsonv2` set.
-
 ## Install
 
 ```sh

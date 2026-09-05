@@ -68,8 +68,7 @@ func TestHubSharesRunnerAcrossSubscribersAndReplaysLast(t *testing.T) {
 
 	// With every subscriber gone the runner was stopped; the next subscriber
 	// starts a fresh one.
-	ctx3, cancel3 := context.WithCancel(context.Background())
-	defer cancel3()
+	ctx3 := t.Context()
 	events3 := make(chan int, 4)
 	go hub.Subscribe(ctx3, "env-1", runner, func(v int) bool {
 		events3 <- v

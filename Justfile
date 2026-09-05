@@ -34,6 +34,15 @@ lint: _build-golangci-lint
         (cd "$module" && "$root/.bin/golangci-lint-custom" run -c "$root/.github/.golangci.yml" ./...)
     done
 
+[group('quality')]
+fix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for module in {{ modules }}; do
+        (cd "$module" && go fix ./...)
+    done
+
+
 [group('test')]
 test:
     #!/usr/bin/env bash
