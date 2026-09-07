@@ -3,7 +3,8 @@ package types
 
 import "context"
 
-// Policy controls selection of newer registry tags. The zero policy uses digests.
+// Policy controls image updates. The zero policy infers tag updates for stable
+// complete semantic versions and digest updates for moving or ambiguous tags.
 type Policy struct {
 	Strategy   string `json:"strategy,omitempty"`
 	Constraint string `json:"constraint,omitempty"`

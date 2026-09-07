@@ -70,16 +70,12 @@ func (s *Service) selectImageTagInternal(ctx context.Context, imageRef string, p
 		return result, err
 	}
 	result.CurrentRef, result.TargetRef = parsed.NormalizedRef, parsed.NormalizedRef
-	switch policy.Strategy {
-	case "", "digest":
-		return result, nil
-	case "tag":
-	default:
-		return result, fmt.Errorf("unknown update strategy %q", policy.Strategy)
-	}
-	// Validate before any registry request, including when a registry is empty.
-	if _, err = tagpolicy.Select(parsed.Tag, nil, policy); err != nil {
+	policy, err = tagpolicy.Resolve(imageRef, policy)
+	if err != nil {
 		return result, err
+	}
+	if policy.Strategy == "digest" {
+		return result, nil
 	}
 	if s.config.RegistryTagLister == nil {
 		return result, errors.New("registry tag lister unavailable")

@@ -93,7 +93,7 @@ service, err := updater.New(updater.Config{
 
 1. Resolve a pullable image reference for each in-scope container, skipping image IDs and digest-pinned references — re-pulling those can never yield a newer image.
 2. Skip containers the `LabelPolicy` disables, containers the host excludes via `SettingsProvider`, and Swarm tasks.
-3. Check the registry digest, so an image that has not actually changed is not needlessly recreated (`Options{Force: true}` bypasses this).
+3. Select a newer eligible version tag, or compare the configured tag's digest. `Options{Force: true}` bypasses unchanged-image checks while preserving the selection policy.
 4. Pull the target image.
 5. Recreate the container — through the `ProjectUpdater` for Compose services (grouped by project, then verified to no longer run the old image), or by a direct stop/create/start with rollback for standalone containers.
 6. Restart containers that depend on what just changed, in dependency order.
@@ -153,7 +153,12 @@ just lint
 
 ## Tag-based updates
 
-Tag discovery is opt-in. Add labels to the container or Compose service:
+The default `auto` strategy discovers newer tags for stable, complete semantic
+versions such as `3.1.2` and `v3.1.2`. Moving tags (`latest`), partial versions
+(`3` or `3.1`), and ambiguous prerelease or variant tags keep using digest checks.
+Set `strategy: digest` to keep a specific version tag and follow only its digest.
+
+Add a constraint or pattern to control selection for a container or Compose service:
 
 ```yaml
 services:
@@ -165,8 +170,10 @@ services:
       com.getarcaneapp.arcane.updater.tag-pattern: '(?P<version>\d+\.\d+\.\d+)-alpine'
 ```
 
-Without `strategy: tag`, updates keep using the configured tag's digest. Without
-an explicit constraint, tag updates stay within the current major, or the current
+An omitted strategy is equivalent to `strategy: auto`. A constraint or pattern
+with `auto` requests tag selection; invalid rules or an incompatible current tag
+return an error. Explicit `strategy: tag` always requires a valid tag policy.
+Without an explicit constraint, tag updates stay within the current major, or the current
 minor for `0.x`. An explicit constraint replaces that range. Version comparison
 uses complete semantic versions with an optional `v` prefix. Prereleases require
 an explicit constraint that admits them, such as `>=3.1.2-0 <4.0.0`.

@@ -400,3 +400,37 @@ func TestApplyPendingTargetedSatisfiedDependencyClearedInternal(t *testing.T) {
 		t.Fatalf("pending=%+v result=%+v", pending, result)
 	}
 }
+
+func TestApplyPendingAutomaticTagPolicyInternal(t *testing.T) {
+	for _, strategy := range []string{"", "auto", "digest"} {
+		t.Run(strategy, func(t *testing.T) {
+			cnt := newTargetedContainerInternal("one", "")
+			cnt.Config.Labels = map[string]string{}
+			if strategy != "" {
+				cnt.Config.Labels[labels.LabelUpdateStrategy] = strategy
+			}
+			fixture := &targetedDockerInternal{containers: []container.InspectResponse{cnt}, created: map[string]string{}}
+			dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
+			store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"))
+			puller := &fakePuller{}
+			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
+			result, err := service.ApplyPending(t.Context(), Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending, err := store.PendingImageUpdates(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strategy == "digest" {
+				if result.Failed == 0 || len(puller.pulled) != 0 || len(pending) != 1 || fixture.mutations != 0 {
+					t.Fatalf("digest override was not respected: %+v", result)
+				}
+				return
+			}
+			if result.Failed != 0 || len(puller.pulled) != 1 || len(pending) != 0 || fixture.created["one"] != "docker.io/library/app:1.2.0" {
+				t.Fatalf("automatic update failed: result %+v, created %v, pending %v", result, fixture.created, pending)
+			}
+		})
+	}
+}

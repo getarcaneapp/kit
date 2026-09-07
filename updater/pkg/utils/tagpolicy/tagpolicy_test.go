@@ -73,3 +73,58 @@ func TestVersion(t *testing.T) {
 		t.Fatal("expected incomplete version error")
 	}
 }
+
+func TestResolveAutomaticStrategy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, ref string
+		policy    types.Policy
+		want      string
+		wantError bool
+	}{
+		{name: "stable", ref: "app:1.2.3", want: "tag"},
+		{name: "zero major", ref: "app:0.2.3", want: "tag"},
+		{name: "v prefix", ref: "app:v1.2.3", want: "tag"},
+		{name: "explicit auto", ref: "app:1.2.3", policy: types.Policy{Strategy: "auto"}, want: "tag"},
+		{name: "latest", ref: "app:latest", want: "digest"},
+		{name: "implicit latest", ref: "app", want: "digest"},
+		{name: "major channel", ref: "app:3", want: "digest"},
+		{name: "minor channel", ref: "app:3.1", want: "digest"},
+		{name: "variant", ref: "app:3.1.2-alpine", want: "digest"},
+		{name: "prerelease", ref: "app:3.1.2-rc.1", want: "digest"},
+		{name: "digest override", ref: "app:3.1.2", policy: types.Policy{Strategy: "digest"}, want: "digest"},
+		{name: "tag override", ref: "app:3.1.2", policy: types.Policy{Strategy: "tag"}, want: "tag"},
+		{name: "constraint opts in", ref: "app:3.1.2-rc.1", policy: types.Policy{Constraint: ">=3.1.2-0 <4"}, want: "tag"},
+		{name: "pattern opts in", ref: "app:3.1.2-alpine", policy: types.Policy{TagPattern: `(?P<version>\d+\.\d+\.\d+)-alpine`}, want: "tag"},
+		{name: "invalid constraint", ref: "app:3.1.2", policy: types.Policy{Constraint: "invalid"}, wantError: true},
+		{name: "invalid pattern", ref: "app:latest", policy: types.Policy{TagPattern: "["}, wantError: true},
+		{name: "pattern mismatch", ref: "app:3.1.2", policy: types.Policy{TagPattern: `(?P<version>.*)-alpine`}, wantError: true},
+		{name: "constraint on moving tag", ref: "app:latest", policy: types.Policy{Constraint: "3.x"}, wantError: true},
+		{name: "explicit invalid tag", ref: "app:latest", policy: types.Policy{Strategy: "tag"}, wantError: true},
+		{name: "unknown strategy", ref: "app:3.1.2", policy: types.Policy{Strategy: "other"}, wantError: true},
+		{name: "invalid reference", ref: "not an image", wantError: true},
+		{name: "pinned", ref: "app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", policy: types.Policy{Strategy: "tag"}, want: "digest"},
+		{name: "image id", ref: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", want: "digest"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := tagpolicy.Resolve(tt.ref, tt.policy)
+			if tt.wantError {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Strategy != tt.want {
+				t.Fatalf("strategy = %q, want %q", got.Strategy, tt.want)
+			}
+			if got.Constraint != tt.policy.Constraint || got.TagPattern != tt.policy.TagPattern {
+				t.Fatal("selection rules changed")
+			}
+		})
+	}
+}

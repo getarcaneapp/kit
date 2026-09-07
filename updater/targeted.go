@@ -94,14 +94,13 @@ func (s *Service) targetRecordPlanInternal(ctx context.Context, cnt container.Su
 		if parseErr != nil {
 			return nil, parseErr
 		}
-		policy := s.config.LabelPolicy.TagPolicy(inspect.Config.Labels)
-		if policy.Strategy != "" && policy.Strategy != "tag" {
+		policy, policyErr := tagpolicy.Resolve(oldRef, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
+		if policyErr != nil {
+			return nil, policyErr
+		}
+		if policy.Strategy != "tag" {
 			return nil, errors.New("tag updates disabled by current policy")
 		}
-		if record.ContainerID != "" && policy.Strategy != "tag" {
-			return nil, errors.New("tag update policy changed since check")
-		}
-		policy.Strategy = "tag"
 		selected, selectErr := tagpolicy.Select(old.Tag, []string{next.Tag}, policy)
 		if selectErr != nil {
 			return nil, selectErr

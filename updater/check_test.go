@@ -142,7 +142,7 @@ func TestCheckImageErrorsAndImmutableReferences(t *testing.T) {
 	t.Run("invalid current digest", func(t *testing.T) {
 		resolver := &countingDigestResolver{}
 		service := newServiceForTest(t, Config{RegistryDigestResolver: resolver})
-		_, err := service.CheckImageUpdate(t.Context(), types.CheckRequest{ImageRef: "example/app:3.1.9", CurrentDigest: "not-a-digest"})
+		_, err := service.CheckImageUpdate(t.Context(), types.CheckRequest{ImageRef: "example/app:3.1.9", Policy: types.Policy{Strategy: "digest"}, CurrentDigest: "not-a-digest"})
 		if err == nil || resolver.calls != 0 {
 			t.Fatalf("error = %v, resolver calls = %d", err, resolver.calls)
 		}
@@ -150,7 +150,7 @@ func TestCheckImageErrorsAndImmutableReferences(t *testing.T) {
 	t.Run("resolver failure", func(t *testing.T) {
 		sentinel := errors.New("registry authentication failed")
 		service := newServiceForTest(t, Config{RegistryDigestResolver: &countingDigestResolver{err: sentinel}})
-		_, err := service.CheckImageUpdate(t.Context(), types.CheckRequest{ImageRef: "example/app:3.1.9", CurrentDigest: "sha256:" + strings.Repeat("a", 64)})
+		_, err := service.CheckImageUpdate(t.Context(), types.CheckRequest{ImageRef: "example/app:3.1.9", Policy: types.Policy{Strategy: "digest"}, CurrentDigest: "sha256:" + strings.Repeat("a", 64)})
 		if !errors.Is(err, sentinel) {
 			t.Fatalf("error = %v", err)
 		}
@@ -211,5 +211,43 @@ func TestCheckContainerCandidatesAreScoped(t *testing.T) {
 	}
 	if lister.calls != 2 {
 		t.Fatalf("listing calls = %d, want 2", lister.calls)
+	}
+}
+
+func TestCheckImageAutomaticStrategy(t *testing.T) {
+	for _, tt := range []struct {
+		current string
+		tags    []string
+		want    string
+	}{
+		{current: "3.1.9", tags: []string{"3.1.10", "4.0.0"}, want: "3.1.10"},
+		{current: "0.2.9", tags: []string{"0.2.10", "0.3.0"}, want: "0.2.10"},
+	} {
+		t.Run(tt.current, func(t *testing.T) {
+			lister := &testTagLister{tags: tt.tags}
+			provider := &fakeDockerClientProvider{err: errors.New("unexpected Docker access")}
+			service := newServiceForTest(t, Config{RegistryTagLister: lister, DockerClientProvider: provider})
+			result, err := service.CheckImageUpdate(t.Context(), types.CheckRequest{ImageRef: "app:" + tt.current})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.UpdateAvailable || result.UpdateType != string(UpdateTypeTag) || result.TargetVersion != tt.want || provider.calls != 0 {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+		})
+	}
+	for _, tag := range []string{"latest", "3", "3.1", "3.1.2-alpine", "3.1.2-rc.1"} {
+		t.Run(tag, func(t *testing.T) {
+			lister := &testTagLister{err: errors.New("unexpected tag lookup")}
+			digest := "sha256:" + strings.Repeat("a", 64)
+			service := newServiceForTest(t, Config{RegistryTagLister: lister, RegistryDigestResolver: &countingDigestResolver{digest: digest}})
+			result, err := service.CheckImageUpdate(t.Context(), types.CheckRequest{ImageRef: "app:" + tag, CurrentDigest: digest})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.UpdateAvailable || result.UpdateType != string(UpdateTypeDigest) || lister.calls != 0 {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+		})
 	}
 }

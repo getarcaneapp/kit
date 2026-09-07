@@ -8,8 +8,43 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"go.getarcane.app/updater/refs"
 	"go.getarcane.app/updater/types"
 )
+
+// Resolve selects a strategy from the configured reference and validates tag policies.
+// Auto follows stable complete semantic versions and uses digests for other tags.
+func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
+	if refs.IsDigestPinnedReference(imageRef) || refs.IsImageIDLikeReference(imageRef) {
+		policy.Strategy = "digest"
+		return policy, nil
+	}
+	switch strings.TrimSpace(policy.Strategy) {
+	case "digest":
+		policy.Strategy = "digest"
+		return policy, nil
+	case "", "auto", "tag":
+	default:
+		return policy, fmt.Errorf("unknown update strategy %q", policy.Strategy)
+	}
+	parsed, err := refs.NormalizeReference(imageRef)
+	if err != nil {
+		return policy, err
+	}
+	strategy := strings.TrimSpace(policy.Strategy)
+	if strategy != "tag" && policy.Constraint == "" && policy.TagPattern == "" {
+		version, parseErr := parseInternal(parsed.Tag, nil)
+		if parseErr != nil || version.Prerelease() != "" {
+			policy.Strategy = "digest"
+			return policy, nil //nolint:nilerr // Non-version tags intentionally select digest updates in auto mode.
+		}
+	}
+	policy.Strategy = "tag"
+	if _, err := Select(parsed.Tag, nil, policy); err != nil {
+		return policy, err
+	}
+	return policy, nil
+}
 
 // Select returns the highest eligible newer tag, or current when none qualifies.
 // Equal candidate versions are resolved using the lexically smallest tag.
