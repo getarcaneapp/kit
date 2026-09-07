@@ -38,13 +38,13 @@ func TestClearPendingRecord(t *testing.T) {
 		{
 			name:        "tag record kept when only old tag re-pulled",
 			appliedRef:  "docker.io/library/nginx:1.27",
-			record:      ImageUpdateRecord{ID: "tag-rec", Repository: "nginx", Tag: "1.27", HasUpdate: true, UpdateType: UpdateTypeTag, LatestVersion: &latest},
+			record:      ImageUpdateRecord{ContainerID: "container", ID: "tag-rec", Repository: "nginx", Tag: "1.27", HasUpdate: true, UpdateType: UpdateTypeTag, LatestVersion: &latest},
 			wantCleared: false,
 		},
 		{
-			name:        "tag record cleared when new tag applied",
+			name:        "scoped tag record cleared when new tag applied",
 			appliedRef:  "nginx:1.28",
-			record:      ImageUpdateRecord{ID: "tag-rec", Repository: "nginx", Tag: "1.27", HasUpdate: true, UpdateType: UpdateTypeTag, LatestVersion: &latest},
+			record:      ImageUpdateRecord{ContainerID: "container", ID: "tag-rec", Repository: "nginx", Tag: "1.27", HasUpdate: true, UpdateType: UpdateTypeTag, LatestVersion: &latest},
 			wantCleared: true,
 		},
 	}
@@ -54,7 +54,7 @@ func TestClearPendingRecord(t *testing.T) {
 			store := &fakePendingStore{records: []ImageUpdateRecord{tt.record}}
 			service := newServiceForTest(t, Config{PendingStore: store})
 
-			service.clearPendingRecord(context.Background(), tt.appliedRef)
+			service.clearPendingRecordInternal(context.Background(), "container", tt.appliedRef)
 
 			if cleared := len(store.cleared) > 0; cleared != tt.wantCleared {
 				t.Fatalf("cleared = %v (%v), want %v", cleared, store.cleared, tt.wantCleared)
@@ -471,7 +471,7 @@ func TestServiceFallsBackToStandaloneWhenComposeProjectUnresolved(t *testing.T) 
 	err := service.updateComposeOrStandalone(context.Background(), container.Summary{
 		ID: "container-1",
 	}, container.InspectResponse{
-		Config: &container.Config{Labels: map[string]string{
+		Config: &container.Config{Image: "nginx:latest", Labels: map[string]string{
 			"com.docker.compose.project": "app",
 			"com.docker.compose.service": "web",
 		}},

@@ -5,6 +5,7 @@ go 1.27
 replace go.getarcane.app/kit => ../
 
 require (
+	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v29.8.0+incompatible
 	github.com/moby/moby/api v1.56.0

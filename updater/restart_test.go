@@ -326,7 +326,7 @@ func TestRestartContainersUsingOldImagesVerifiesComposeServiceAfterProjectError(
 		case r.Method == http.MethodGet && path == "/containers/json":
 			if strings.Contains(r.URL.RawQuery, "label") {
 				writeDockerJSON(t, w, []container.Summary{
-					{ID: "web-new", Names: []string{"/web"}, Image: "app:2", ImageID: "sha256:new-app", State: "running"},
+					{ID: "web-new", Names: []string{"/web"}, Image: "app:1", ImageID: "sha256:new-app", State: "running"},
 				})
 				return
 			}
@@ -356,7 +356,7 @@ func TestRestartContainersUsingOldImagesVerifiesComposeServiceAfterProjectError(
 					},
 				},
 			})
-		case r.Method == http.MethodGet && path == "/images/app:2/json":
+		case r.Method == http.MethodGet && path == "/images/app:1/json":
 			writeDockerJSON(t, w, image.InspectResponse{ID: "sha256:new-app"})
 		default:
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
@@ -367,7 +367,7 @@ func TestRestartContainersUsingOldImagesVerifiesComposeServiceAfterProjectError(
 		ProjectUpdater:       projectUpdater,
 	})
 
-	results, err := service.RestartContainersUsingOldImages(context.Background(), map[string]string{"sha256:old-app": "app:2"}, nil)
+	results, err := service.RestartContainersUsingOldImages(context.Background(), map[string]string{"sha256:old-app": "app:1"}, nil)
 	if err != nil {
 		t.Fatalf("RestartContainersUsingOldImages() error = %v", err)
 	}

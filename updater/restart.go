@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -13,6 +14,7 @@ import (
 	"go.getarcane.app/updater/internal/digestcheck"
 	"go.getarcane.app/updater/internal/match"
 	"go.getarcane.app/updater/refs"
+	"go.getarcane.app/updater/types"
 )
 
 // RestartContainersUsingOldImages restarts running containers matching old image
@@ -259,6 +261,9 @@ func (s *Service) dispatchRestartCandidate(ctx context.Context, dockerClient *cl
 	selfUpdate := s.isSelfUpdateCandidate(plan.cnt.ID, labels)
 
 	switch {
+	case isComposeTagChangeInternal(plan) && projectID == "" && !selfUpdate:
+		res.Status = StatusFailed
+		res.Error = "compose tag update project could not be resolved"
 	case projectID != "" && serviceName != "" && !selfUpdate:
 		res = s.applyComposeServiceUpdate(ctx, dockerClient, res, plan, candidate.Name, projectID, projectName, serviceName, run)
 	case selfUpdate:
@@ -397,7 +402,19 @@ func (s *Service) applyComposeServiceUpdate(
 	if !run.processedProjects[projectID] {
 		group := run.composeGroups[projectID]
 		opCtx, cancel := s.opCtx(ctx)
-		projectErr := s.config.ProjectUpdater.UpdateServices(opCtx, projectID, group.services)
+		projectErr := group.err
+		if projectErr == nil {
+			if group.tagChanges {
+				adapter, ok := s.config.ProjectUpdater.(types.ProjectImageUpdater)
+				if !ok {
+					projectErr = errors.New("compose tag updates require a ProjectImageUpdater adapter")
+				} else {
+					projectErr = adapter.UpdateServiceImages(opCtx, projectID, group.images)
+				}
+			} else {
+				projectErr = s.config.ProjectUpdater.UpdateServices(opCtx, projectID, group.services)
+			}
+		}
 		cancel()
 		run.processedProjects[projectID] = true
 		if projectErr != nil {
@@ -406,7 +423,17 @@ func (s *Service) applyComposeServiceUpdate(
 	}
 
 	projectErr := run.projectResults[projectID]
-	verifyErr := match.VerifyComposeServiceUpdatedImage(ctx, dockerClient, projectName, serviceName, match.CurrentContainerImageID(plan.cnt, plan.inspect))
+	var verifyErr error
+	if run.composeGroups[projectID].tagChanges {
+		if projectErr != nil {
+			res.Status = StatusFailed
+			res.Error = projectErr.Error()
+			return res
+		}
+		verifyErr = verifyComposeTargetInternal(ctx, dockerClient, projectName, serviceName, plan.newRef)
+	} else {
+		verifyErr = match.VerifyComposeServiceUpdatedImage(ctx, dockerClient, projectName, serviceName, match.CurrentContainerImageID(plan.cnt, plan.inspect))
+	}
 	if verifyErr != nil {
 		res.Status = StatusFailed
 		if projectErr != nil {
@@ -421,7 +448,10 @@ func (s *Service) applyComposeServiceUpdate(
 		s.logger.WarnContext(ctx, "service updated despite project-level compose error", "projectID", projectID, "projectName", projectName, "serviceName", serviceName, "error", projectErr)
 	}
 	res.Status = StatusUpdated
-	res.UpdateAvailable = true
+	if plan.implicit {
+		res.Status = StatusRestarted
+	}
+	res.UpdateAvailable = !plan.implicit
 	res.UpdateApplied = true
 	_ = s.notify(ctx, plan.cnt.ID, containerName, plan.newRef, plan.match, refs.NormalizeImageUpdateRef(plan.newRef))
 	return res

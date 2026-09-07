@@ -1,12 +1,18 @@
 package updater
 
-import "go.getarcane.app/updater/labels"
+import (
+	"strings"
+
+	"go.getarcane.app/updater/labels"
+	"go.getarcane.app/updater/types"
+)
 
 // LabelPolicy decides, from a container's labels, whether the updater may touch
 // it, whether the host application must update it itself, and how to stop it.
 // Every field is optional; a nil func answers false (or "" for StopSignalFunc),
 // and New fills the nil ones in from DefaultLabelPolicy.
 type LabelPolicy struct {
+	TagPolicyFunc          func(map[string]string) types.Policy
 	IsUpdateDisabledFunc   func(map[string]string) bool
 	IsSelfUpdateTargetFunc func(map[string]string) bool
 	IsAgentFunc            func(map[string]string) bool
@@ -19,6 +25,9 @@ type LabelPolicy struct {
 // any field a caller leaves nil.
 func DefaultLabelPolicy() LabelPolicy {
 	return LabelPolicy{
+		TagPolicyFunc: func(l map[string]string) types.Policy {
+			return types.Policy{Strategy: strings.TrimSpace(l[labels.LabelUpdateStrategy]), Constraint: strings.TrimSpace(l[labels.LabelUpdateConstraint]), TagPattern: strings.TrimSpace(l[labels.LabelUpdateTagPattern])}
+		},
 		IsUpdateDisabledFunc:   labels.IsUpdateDisabled,
 		IsSelfUpdateTargetFunc: labels.IsArcaneContainer,
 		IsAgentFunc:            labels.IsArcaneAgentContainer,
@@ -33,6 +42,9 @@ func DefaultLabelPolicy() LabelPolicy {
 // behavior keeps the defaults for the rest.
 func mergeLabelPolicyDefaults(policy LabelPolicy) LabelPolicy {
 	defaults := DefaultLabelPolicy()
+	if policy.TagPolicyFunc == nil {
+		policy.TagPolicyFunc = defaults.TagPolicyFunc
+	}
 	if policy.IsUpdateDisabledFunc == nil {
 		policy.IsUpdateDisabledFunc = defaults.IsUpdateDisabledFunc
 	}
@@ -86,4 +98,12 @@ func (p LabelPolicy) StopSignal(containerLabels map[string]string) string {
 		return ""
 	}
 	return p.StopSignalFunc(containerLabels)
+}
+
+// TagPolicy returns the image selection policy for a container.
+func (p LabelPolicy) TagPolicy(containerLabels map[string]string) types.Policy {
+	if p.TagPolicyFunc == nil {
+		return types.Policy{}
+	}
+	return p.TagPolicyFunc(containerLabels)
 }

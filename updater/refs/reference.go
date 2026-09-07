@@ -76,7 +76,18 @@ func NormalizeImageUpdateRefMapKeys(refToValue map[string]string) map[string]str
 // IsImageIDLikeReference reports whether ref is a Docker image ID rather than a pullable tag.
 func IsImageIDLikeReference(ref string) bool {
 	ref = strings.ToLower(strings.TrimSpace(ref))
-	return strings.HasPrefix(ref, "sha256:")
+	if strings.HasPrefix(ref, "sha256:") {
+		return true
+	}
+	if len(ref) != 64 {
+		return false
+	}
+	for _, c := range ref {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // IsDigestPinnedReference reports whether ref names an immutable repository digest.

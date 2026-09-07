@@ -3,6 +3,8 @@ package updater
 import (
 	"log/slog"
 	"time"
+
+	"go.getarcane.app/updater/types"
 )
 
 // Config configures a Service. Every field is optional: New fills in a
@@ -21,6 +23,8 @@ type Config struct {
 	// RegistryDigestResolver checks registries for newer digests. Defaults to
 	// NewRegistryDigestResolver(), which uses the local Docker credentials.
 	RegistryDigestResolver RegistryDigestResolver
+	// RegistryTagLister discovers version tags. Defaults to Docker-config credentials.
+	RegistryTagLister types.RegistryTagLister
 	// ProjectUpdater updates Docker Compose services. Defaults to
 	// NewDockerComposeProjectUpdater(DockerClientProvider), which shells out to
 	// the docker compose CLI.

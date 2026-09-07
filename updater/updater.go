@@ -106,6 +106,9 @@ func applyConfigDefaults(config *Config) *DockerClient {
 	if config.RegistryDigestResolver == nil {
 		config.RegistryDigestResolver = NewRegistryDigestResolver()
 	}
+	if config.RegistryTagLister == nil {
+		config.RegistryTagLister = NewRegistryTagLister()
+	}
 	if config.ProjectUpdater == nil {
 		config.ProjectUpdater = NewDockerComposeProjectUpdater(config.DockerClientProvider)
 	}

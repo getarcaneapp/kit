@@ -2,12 +2,18 @@ package updater
 
 import (
 	"context"
+	"fmt"
+
+	"go.getarcane.app/updater/types"
 
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/internal/deps"
 )
 
 type composeGroup struct {
+	images      map[string]types.ServiceImageChange
+	tagChanges  bool
+	err         error
 	projectName string
 	services    []string
 	seen        map[string]struct{}
@@ -42,6 +48,15 @@ func (s *Service) buildComposeGroups(ctx context.Context, sorted []deps.Containe
 		if group.seen == nil {
 			group.seen = map[string]struct{}{}
 		}
+		if group.images == nil {
+			group.images = map[string]types.ServiceImageChange{}
+		}
+		change := types.ServiceImageChange{ExpectedRef: plan.inspect.Config.Image, TargetRef: plan.newRef}
+		if previous, ok := group.images[serviceName]; ok && previous != change {
+			group.err = fmt.Errorf("conflicting targets for compose service %s/%s", projectName, serviceName)
+		}
+		group.images[serviceName] = change
+		group.tagChanges = group.tagChanges || isComposeTagChangeInternal(plan)
 		if _, seen := group.seen[serviceName]; !seen {
 			group.services = append(group.services, serviceName)
 			group.seen[serviceName] = struct{}{}
