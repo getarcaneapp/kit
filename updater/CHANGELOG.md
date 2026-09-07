@@ -1,3 +1,13 @@
+## updater/v0.9.1
+
+### Bug fixes
+
+* auto detect tag updates([b4b62ba](https://github.com/getarcaneapp/kit/commit/b4b62baab863f4e2340dc4b84f37b2da9b41ba67) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.9.0...updater/v0.9.1
+
 ## updater/v0.9.0
 
 ### New features
