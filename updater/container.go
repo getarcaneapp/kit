@@ -55,24 +55,25 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	endProjectStatus := s.BeginProjectUpdate(compose.ProjectLabel(labels))
 	defer endProjectStatus()
 
-	if s.config.LabelPolicy.IsUpdateDisabled(labels) {
-		item := skippedContainerResult(target.ID, name, "updates disabled by label")
-		out.Items = append(out.Items, item)
+	reason, eligibilityErr := s.containerEligibilityInternal(ctx, inspect)
+	if eligibilityErr != nil {
+		return out, eligibilityErr
+	}
+	if reason != "" {
+		out.Items = append(out.Items, skippedContainerResult(target.ID, name, reason))
 		out.Checked = 1
 		out.Skipped++
 		return out, nil
 	}
-	if s.config.LabelPolicy.IsSwarmTask(labels) && !s.isSelfUpdateCandidate(target.ID, labels) {
-		item := skippedContainerResult(target.ID, name, "swarm service; update at the service level")
-		out.Items = append(out.Items, item)
-		out.Checked = 1
-		out.Skipped++
-		return out, nil
-	}
-
 	configImageRef := ""
 	if inspect.Config != nil {
 		configImageRef = strings.TrimSpace(inspect.Config.Image)
+	}
+	if refs.IsDigestPinnedReference(configImageRef) || refs.IsImageIDLikeReference(configImageRef) {
+		out.Items = append(out.Items, skippedContainerResult(target.ID, name, "immutable image reference"))
+		out.Checked = 1
+		out.Skipped++
+		return out, nil
 	}
 	imageRef := refs.PullableImageRef(target.Image, configImageRef, nil)
 	if imageRef == "" && inspect.Image != "" {
@@ -88,8 +89,23 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		return out, nil
 	}
 
+	selection, selectionErr := s.selectImageTagInternal(ctx, normalizedRef, s.config.LabelPolicy.TagPolicy(labels))
+	if selectionErr != nil {
+		out.Items = append(out.Items, failedContainerResult(target.ID, name, selectionErr.Error()))
+		out.Failed++
+		out.Checked = 1
+		return out, nil
+	}
+	tagChanged := selection.UpdateAvailable && selection.UpdateType == string(UpdateTypeTag)
+	normalizedRef = selection.TargetRef
+	if preflightErr := s.preflightComposeImageInternal(ctx, target, inspect, normalizedRef); preflightErr != nil {
+		out.Items = append(out.Items, failedContainerResult(target.ID, name, preflightErr.Error()))
+		out.Failed++
+		out.Checked = 1
+		return out, nil
+	}
 	if opts.DryRun {
-		item := ResourceResult{ResourceID: target.ID, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusSkipped, OldImage: inspect.Image, NewImage: normalizedRef}
+		item := ResourceResult{ResourceID: target.ID, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusSkipped, UpdateAvailable: selection.UpdateAvailable, OldImage: imageRef, NewImage: normalizedRef}
 		out.Items = append(out.Items, item)
 		out.Checked = 1
 		out.Skipped++
@@ -110,12 +126,18 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	}
 
 	changed, compareErr := digestcheck.NewChecker(dockerClient, nil).CompareWithPulled(ctx, inspect.Image, normalizedRef)
-	if compareErr == nil && !changed && !opts.Force {
+	if compareErr != nil && tagChanged {
+		out.Items = append(out.Items, failedContainerResult(target.ID, name, compareErr.Error()))
+		out.Checked = 1
+		out.Failed++
+		return out, nil
+	}
+	if compareErr == nil && !changed && !opts.Force && !tagChanged {
 		item := skippedContainerResult(target.ID, name, "image digest unchanged after pull")
 		out.Items = append(out.Items, item)
 		out.Checked = 1
 		out.Skipped++
-		s.clearPendingRecord(ctx, normalizedRef)
+		s.clearPendingRecordInternal(ctx, target.ID, normalizedRef)
 		return out, nil
 	}
 
@@ -130,7 +152,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		out.Items = append(out.Items, item)
 		out.Checked = 1
 		out.Updated++
-		s.clearPendingRecord(ctx, normalizedRef)
+		s.clearPendingRecordInternal(ctx, target.ID, normalizedRef)
 		return out, nil
 	}
 
@@ -143,7 +165,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		out.Items = append(out.Items, item)
 		out.Updated++
 		_ = s.notify(ctx, target.ID, name, imageRef, inspect.Image, normalizedRef)
-		s.clearPendingRecord(ctx, normalizedRef)
+		s.clearPendingRecordInternal(ctx, target.ID, normalizedRef)
 	}
 	out.Checked = 1
 	return out, nil
@@ -158,7 +180,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 // re-pulled. The records are looked up
 // and cleared as stored (ID and all) rather than reconstructed, because
 // stores key by ID when one is present.
-func (s *Service) clearPendingRecord(ctx context.Context, imageRef string) {
+func (s *Service) clearPendingRecordInternal(ctx context.Context, containerID, imageRef string) {
 	if s.config.PendingStore == nil {
 		return
 	}
@@ -172,6 +194,12 @@ func (s *Service) clearPendingRecord(ctx context.Context, imageRef string) {
 		return
 	}
 	for _, record := range records {
+		if record.ContainerID != "" && record.ContainerID != containerID {
+			continue
+		}
+		if record.IsTagUpdate() && record.ContainerID == "" {
+			continue
+		}
 		if refs.NormalizeImageUpdateRef(record.NewImageRef()) != normalized {
 			continue
 		}
@@ -365,6 +393,9 @@ func (s *Service) rollbackStandaloneContainer(ctx context.Context, dockerClient 
 
 func (s *Service) updateComposeOrStandalone(ctx context.Context, target container.Summary, inspect container.InspectResponse, normalizedRef string) error {
 	labels := labelsFromInspect(inspect)
+	if inspect.Config != nil && refs.NormalizeImageUpdateRef(inspect.Config.Image) != refs.NormalizeImageUpdateRef(normalizedRef) && (compose.ProjectLabel(labels) != "" || compose.ServiceLabel(labels) != "") {
+		return s.updateComposeImageInternal(ctx, target, inspect, normalizedRef)
+	}
 	projectName := compose.ProjectLabel(labels)
 	serviceName := compose.ServiceLabel(labels)
 	if projectName != "" && serviceName != "" && s.config.ProjectUpdater != nil {

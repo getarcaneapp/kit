@@ -30,6 +30,11 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 		return out, nil
 	}
 
+	for _, record := range records {
+		if record.IsTagUpdate() || record.ContainerID != "" {
+			return out, s.applyTargetedRecordsInternal(ctx, records, opts, out)
+		}
+	}
 	usedImages, err := s.usedImages(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("collect used images: %w", err)

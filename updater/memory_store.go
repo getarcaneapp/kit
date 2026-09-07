@@ -3,6 +3,7 @@ package updater
 import (
 	"context"
 	"slices"
+	"strconv"
 	"sync"
 )
 
@@ -56,8 +57,9 @@ func (s *memoryPendingStore) ClearImageUpdateRecord(ctx context.Context, record 
 }
 
 func memoryPendingStoreKey(record ImageUpdateRecord) string {
-	if record.ID != "" {
-		return record.ID
+	key := record.ID
+	if key == "" {
+		key = record.ImageRef()
 	}
-	return record.ImageRef()
+	return strconv.Quote(record.ContainerID) + ":" + strconv.Quote(key)
 }

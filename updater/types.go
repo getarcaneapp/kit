@@ -60,6 +60,8 @@ type Status struct {
 
 // ImageUpdateRecord is a pending image update known to a caller-provided store.
 type ImageUpdateRecord struct {
+	// ContainerID scopes this record to one container; ID remains the image/store ID.
+	ContainerID    string
 	ID             string
 	Repository     string
 	Tag            string

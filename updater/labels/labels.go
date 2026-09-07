@@ -15,6 +15,12 @@ const (
 	LabelArcaneAgent = "com.getarcaneapp.arcane.agent"
 	// LabelUpdater controls updater participation.
 	LabelUpdater = "com.getarcaneapp.arcane.updater"
+	// LabelUpdateStrategy selects digest or tag updates.
+	LabelUpdateStrategy = LabelUpdater + ".strategy"
+	// LabelUpdateConstraint limits eligible semantic versions.
+	LabelUpdateConstraint = LabelUpdater + ".constraint"
+	// LabelUpdateTagPattern selects tags and optionally captures their version.
+	LabelUpdateTagPattern = LabelUpdater + ".tag-pattern"
 	// LabelSwarmServiceID identifies a Docker Swarm task.
 	LabelSwarmServiceID = "com.docker.swarm.service.id"
 	// LabelSwarmServiceName identifies a Docker Swarm task.
