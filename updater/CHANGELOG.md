@@ -1,3 +1,13 @@
+## updater/v0.9.2
+
+### Bug fixes
+
+* apply pre-pulled updates and skip ineligible targets([95753a1](https://github.com/getarcaneapp/kit/commit/95753a1fe06394fd09086d2dc44f59abfe3efab4) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.9.1...updater/v0.9.2
+
 ## updater/v0.9.1
 
 ### Bug fixes
