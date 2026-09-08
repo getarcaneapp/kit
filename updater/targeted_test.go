@@ -135,9 +135,10 @@ func TestApplyPendingTargetedRetainsRejectedInternal(t *testing.T) {
 		name      string
 		change    func(*container.InspectResponse)
 		pullError bool
+		skipped   bool
 		wantPulls int
 	}{
-		{name: "disabled", change: func(c *container.InspectResponse) { c.Config.Labels[labels.LabelUpdater] = "false" }},
+		{name: "disabled", skipped: true, change: func(c *container.InspectResponse) { c.Config.Labels[labels.LabelUpdater] = "false" }},
 		{name: "digest pin", change: func(c *container.InspectResponse) { c.Config.Image = "app@sha256:" + strings.Repeat("a", 64) }},
 		{name: "image ID", change: func(c *container.InspectResponse) { c.Config.Image = "sha256:" + strings.Repeat("a", 64) }},
 		{name: "changed reference", change: func(c *container.InspectResponse) { c.Config.Image = "app:1.1.0" }},
@@ -172,7 +173,11 @@ func TestApplyPendingTargetedRetainsRejectedInternal(t *testing.T) {
 			}
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
-			if result.Failed != 1 || len(pending) != 1 || len(puller.pulled) != tt.wantPulls || fixture.mutations != 0 {
+			wantFailed, wantSkipped := 1, 0
+			if tt.skipped {
+				wantFailed, wantSkipped = 0, 1
+			}
+			if result.Failed != wantFailed || result.Skipped != wantSkipped || len(pending) != 1 || len(puller.pulled) != tt.wantPulls || fixture.mutations != 0 {
 				t.Fatalf("result=%#v pending=%d pulls=%#v mutations=%d", result, len(pending), puller.pulled, fixture.mutations)
 			}
 		})
@@ -272,7 +277,7 @@ func TestApplyPendingTargetedScopedClearingInternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 2 || result.Failed != 2 || len(puller.pulled) != 1 {
+	if len(pending) != 2 || result.Failed != 1 || result.Skipped != 2 || len(puller.pulled) != 1 {
 		t.Fatalf("result=%#v pending=%#v pulls=%#v", result, pending, puller.pulled)
 	}
 	for _, record := range pending {
@@ -367,7 +372,7 @@ func TestApplyPendingTargetedExcludedContainersInternal(t *testing.T) {
 			}
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
-			if len(pending) != 1 || len(puller.pulled) != 0 || fixture.mutations != 0 || result.Updated != 0 {
+			if len(pending) != 1 || len(puller.pulled) != 0 || fixture.mutations != 0 || result.Updated != 0 || result.Failed != 0 {
 				t.Fatalf("excluded container mutated: pending=%#v pulls=%#v mutations=%d result=%#v", pending, puller.pulled, fixture.mutations, result)
 			}
 		})

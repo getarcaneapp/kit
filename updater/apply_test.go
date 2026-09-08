@@ -222,7 +222,7 @@ func TestApplyPendingUsesRecordDigestBeforeResolver(t *testing.T) {
 	}
 }
 
-func TestApplyPendingSkipsWhenKnownDigestMatchesAnyLocalRepoDigest(t *testing.T) {
+func TestApplyPendingReportsUpToDateWhenKnownDigestMatchesAnyLocalRepoDigest(t *testing.T) {
 	firstDigest := digest.FromString("first-local-digest").String()
 	secondDigest := digest.FromString("second-local-digest").String()
 
@@ -262,11 +262,11 @@ func TestApplyPendingSkipsWhenKnownDigestMatchesAnyLocalRepoDigest(t *testing.T)
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
-	if got.Checked != 1 || got.Updated != 0 || got.Skipped != 1 || got.Failed != 0 {
+	if got.Checked != 1 || got.Updated != 0 || got.Skipped != 0 || got.Failed != 0 {
 		t.Fatalf("ApplyPending() counts = checked:%d updated:%d skipped:%d failed:%d", got.Checked, got.Updated, got.Skipped, got.Failed)
 	}
-	if len(got.Items) != 1 || got.Items[0].Status != StatusSkipped {
-		t.Fatalf("ApplyPending() items = %#v, want one skipped item", got.Items)
+	if len(got.Items) != 1 || got.Items[0].Status != StatusUpToDate {
+		t.Fatalf("ApplyPending() items = %#v, want one up-to-date item", got.Items)
 	}
 	if len(puller.pulled) != 0 {
 		t.Fatalf("pulled images = %#v, want none", puller.pulled)
@@ -274,8 +274,75 @@ func TestApplyPendingSkipsWhenKnownDigestMatchesAnyLocalRepoDigest(t *testing.T)
 	if resolver.calls != 0 {
 		t.Fatalf("resolver calls = %d, want 0", resolver.calls)
 	}
-	if len(store.cleared) != 0 {
-		t.Fatalf("cleared records = %#v, want none", store.cleared)
+	if len(store.cleared) != 1 || store.cleared[0] != "record-1" {
+		t.Fatalf("cleared records = %#v, want record-1", store.cleared)
+	}
+}
+
+func TestApplyPendingRestartsStaleContainersWhenImageAlreadyPulled(t *testing.T) {
+	latestDigest := digest.FromString("latest-app-digest").String()
+	store := &fakePendingStore{records: []ImageUpdateRecord{{
+		ID:           "sha256:old-app",
+		Repository:   "app",
+		Tag:          "1",
+		HasUpdate:    true,
+		UpdateType:   UpdateTypeDigest,
+		LatestDigest: &latestDigest,
+	}}}
+	puller := &fakePuller{}
+	dockerClient := newDockerClientForHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		path := dockerAPIPath(r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && (path == "/images/app:1/json" || path == "/images/docker.io/library/app:1/json"):
+			writeDockerJSON(t, w, image.InspectResponse{ID: "sha256:new-app", RepoTags: []string{"app:1"}, RepoDigests: []string{"app@" + latestDigest}})
+		case r.Method == http.MethodGet && path == "/containers/json":
+			writeDockerJSON(t, w, []container.Summary{
+				{ID: "app-id", Names: []string{"/app"}, Image: "app:1", ImageID: "sha256:old-app", State: "running"},
+			})
+		case r.Method == http.MethodGet && path == "/containers/app-id/json":
+			writeDockerJSON(t, w, container.InspectResponse{ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/stop"):
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && path == "/containers/create":
+			writeDockerJSON(t, w, map[string]any{"Id": "new-app-id", "Warnings": []string{}})
+		case r.Method == http.MethodPost && path == "/containers/new-app-id/start":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	})
+	service := newService(Config{
+		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
+		PendingStore:         store,
+		ImagePuller:          puller,
+		UsedImageCollector: UsedImageCollectorFunc(func(context.Context) (map[string]struct{}, error) {
+			return map[string]struct{}{"docker.io/library/app:1": {}}, nil
+		}),
+	})
+
+	got, err := service.ApplyPending(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("ApplyPending() error = %v", err)
+	}
+	if len(puller.pulled) != 0 {
+		t.Fatalf("pulled images = %#v, want none", puller.pulled)
+	}
+	if len(got.Items) == 0 || got.Items[0].Status != StatusUpdated {
+		t.Fatalf("ApplyPending() first item = %#v, want updated image", got.Items)
+	}
+	updatedContainer := false
+	for _, item := range got.Items {
+		if item.ResourceType == ResourceTypeContainer && item.Status == StatusUpdated {
+			updatedContainer = true
+		}
+	}
+	if !updatedContainer {
+		t.Fatalf("ApplyPending() items = %#v, want updated container result", got.Items)
+	}
+	if len(store.cleared) != 1 || store.cleared[0] != "sha256:old-app" {
+		t.Fatalf("cleared records = %#v, want sha256:old-app", store.cleared)
 	}
 }
 

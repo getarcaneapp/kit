@@ -94,8 +94,9 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 }
 
 // executeUpdatePlan applies a single pending-update plan: it honors
-// dry-run, skips images that are already current, pulls the new reference,
-// and reports the outcome. It marks plan.pulled once the pull succeeds.
+// dry-run, pulls the new reference unless it is already current locally, and
+// reports whether any old image ID is still stale. It marks plan.pulled once
+// the target image is present.
 func (s *Service) executeUpdatePlan(ctx context.Context, digestChecker *digestcheck.Checker, plan *updatePlan, opts Options) ResourceResult {
 	item := ResourceResult{
 		ResourceID:   plan.oldRef,
@@ -110,29 +111,32 @@ func (s *Service) executeUpdatePlan(ctx context.Context, digestChecker *digestch
 		item.Status = StatusSkipped
 		return item
 	}
+	upToDateMessage := "image digest unchanged after pull"
 	if !opts.Force && planImageUpToDate(ctx, digestChecker, *plan) {
-		item.Status = StatusSkipped
-		item.Error = "image already up to date"
-		return item
-	}
-	if s.config.ImagePuller == nil {
-		item.Status = StatusFailed
-		item.Error = ErrImagePullerRequired.Error()
-		return item
-	}
-	if err := s.config.ImagePuller.PullImage(ctx, plan.newRef, io.Discard); err != nil {
-		item.Status = StatusFailed
-		item.Error = fmt.Sprintf("pull failed: %v", err)
-		return item
+		upToDateMessage = "image already up to date"
+	} else {
+		if s.config.ImagePuller == nil {
+			item.Status = StatusFailed
+			item.Error = ErrImagePullerRequired.Error()
+			return item
+		}
+		if err := s.config.ImagePuller.PullImage(ctx, plan.newRef, io.Discard); err != nil {
+			item.Status = StatusFailed
+			item.Error = fmt.Sprintf("pull failed: %v", err)
+			return item
+		}
 	}
 	plan.pulled = true
 
 	if !opts.Force {
-		targetIDs, targetErr := digestChecker.GetImageIDsForRef(ctx, plan.newRef)
-		if targetErr == nil && imageIDsOverlap(plan.oldIDs, targetIDs) {
-			item.Status = StatusUpToDate
-			item.Error = "image digest unchanged after pull"
-			return item
+		if targetIDs, targetErr := digestChecker.GetImageIDsForRef(ctx, plan.newRef); targetErr == nil {
+			stale, matched := staleImageIDs(plan.oldIDs, targetIDs)
+			if len(stale) == 0 && matched {
+				item.Status = StatusUpToDate
+				item.Error = upToDateMessage
+				return item
+			}
+			plan.oldIDs = stale
 		}
 	}
 
@@ -261,23 +265,25 @@ func (s *Service) buildUpdatePlans(ctx context.Context, records []ImageUpdateRec
 	return plans
 }
 
-func imageIDsOverlap(oldIDs, newIDs []string) bool {
-	seen := map[string]struct{}{}
-	for _, oldID := range oldIDs {
-		oldID = strings.TrimSpace(oldID)
-		if oldID != "" {
-			seen[oldID] = struct{}{}
+func staleImageIDs(oldIDs, targetIDs []string) ([]string, bool) {
+	current := make(map[string]struct{}, len(targetIDs))
+	for _, id := range targetIDs {
+		current[strings.TrimSpace(id)] = struct{}{}
+	}
+	var stale []string
+	matched := false
+	for _, id := range oldIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
 		}
-	}
-	if len(seen) == 0 {
-		return false
-	}
-	for _, newID := range newIDs {
-		if _, ok := seen[strings.TrimSpace(newID)]; ok {
-			return true
+		if _, ok := current[id]; ok {
+			matched = true
+			continue
 		}
+		stale = append(stale, id)
 	}
-	return false
+	return stale, matched
 }
 
 func (s *Service) usedImages(ctx context.Context) (map[string]struct{}, error) {

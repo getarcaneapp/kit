@@ -65,54 +65,51 @@ func (s *Service) applyTargetedRecordsInternal(ctx context.Context, records []Im
 	return nil
 }
 
-func (s *Service) targetRecordPlanInternal(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, record ImageUpdateRecord) (*restartPlan, error) {
+func (s *Service) targetRecordPlanInternal(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, record ImageUpdateRecord) (*restartPlan, string, error) {
 	reason, err := s.containerEligibilityInternal(ctx, inspect)
-	if err != nil {
-		return nil, err
-	}
-	if reason != "" {
-		return nil, errors.New(reason)
+	if err != nil || reason != "" {
+		return nil, reason, err
 	}
 	current := inspect.Config.Image
 	if refs.IsDigestPinnedReference(current) || refs.IsImageIDLikeReference(current) {
-		return nil, errors.New("immutable image reference")
+		return nil, "", errors.New("immutable image reference")
 	}
 	oldRef, newRef := refs.NormalizeImageUpdateRef(record.ImageRef()), refs.NormalizeImageUpdateRef(record.NewImageRef())
 	if oldRef == "" || newRef == "" {
-		return nil, errors.New("invalid pending image reference")
+		return nil, "", errors.New("invalid pending image reference")
 	}
 	current = refs.NormalizeImageUpdateRef(current)
 	if current != oldRef && current != newRef {
-		return nil, errors.New("container image changed since update check")
+		return nil, "", errors.New("container image changed since update check")
 	}
 	if record.IsTagUpdate() {
 		old, parseErr := refs.NormalizeReference(oldRef)
 		if parseErr != nil {
-			return nil, parseErr
+			return nil, "", parseErr
 		}
 		next, parseErr := refs.NormalizeReference(newRef)
 		if parseErr != nil {
-			return nil, parseErr
+			return nil, "", parseErr
 		}
 		policy, policyErr := tagpolicy.Resolve(oldRef, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
 		if policyErr != nil {
-			return nil, policyErr
+			return nil, "", policyErr
 		}
 		if policy.Strategy != "tag" {
-			return nil, errors.New("tag updates disabled by current policy")
+			return nil, "", errors.New("tag updates disabled by current policy")
 		}
 		selected, selectErr := tagpolicy.Select(old.Tag, []string{next.Tag}, policy)
 		if selectErr != nil {
-			return nil, selectErr
+			return nil, "", selectErr
 		}
 		if selected != next.Tag || old.Tag == next.Tag {
-			return nil, errors.New("pending tag is not a newer allowed version")
+			return nil, "", errors.New("pending tag is not a newer allowed version")
 		}
 	}
 	if err := s.preflightComposeImageInternal(ctx, cnt, inspect, newRef); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &restartPlan{cnt: cnt, inspect: &inspect, newRef: newRef, match: oldRef, explicit: true}, nil
+	return &restartPlan{cnt: cnt, inspect: &inspect, newRef: newRef, match: oldRef, explicit: true}, "", nil
 }
 
 func (s *Service) pullTargetPlansInternal(ctx context.Context, dockerClient *client.Client, scan *restartScan, opts Options) []ResourceResult {
@@ -260,10 +257,14 @@ func (s *Service) collectTargetRecordInternal(ctx context.Context, dockerClient 
 			continue
 		}
 		state.targets[cnt.ID] = true
-		plan, planErr := s.targetRecordPlanInternal(ctx, cnt, inspect, record)
-		if planErr != nil {
+		plan, reason, planErr := s.targetRecordPlanInternal(ctx, cnt, inspect, record)
+		if planErr != nil || reason != "" {
 			state.failed = true
-			s.appendTargetResultInternal(ctx, out, failedContainerResult(cnt.ID, containerSummaryName(cnt), planErr.Error()))
+			if reason != "" {
+				s.appendTargetResultInternal(ctx, out, skippedContainerResult(cnt.ID, containerSummaryName(cnt), reason))
+			} else {
+				s.appendTargetResultInternal(ctx, out, failedContainerResult(cnt.ID, containerSummaryName(cnt), planErr.Error()))
+			}
 			continue
 		}
 		name := containerSummaryName(cnt)
@@ -279,7 +280,7 @@ func (s *Service) collectTargetRecordInternal(ctx context.Context, dockerClient 
 	}
 	if len(state.targets) == 0 {
 		state.failed = true
-		s.appendTargetResultInternal(ctx, out, failedContainerResult(record.ContainerID, record.ImageRef(), "pending update has no matching container"))
+		s.appendTargetResultInternal(ctx, out, skippedContainerResult(record.ContainerID, record.ImageRef(), "pending update has no matching container"))
 	}
 
 	return state, nil
