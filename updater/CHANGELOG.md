@@ -1,3 +1,13 @@
+## updater/v0.9.3
+
+### Bug fixes
+
+* apply pagination to tag based updates([7ce921b](https://github.com/getarcaneapp/kit/commit/7ce921bf97d933e51f763ea5ee35f5ad97c7dae2) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.9.2...updater/v0.9.3
+
 ## updater/v0.9.2
 
 ### Bug fixes
