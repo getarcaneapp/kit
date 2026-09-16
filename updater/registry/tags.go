@@ -15,8 +15,14 @@ import (
 	kitregistry "go.getarcane.app/kit/pkg/registry"
 )
 
+const (
+	tagsPageSize            = "1000"
+	defaultTagsFetchTimeout = 120 * time.Second
+)
+
 // FetchTags lists all repository tags, including paginated results. A partial
-// listing is never returned on failure. The entire lookup has a 30-second limit.
+// listing is never returned on failure. The caller's deadline bounds the whole
+// walk; without one the lookup falls back to a 120-second limit.
 func FetchTags(
 	ctx context.Context,
 	registryHost, repository string,
@@ -30,8 +36,12 @@ func FetchTags(
 	// and token endpoint redirects must not forward credentials to another URL.
 	client := *httpClient
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	requestCtx := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, defaultTagsFetchTimeout)
+		defer cancel()
+	}
 
 	registryHost = kitregistry.Normalize(registryHost)
 	if registryHost == "docker.io" {
@@ -39,7 +49,7 @@ func FetchTags(
 	}
 	repository = strings.Trim(repository, "/")
 	endpoint := &url.URL{Scheme: "https", Host: registryHost, Path: "/v2/" + repository + "/tags/list"}
-	next := endpoint
+	next := &url.URL{Scheme: endpoint.Scheme, Host: endpoint.Host, Path: endpoint.Path, RawQuery: "n=" + tagsPageSize}
 	seen := map[string]bool{}
 	tags := []string{}
 	authHeader := basicAuthHeaderForCredential(credential)

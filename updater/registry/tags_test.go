@@ -11,11 +11,17 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFetchTagsPaginationAndAuthentication(t *testing.T) {
 	var server *httptest.Server
 	var tokenCalls, pageCalls int
+	pages := map[string]struct{ body, link string }{
+		"":      {body: `{"name":"team/app","tags":["1.0.0"]}`, link: `</v2/team/app/tags/list?last=1.0.0&n=1000>; rel="next"`},
+		"1.0.0": {body: `{"name":"team/app","tags":["1.0.1"]}`, link: `</v2/team/app/tags/list?last=1.0.1&n=1000>; rel="next"`},
+		"1.0.1": {body: `{"name":"team/app","tags":["1.1.0"]}`},
+	}
 	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
 			tokenCalls++
@@ -32,20 +38,22 @@ func TestFetchTagsPaginationAndAuthentication(t *testing.T) {
 			return
 		}
 		pageCalls++
-		if r.URL.Query().Get("last") == "1.0.0" {
-			_, _ = io.WriteString(w, `{"name":"team/app","tags":["1.0.1"]}`)
-			return
+		if r.URL.Query().Get("n") != "1000" {
+			t.Errorf("page %q requested without explicit page size: %s", r.URL.Query().Get("last"), r.URL.RawQuery)
 		}
-		w.Header().Set("Link", `</v2/team/app/tags/list?last=1.0.0&n=1>; rel="next"`)
-		_, _ = io.WriteString(w, `{"name":"team/app","tags":["1.0.0"]}`)
+		page := pages[r.URL.Query().Get("last")]
+		if page.link != "" {
+			w.Header().Set("Link", page.link)
+		}
+		_, _ = io.WriteString(w, page.body)
 	}))
 	defer server.Close()
 	u, _ := url.Parse(server.URL)
 	tags, err := FetchTags(t.Context(), u.Host, "team/app", &Credentials{Username: "user", Token: "password"}, server.Client())
-	if err != nil || !reflect.DeepEqual(tags, []string{"1.0.0", "1.0.1"}) {
+	if err != nil || !reflect.DeepEqual(tags, []string{"1.0.0", "1.0.1", "1.1.0"}) {
 		t.Fatalf("FetchTags = %v, %v", tags, err)
 	}
-	if tokenCalls != 1 || pageCalls != 2 {
+	if tokenCalls != 1 || pageCalls != 3 {
 		t.Fatalf("token calls = %d, page calls = %d", tokenCalls, pageCalls)
 	}
 }
@@ -104,11 +112,80 @@ func TestFetchTagsDockerHubAndEmpty(t *testing.T) {
 }
 
 func TestFetchTagsCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	_, err := FetchTags(ctx, "registry.test", "team/app", nil, nil)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("error = %v, want canceled", err)
+	for _, tt := range []struct {
+		name         string
+		timeout      time.Duration
+		cancelBefore bool
+		secondPage   func(cancel context.CancelFunc)
+		want         error
+	}{
+		{name: "before first page", cancelBefore: true, want: context.Canceled},
+		{name: "caller deadline expires during pagination", timeout: 100 * time.Millisecond, secondPage: func(context.CancelFunc) { time.Sleep(200 * time.Millisecond) }, want: context.DeadlineExceeded},
+		{name: "cancelled during pagination", secondPage: func(cancel context.CancelFunc) { cancel() }, want: context.Canceled},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tt.timeout > 0 {
+				var cancelTimeout context.CancelFunc
+				ctx, cancelTimeout = context.WithTimeout(ctx, tt.timeout)
+				defer cancelTimeout()
+			}
+			if tt.cancelBefore {
+				cancel()
+			}
+			pages := 0
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				pages++
+				header := http.Header{}
+				if pages == 1 {
+					header.Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
+				} else {
+					tt.secondPage(cancel)
+				}
+				if err := r.Context().Err(); err != nil {
+					return nil, err
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"tags":["1.0.0"]}`)), Header: header}, nil
+			})}
+			tags, err := FetchTags(ctx, "registry.test", "team/app", nil, client)
+			if !errors.Is(err, tt.want) || tags != nil {
+				t.Fatalf("tags = %v, err = %v, want %v", tags, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestFetchTagsHonorsCallerDeadlineInternal(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		timeout  time.Duration
+		min, max time.Duration
+	}{
+		{name: "caller deadline longer than 30 seconds", timeout: 5 * time.Minute, min: 4 * time.Minute, max: 5 * time.Minute},
+		{name: "no caller deadline falls back to 120 seconds", min: 115 * time.Second, max: 120 * time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			if tt.timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tt.timeout)
+				defer cancel()
+			}
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				deadline, ok := r.Context().Deadline()
+				if !ok {
+					t.Fatal("request has no deadline")
+				}
+				if remaining := time.Until(deadline); remaining < tt.min || remaining > tt.max {
+					t.Fatalf("request deadline %s remaining, want between %s and %s", remaining, tt.min, tt.max)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"tags":["1.0.0"]}`)), Header: http.Header{}}, nil
+			})}
+			if _, err := FetchTags(ctx, "registry.test", "team/app", nil, client); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -141,11 +218,11 @@ func TestFetchTagsRejectsCredentialRedirects(t *testing.T) {
 
 func TestFetchTagsDiscardsPartialListing(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.RawQuery != "" {
+		if r.URL.Query().Has("last") {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
-		w.Header().Set("Link", `<?last=1.0.0>; rel="next"`)
+		w.Header().Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
 		_, _ = io.WriteString(w, `{"tags":["1.0.0"]}`)
 	}))
 	defer server.Close()
@@ -164,8 +241,8 @@ func TestFetchTagsMixedRelationsInternal(t *testing.T) {
 				calls++
 				header := http.Header{}
 				body := `{"tags":["1.0.0"]}`
-				if r.URL.RawQuery == "" {
-					links := []string{`<?first=1>; rel="first"`, `<?last=1.0.0>; rel="next"`, `<?prev=1>; rel="prev"`}
+				if !r.URL.Query().Has("last") {
+					links := []string{`<?first=1>; rel="first"`, `<?last=1.0.0&n=1000>; rel="next"`, `<?prev=1>; rel="prev"`}
 					if separate {
 						for _, link := range links {
 							header.Add("Link", link)

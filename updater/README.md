@@ -228,7 +228,8 @@ Import `go.getarcane.app/updater/refs` for reference parsing and
 `go.getarcane.app/updater/types` for check requests and policies. A host can
 replace `Config.RegistryTagLister` to supply registry credentials or its own
 registry client. The default uses Docker configuration credentials and handles
-registry pagination with a 30-second total lookup deadline.
+registry pagination, requesting 1000 tags per page and honoring the caller's
+deadline across every page (falling back to 120 seconds when none is set).
 
 `ImageUpdateRecord.ContainerID` scopes a candidate to one container. `ID` retains
 its existing image/store meaning. Durable stores must include `ContainerID` in
