@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/compose-spec/compose-go/v2 v2.15.0
-	github.com/mattn/go-shellwords v1.0.14
+	github.com/mattn/go-shellwords v1.0.15
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 )
 
