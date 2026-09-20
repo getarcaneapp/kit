@@ -1,3 +1,18 @@
+## updater/v0.10.0
+
+### New features
+
+* let UpdateContainer override settings exclusions([91b26fc](https://github.com/getarcaneapp/kit/commit/91b26fc3698916464c9a851f1b2d43056e55f44c) by @kmendell)
+
+### Dependencies
+
+* bump golang.org/x/text from 0.41.0 to 0.42.0 ([#6](https://github.com/getarcaneapp/kit/pull/6) by @dependabot[bot])
+* bump github.com/Masterminds/semver/v3 from 3.4.0 to 3.5.0 ([#2](https://github.com/getarcaneapp/kit/pull/2) by @dependabot[bot])
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.9.3...updater/v0.10.0
+
 ## updater/v0.9.3
 
 ### Bug fixes
