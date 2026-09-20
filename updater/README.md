@@ -249,6 +249,11 @@ fail before pulls. Digest-only pending runs retain their existing behavior.
 candidate without pulling or changing resources. `Force` can recreate an
 unchanged image but cannot bypass eligibility or version rules. A tag change
 still updates the configured reference when both tags share the same image ID.
+`Options{IgnoreSettingsExclusions: true}` lets the explicitly requested container
+update even when the `SettingsProvider` excludes it from automatic updates. It
+applies only to that target and leaves the exclusion in place; `ApplyPending`
+and the restart pass keep honoring exclusions, and disabled labels, Swarm tasks
+and immutable references stay ineligible.
 
 ### Compose host adapters
 

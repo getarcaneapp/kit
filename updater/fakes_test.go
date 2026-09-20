@@ -113,6 +113,21 @@ func (f *fakePuller) PullImage(ctx context.Context, imageRef string, progress io
 	return nil
 }
 
+// fakeSettings excludes the listed container names or IDs the way a host's
+// settings would. Its list never changes: the engine only reads it.
+type fakeSettings struct {
+	excluded []string
+}
+
+func (f *fakeSettings) ExcludedContainers(ctx context.Context) ([]string, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return f.excluded, nil
+}
+
 type fakeDigestResolver struct{}
 
 func (fakeDigestResolver) ImageDigest(ctx context.Context, imageRef string) (string, error) {

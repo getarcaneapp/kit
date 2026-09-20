@@ -66,7 +66,7 @@ func (s *Service) applyTargetedRecordsInternal(ctx context.Context, records []Im
 }
 
 func (s *Service) targetRecordPlanInternal(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, record ImageUpdateRecord) (*restartPlan, string, error) {
-	reason, err := s.containerEligibilityInternal(ctx, inspect)
+	reason, err := s.containerEligibilityInternal(ctx, inspect, enforceSettingsExclusions)
 	if err != nil || reason != "" {
 		return nil, reason, err
 	}
@@ -177,7 +177,7 @@ func (s *Service) addTargetDependenciesInternal(ctx context.Context, dockerClien
 		if err != nil {
 			continue
 		}
-		reason, err := s.containerEligibilityInternal(ctx, inspected.Container)
+		reason, err := s.containerEligibilityInternal(ctx, inspected.Container, enforceSettingsExclusions)
 		if err != nil || reason != "" {
 			continue
 		}

@@ -338,12 +338,20 @@ func TestApplyPendingTargetedFailedComposeDependencyRetainedInternal(t *testing.
 	}
 }
 
+// Settings exclusions, stopped containers and the Docker proxy are all left
+// alone by a pending batch, even when the batch is forced: the
+// IgnoreSettingsExclusions override is reserved for an explicitly requested
+// UpdateContainer target.
 func TestApplyPendingTargetedExcludedContainersInternal(t *testing.T) {
-	for _, name := range []string{"stopped", "docker-proxy"} {
+	for _, name := range []string{"stopped", "docker-proxy", "settings-excluded"} {
 		t.Run(name, func(t *testing.T) {
 			cnt := newTargetedContainerInternal(name, "1.x")
 			if name == "stopped" {
 				cnt.State.Running = false
+			}
+			settings := &fakeSettings{}
+			if name == "settings-excluded" {
+				settings.excluded = []string{name}
 			}
 			fixture := &targetedDockerInternal{containers: []container.InspectResponse{cnt}, created: map[string]string{}}
 			server := httptest.NewServer(fixture.handlerInternal(t))
@@ -361,8 +369,8 @@ func TestApplyPendingTargetedExcludedContainersInternal(t *testing.T) {
 			}()
 			store := NewMemoryPendingStore(targetedPendingInternal(name, "1.2.0"))
 			puller := &fakePuller{}
-			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
-			result, err := service.ApplyPending(context.Background(), Options{Force: true})
+			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, Settings: settings})
+			result, err := service.ApplyPending(context.Background(), Options{Force: true, IgnoreSettingsExclusions: true})
 			if err != nil {
 				t.Fatal(err)
 			}

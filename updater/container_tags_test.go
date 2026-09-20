@@ -11,22 +11,41 @@ import (
 )
 
 func TestUpdateContainerTagSelectionInternal(t *testing.T) {
+	const containerID, containerName = "app", "web"
 	for _, scenario := range []struct {
 		name                string
 		dry, force, self    bool
 		current, constraint string
 		disabled, compose   bool
-		wantFailure         bool
+		// excluded is a settings exclusion matching the container by name or ID;
+		// override sets Options.IgnoreSettingsExclusions.
+		excluded        string
+		override        bool
+		unchangedDigest bool
+		wantFailure     bool
+		wantSkipped     bool
 	}{
 		{name: "same digest still changes standalone reference"},
 		{name: "dry run selects target", dry: true},
 		{name: "self receives new tag", self: true},
 		{name: "force respects constraint", force: true, constraint: "1.0.x"},
 		{name: "force rejects invalid constraint", force: true, constraint: "bad", wantFailure: true},
-		{name: "disabled force", force: true, disabled: true},
-		{name: "digest pin force", force: true, current: "app@sha256:" + strings.Repeat("a", 64)},
-		{name: "image ID force", force: true, current: "sha256:" + strings.Repeat("a", 64)},
+		{name: "disabled force", force: true, disabled: true, wantSkipped: true},
+		{name: "digest pin force", force: true, current: "app@sha256:" + strings.Repeat("a", 64), wantSkipped: true},
+		{name: "image ID force", force: true, current: "sha256:" + strings.Repeat("a", 64), wantSkipped: true},
 		{name: "compose unsupported before pull", compose: true, wantFailure: true},
+		{name: "settings exclusion by name skips", excluded: containerName, wantSkipped: true},
+		{name: "settings exclusion by ID skips", excluded: containerID, wantSkipped: true},
+		{name: "force does not bypass settings exclusion", force: true, excluded: containerName, wantSkipped: true},
+		{name: "override updates excluded name", excluded: containerName, override: true},
+		{name: "override updates excluded ID", excluded: containerID, override: true},
+		{name: "override previews excluded container", excluded: containerName, override: true, dry: true},
+		{name: "override keeps disabled label", excluded: containerName, override: true, disabled: true, wantSkipped: true},
+		{name: "override keeps digest pin", excluded: containerName, override: true, current: "app@sha256:" + strings.Repeat("a", 64), wantSkipped: true},
+		{name: "override keeps image ID", excluded: containerName, override: true, current: "sha256:" + strings.Repeat("a", 64), wantSkipped: true},
+		{name: "override rejects invalid constraint", excluded: containerName, override: true, constraint: "bad", wantFailure: true},
+		{name: "override respects constraint", excluded: containerName, override: true, force: true, constraint: "1.0.x"},
+		{name: "override keeps unchanged digest", excluded: containerName, override: true, unchangedDigest: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			current := scenario.current
@@ -34,6 +53,9 @@ func TestUpdateContainerTagSelectionInternal(t *testing.T) {
 				current = "app:1.0.0"
 			}
 			values := map[string]string{labels.LabelUpdateStrategy: "tag"}
+			if scenario.unchangedDigest {
+				values[labels.LabelUpdateStrategy] = "digest"
+			}
 			if scenario.constraint != "" {
 				values[labels.LabelUpdateConstraint] = scenario.constraint
 			}
@@ -53,9 +75,9 @@ func TestUpdateContainerTagSelectionInternal(t *testing.T) {
 				}
 				switch {
 				case path == "/containers/json":
-					writeDockerJSON(t, w, []container.Summary{{ID: "app", Names: []string{"/app"}, Image: current, ImageID: "same", Labels: values}})
-				case path == "/containers/app/json":
-					writeDockerJSON(t, w, container.InspectResponse{ID: "app", Name: "/app", Image: "same", Config: &container.Config{Image: current, Labels: values}, HostConfig: &container.HostConfig{}})
+					writeDockerJSON(t, w, []container.Summary{{ID: containerID, Names: []string{"/" + containerName}, Image: current, ImageID: "same", Labels: values}})
+				case path == "/containers/"+containerID+"/json":
+					writeDockerJSON(t, w, container.InspectResponse{ID: containerID, Name: "/" + containerName, Image: "same", Config: &container.Config{Image: current, Labels: values}, HostConfig: &container.HostConfig{}})
 				case strings.HasPrefix(path, "/images/"):
 					writeDockerJSON(t, w, map[string]any{"Id": "same", "Config": map[string]any{}})
 				case path == "/info":
@@ -78,14 +100,21 @@ func TestUpdateContainerTagSelectionInternal(t *testing.T) {
 			puller := &fakePuller{}
 			lister := &testTagLister{tags: []string{"1.1.0", "2.0.0"}}
 			self := &fakeSelfUpdater{}
-			cfg := Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, RegistryTagLister: lister, ImagePuller: puller, SelfUpdater: self}
+			settings := &fakeSettings{}
+			if scenario.excluded != "" {
+				settings.excluded = []string{scenario.excluded}
+			}
+			cfg := Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, RegistryTagLister: lister, ImagePuller: puller, SelfUpdater: self, Settings: settings}
 			if scenario.self {
-				cfg.SelfContainerID = "app"
+				cfg.SelfContainerID = containerID
 			}
 			service := newServiceForTest(t, cfg)
-			result, err := service.UpdateContainer(t.Context(), "app", Options{DryRun: scenario.dry, Force: scenario.force})
+			result, err := service.UpdateContainer(t.Context(), containerID, Options{DryRun: scenario.dry, Force: scenario.force, IgnoreSettingsExclusions: scenario.override})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if scenario.excluded != "" && (len(settings.excluded) != 1 || settings.excluded[0] != scenario.excluded) {
+				t.Fatalf("settings exclusion changed: %v", settings.excluded)
 			}
 			if scenario.wantFailure {
 				if result.Failed != 1 || mutations != 0 || len(puller.pulled) != 0 {
@@ -93,9 +122,15 @@ func TestUpdateContainerTagSelectionInternal(t *testing.T) {
 				}
 				return
 			}
-			if scenario.disabled || scenario.current != "" {
+			if scenario.wantSkipped {
 				if result.Skipped != 1 || lister.calls != 0 || mutations != 0 || len(puller.pulled) != 0 {
 					t.Fatalf("expected ineligible: %+v", result)
+				}
+				return
+			}
+			if scenario.unchangedDigest {
+				if result.Skipped != 1 || result.Updated != 0 || mutations != 0 || len(puller.pulled) != 1 {
+					t.Fatalf("expected unchanged image to be left alone: %+v, pulls %v", result, puller.pulled)
 				}
 				return
 			}

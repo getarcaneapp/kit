@@ -13,6 +13,28 @@ type Options struct {
 	// DryRun reports what would be updated without pulling or recreating
 	// anything.
 	DryRun bool `json:"dryRun,omitempty"`
+	// IgnoreSettingsExclusions lets UpdateContainer update its explicitly
+	// requested container even when the SettingsProvider excludes it from
+	// automatic updates. It applies only to that target: ApplyPending and the
+	// restart and dependency passes keep honoring exclusions, and a container
+	// that is disabled by label, a Swarm task, or on an immutable reference
+	// stays ineligible. The exclusion itself is never modified.
+	IgnoreSettingsExclusions bool `json:"ignoreSettingsExclusions,omitempty"`
+}
+
+// exclusionPolicy tells containerEligibilityInternal whether to consult the
+// SettingsProvider's exclusion list.
+type exclusionPolicy bool
+
+const (
+	enforceSettingsExclusions exclusionPolicy = true
+	ignoreSettingsExclusions  exclusionPolicy = false
+)
+
+// targetExclusionPolicyInternal is the policy for the container a caller
+// explicitly asked UpdateContainer to update.
+func (o Options) targetExclusionPolicyInternal() exclusionPolicy {
+	return exclusionPolicy(!o.IgnoreSettingsExclusions)
 }
 
 // ResourceResult represents the result of an update operation on one resource.

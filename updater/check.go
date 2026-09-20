@@ -120,7 +120,7 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 	if result.ContainerID == "" {
 		result.ContainerID = containerID
 	}
-	reason, err := s.containerEligibilityInternal(ctx, inspect)
+	reason, err := s.containerEligibilityInternal(ctx, inspect, enforceSettingsExclusions)
 	if err != nil {
 		return result, err
 	}
@@ -166,7 +166,10 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 	return result, nil
 }
 
-func (s *Service) containerEligibilityInternal(ctx context.Context, inspect container.InspectResponse) (string, error) {
+// containerEligibilityInternal reports why a container cannot be updated, or
+// "" when it can. The label, Swarm, and configuration checks always apply;
+// policy decides whether the settings exclusion list is consulted too.
+func (s *Service) containerEligibilityInternal(ctx context.Context, inspect container.InspectResponse, policy exclusionPolicy) (string, error) {
 	if inspect.Config == nil {
 		return "container config unavailable", nil
 	}
@@ -176,6 +179,9 @@ func (s *Service) containerEligibilityInternal(ctx context.Context, inspect cont
 	}
 	if s.config.LabelPolicy.IsSwarmTask(labels) && !s.isSelfUpdateCandidate(inspect.ID, labels) {
 		return "swarm service; update at the service level", nil
+	}
+	if policy == ignoreSettingsExclusions {
+		return "", nil
 	}
 	excluded, err := s.excludedContainerSet(ctx)
 	if err != nil {

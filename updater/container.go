@@ -55,7 +55,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	endProjectStatus := s.BeginProjectUpdate(compose.ProjectLabel(labels))
 	defer endProjectStatus()
 
-	reason, eligibilityErr := s.containerEligibilityInternal(ctx, inspect)
+	reason, eligibilityErr := s.containerEligibilityInternal(ctx, inspect, opts.targetExclusionPolicyInternal())
 	if eligibilityErr != nil {
 		return out, eligibilityErr
 	}
