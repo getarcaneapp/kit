@@ -7,7 +7,7 @@ replace go.getarcane.app/kit => ../
 require (
 	github.com/depot/depot-go v0.5.3
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v29.8.0+incompatible
+	github.com/docker/cli v29.8.1+incompatible
 	github.com/moby/buildkit v0.33.0
 	github.com/moby/go-archive v0.3.3
 	github.com/moby/moby/api v1.56.0
