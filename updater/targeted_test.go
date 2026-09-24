@@ -435,9 +435,9 @@ func TestApplyPendingAutomaticTagPolicyInternal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strategy == "digest" {
+			if strategy != "auto" {
 				if result.Failed == 0 || len(puller.pulled) != 0 || len(pending) != 1 || fixture.mutations != 0 {
-					t.Fatalf("digest override was not respected: %+v", result)
+					t.Fatalf("policy without tag opt-in was not respected: %+v", result)
 				}
 				return
 			}

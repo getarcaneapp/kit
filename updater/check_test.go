@@ -227,7 +227,7 @@ func TestCheckImageAutomaticStrategy(t *testing.T) {
 			lister := &testTagLister{tags: tt.tags}
 			provider := &fakeDockerClientProvider{err: errors.New("unexpected Docker access")}
 			service := newServiceForTest(t, Config{RegistryTagLister: lister, DockerClientProvider: provider})
-			result, err := service.CheckImageUpdate(t.Context(), types.CheckRequest{ImageRef: "app:" + tt.current})
+			result, err := service.CheckImageUpdate(t.Context(), types.CheckRequest{ImageRef: "app:" + tt.current, Policy: types.Policy{Strategy: "auto"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -236,7 +236,7 @@ func TestCheckImageAutomaticStrategy(t *testing.T) {
 			}
 		})
 	}
-	for _, tag := range []string{"latest", "3", "3.1", "3.1.2-alpine", "3.1.2-rc.1"} {
+	for _, tag := range []string{"3.1.9", "latest", "3", "3.1", "3.1.2-alpine", "3.1.2-rc.1"} {
 		t.Run(tag, func(t *testing.T) {
 			lister := &testTagLister{err: errors.New("unexpected tag lookup")}
 			digest := "sha256:" + strings.Repeat("a", 64)

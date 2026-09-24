@@ -3,8 +3,9 @@ package types
 
 import "context"
 
-// Policy controls image updates. The zero policy infers tag updates for stable
-// complete semantic versions and digest updates for moving or ambiguous tags.
+// Policy controls image updates. The zero policy follows the current tag's digest.
+// A constraint or tag pattern without a strategy, or strategy auto, selects tag
+// updates for stable complete semantic versions.
 type Policy struct {
 	Strategy   string `json:"strategy,omitempty"`
 	Constraint string `json:"constraint,omitempty"`

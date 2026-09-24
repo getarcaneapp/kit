@@ -153,10 +153,11 @@ just lint
 
 ## Tag-based updates
 
-The default `auto` strategy discovers newer tags for stable, complete semantic
-versions such as `3.1.2` and `v3.1.2`. Moving tags (`latest`), partial versions
-(`3` or `3.1`), and ambiguous prerelease or variant tags keep using digest checks.
-Set `strategy: digest` to keep a specific version tag and follow only its digest.
+The default `digest` strategy keeps the configured tag and follows only its
+digest. Set `strategy: auto` to discover newer tags for stable, complete semantic
+versions such as `3.1.2` and `v3.1.2`. Under `auto`, moving tags (`latest`),
+partial versions (`3` or `3.1`), and ambiguous prerelease or variant tags keep
+using digest checks.
 
 Add a constraint or pattern to control selection for a container or Compose service:
 
@@ -170,9 +171,9 @@ services:
       com.getarcaneapp.arcane.updater.tag-pattern: '(?P<version>\d+\.\d+\.\d+)-alpine'
 ```
 
-An omitted strategy is equivalent to `strategy: auto`. A constraint or pattern
-with `auto` requests tag selection; invalid rules or an incompatible current tag
-return an error. Explicit `strategy: tag` always requires a valid tag policy.
+An omitted strategy follows the digest. A constraint or pattern without a
+strategy, or with `auto`, requests tag selection; invalid rules or an incompatible
+current tag return an error. Explicit `strategy: tag` always requires a valid tag policy.
 Without an explicit constraint, tag updates stay within the current major, or the current
 minor for `0.x`. An explicit constraint replaces that range. Version comparison
 uses complete semantic versions with an optional `v` prefix. Prereleases require

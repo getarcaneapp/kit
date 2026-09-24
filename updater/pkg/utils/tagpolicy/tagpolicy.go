@@ -13,13 +13,15 @@ import (
 )
 
 // Resolve selects a strategy from the configured reference and validates tag policies.
-// Auto follows stable complete semantic versions and uses digests for other tags.
+// An undeclared strategy follows the digest unless a constraint or tag pattern is set;
+// auto follows stable complete semantic versions and uses digests for other tags.
 func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
 	if refs.IsDigestPinnedReference(imageRef) || refs.IsImageIDLikeReference(imageRef) {
 		policy.Strategy = "digest"
 		return policy, nil
 	}
-	switch strings.TrimSpace(policy.Strategy) {
+	strategy := strings.TrimSpace(policy.Strategy)
+	switch strategy {
 	case "digest":
 		policy.Strategy = "digest"
 		return policy, nil
@@ -31,8 +33,12 @@ func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
 	if err != nil {
 		return policy, err
 	}
-	strategy := strings.TrimSpace(policy.Strategy)
-	if strategy != "tag" && policy.Constraint == "" && policy.TagPattern == "" {
+	hasRules := policy.Constraint != "" || policy.TagPattern != ""
+	if strategy == "" && !hasRules {
+		policy.Strategy = "digest"
+		return policy, nil
+	}
+	if strategy == "auto" && !hasRules {
 		version, parseErr := parseInternal(parsed.Tag, nil)
 		if parseErr != nil || version.Prerelease() != "" {
 			policy.Strategy = "digest"

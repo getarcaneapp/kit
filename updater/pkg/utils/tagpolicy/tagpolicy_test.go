@@ -82,16 +82,16 @@ func TestResolveAutomaticStrategy(t *testing.T) {
 		want      string
 		wantError bool
 	}{
-		{name: "stable", ref: "app:1.2.3", want: "tag"},
-		{name: "zero major", ref: "app:0.2.3", want: "tag"},
-		{name: "v prefix", ref: "app:v1.2.3", want: "tag"},
+		{name: "undeclared stable", ref: "app:1.2.3", want: "digest"},
+		{name: "zero major", ref: "app:0.2.3", policy: types.Policy{Strategy: "auto"}, want: "tag"},
+		{name: "v prefix", ref: "app:v1.2.3", policy: types.Policy{Strategy: "auto"}, want: "tag"},
 		{name: "explicit auto", ref: "app:1.2.3", policy: types.Policy{Strategy: "auto"}, want: "tag"},
 		{name: "latest", ref: "app:latest", want: "digest"},
 		{name: "implicit latest", ref: "app", want: "digest"},
 		{name: "major channel", ref: "app:3", want: "digest"},
 		{name: "minor channel", ref: "app:3.1", want: "digest"},
-		{name: "variant", ref: "app:3.1.2-alpine", want: "digest"},
-		{name: "prerelease", ref: "app:3.1.2-rc.1", want: "digest"},
+		{name: "variant", ref: "app:3.1.2-alpine", policy: types.Policy{Strategy: "auto"}, want: "digest"},
+		{name: "prerelease", ref: "app:3.1.2-rc.1", policy: types.Policy{Strategy: "auto"}, want: "digest"},
 		{name: "digest override", ref: "app:3.1.2", policy: types.Policy{Strategy: "digest"}, want: "digest"},
 		{name: "tag override", ref: "app:3.1.2", policy: types.Policy{Strategy: "tag"}, want: "tag"},
 		{name: "constraint opts in", ref: "app:3.1.2-rc.1", policy: types.Policy{Constraint: ">=3.1.2-0 <4"}, want: "tag"},
