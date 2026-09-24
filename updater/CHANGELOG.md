@@ -1,3 +1,13 @@
+## updater/v0.10.1
+
+### Bug fixes
+
+* default an undeclared strategy to digest([778f170](https://github.com/getarcaneapp/kit/commit/778f17098e1fcad9789065f14722226142eb3aa7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.10.0...updater/v0.10.1
+
 ## updater/v0.10.0
 
 ### New features
