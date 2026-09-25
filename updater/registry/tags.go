@@ -65,14 +65,14 @@ func FetchTags(
 			return nil, fmt.Errorf("list registry tags: %w", err)
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
-			realm, service := parseWWWAuth(resp.Header.Get("WWW-Authenticate"))
+			realm, service, scope := parseWWWAuth(resp.Header.Get("WWW-Authenticate"))
 			if err := resp.Body.Close(); err != nil {
 				return nil, fmt.Errorf("close registry authentication response: %w", err)
 			}
 			if err := validateAuthRealm(registryHost, realm); err != nil {
 				return nil, err
 			}
-			authHeader, err = fetchRegistryToken(requestCtx, &client, realm, service, repository, credential)
+			authHeader, err = fetchRegistryToken(requestCtx, &client, realm, service, scope, repository, credential)
 			if err != nil {
 				return nil, fmt.Errorf("authorize registry tags: %w", err)
 			}

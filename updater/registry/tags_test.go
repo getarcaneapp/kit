@@ -58,6 +58,33 @@ func TestFetchTagsPaginationAndAuthentication(t *testing.T) {
 	}
 }
 
+func TestFetchTagsRequestsChallengeScope(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth2/token" {
+			user, password, _ := r.BasicAuth()
+			if user != "user" || password != "password" || r.URL.Query().Get("scope") != "repository:team/app:metadata_read" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = io.WriteString(w, `{"access_token":"metadata-token"}`)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer metadata-token" {
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s/oauth2/token",service="registry",scope="repository:team/app:metadata_read"`, server.URL))
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, `{"name":"team/app","tags":["1.1.1-1"]}`)
+	}))
+	defer server.Close()
+	u, _ := url.Parse(server.URL)
+	tags, err := FetchTags(t.Context(), u.Host, "team/app", &Credentials{Username: "user", Token: "password"}, server.Client())
+	if err != nil || !reflect.DeepEqual(tags, []string{"1.1.1-1"}) {
+		t.Fatalf("FetchTags = %v, %v", tags, err)
+	}
+}
+
 func TestFetchTagsFailures(t *testing.T) {
 	for _, tt := range []struct {
 		name, body, link string
