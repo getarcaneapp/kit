@@ -1,3 +1,18 @@
+## updater/v0.10.2
+
+### Bug fixes
+
+* request the scope from the registry's auth challenge ([#12](https://github.com/getarcaneapp/kit/pull/12) by @DominikZublasing)
+* follow anonymous redirects when listing registry tags ([#11](https://github.com/getarcaneapp/kit/pull/11) by @GiulioSavini)
+
+### Dependencies
+
+* bump github.com/docker/cli from 29.8.0+incompatible to 29.8.1+incompatible ([#8](https://github.com/getarcaneapp/kit/pull/8) by @dependabot[bot])
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.10.1...updater/v0.10.2
+
 ## updater/v0.10.1
 
 ### Bug fixes
