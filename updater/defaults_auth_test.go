@@ -126,14 +126,15 @@ func TestDefaultRegistryDigestResolverUsesDockerConfigAuthAfterUnauthorized(t *t
 	var tokenURL string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v2/team/app/manifests/1.2.3":
+		case "/v2/", "/v2/team/app/manifests/1.2.3":
 			if r.Header.Get("Authorization") != "Bearer credential-token" {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenURL+`",service="registry.example.com"`)
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			w.Header().Set("Docker-Content-Digest", wantDigest)
-			w.WriteHeader(http.StatusOK)
+			if r.URL.Path != "/v2/" {
+				writeManifestHeadersForTest(w, wantDigest)
+			}
 		case "/token":
 			tokenUser, tokenPassword, _ = r.BasicAuth()
 			if err := json.NewEncoder(w).Encode(map[string]string{"token": "credential-token"}); err != nil {

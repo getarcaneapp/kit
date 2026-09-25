@@ -48,16 +48,17 @@ func defaultDigestCredentials(ctx context.Context, imageRef string) (*updaterreg
 		return nil, nil
 	}
 
-	username := strings.TrimSpace(authConfig.Username)
-	token := strings.TrimSpace(authConfig.Password)
-	if token == "" {
-		token = strings.TrimSpace(authConfig.IdentityToken)
+	credential := &updaterregistry.Credentials{
+		Username:      authConfig.Username,
+		Token:         authConfig.Password,
+		IdentityToken: authConfig.IdentityToken,
+		RegistryToken: authConfig.RegistryToken,
 	}
-	if username == "" || token == "" {
+	if (credential.Username == "" || credential.Token == "") && credential.IdentityToken == "" && credential.RegistryToken == "" {
 		logAnonymousRegistryFallback(ctx, imageRef, "credentials missing username or token", nil)
 		return nil, nil
 	}
-	return &updaterregistry.Credentials{Username: username, Token: token}, nil
+	return credential, nil
 }
 
 func defaultDockerConfigRegistryAuthConfig(ctx context.Context, imageRef string) (dockerregistry.AuthConfig, bool, error) {

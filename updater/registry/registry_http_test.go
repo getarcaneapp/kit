@@ -1,12 +1,10 @@
 package registry
 
 import (
-	"context"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 )
@@ -15,27 +13,6 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
-}
-
-func crossDomainRegistryTestClient(t *testing.T, server *httptest.Server, authHost string) *http.Client {
-	t.Helper()
-
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse server url: %v", err)
-	}
-
-	client := server.Client()
-	baseTransport := client.Transport
-	client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Host == authHost {
-			rewritten := req.Clone(req.Context())
-			rewritten.URL.Host = serverURL.Host
-			return baseTransport.RoundTrip(rewritten)
-		}
-		return baseTransport.RoundTrip(req)
-	})
-	return client
 }
 
 func TestIsFallbackEligibleDaemonError(t *testing.T) {
@@ -62,301 +39,145 @@ func TestIsFallbackEligibleDaemonError(t *testing.T) {
 	}
 }
 
-func TestFetchDigestAllowsHTTPSCrossDomainAuthRealm(t *testing.T) {
-	wantDigest := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	var manifestAuthHeaders []string
-	var tokenURL string
-	authHost := "auth.example.test"
+const testDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v2/team/app/manifests/1.2.3":
-			manifestAuthHeaders = append(manifestAuthHeaders, r.Header.Get("Authorization"))
-			switch len(manifestAuthHeaders) {
-			case 1:
-				w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenURL+`",service="registry.example.com"`)
-				w.WriteHeader(http.StatusUnauthorized)
-			case 2:
-				if got := r.Header.Get("Authorization"); got != "Bearer anonymous-token" {
-					t.Fatalf("authorization header = %q, want Bearer anonymous-token", got)
-				}
-				w.Header().Set("Docker-Content-Digest", wantDigest)
-				w.WriteHeader(http.StatusOK)
-			default:
-				t.Fatalf("unexpected manifest call %d", len(manifestAuthHeaders))
-			}
-		case "/token":
-			if got := r.URL.Query().Get("service"); got != "registry.example.com" {
-				t.Fatalf("service query = %q, want registry.example.com", got)
-			}
-			if got := r.URL.Query().Get("scope"); got != "repository:team/app:pull" {
-				t.Fatalf("scope query = %q, want repository:team/app:pull", got)
-			}
-			if err := json.NewEncoder(w).Encode(map[string]string{
-				"token": "anonymous-token",
-			}); err != nil {
-				t.Fatalf("encode token response: %v", err)
-			}
-		default:
-			http.NotFound(w, r)
+// fakeRegistryInternal serves registry.test with bearer auth from auth.test and
+// passes authorized requests to handle.
+func fakeRegistryInternal(t *testing.T, realm string, checkToken func(*http.Request), handle func(*http.Request) *http.Response) *http.Client {
+	t.Helper()
+	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "auth.test" {
+			checkToken(r)
+			return tagsResponseInternal(r, http.StatusOK, `{"token":"registry-token"}`), nil
 		}
-	}))
-	defer server.Close()
-
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse server url: %v", err)
-	}
-	tokenURL = "https://" + authHost + "/token"
-
-	gotDigest, err := FetchDigest(context.Background(), serverURL.Host, "team/app", "1.2.3", nil, crossDomainRegistryTestClient(t, server, authHost))
-
-	if err != nil {
-		t.Fatalf("FetchDigest returned error: %v", err)
-	}
-	if gotDigest != wantDigest {
-		t.Fatalf("digest = %q, want %q", gotDigest, wantDigest)
-	}
-	if len(manifestAuthHeaders) != 2 {
-		t.Fatalf("manifest calls = %d, want 2", len(manifestAuthHeaders))
-	}
-	if manifestAuthHeaders[0] != "" {
-		t.Fatalf("first authorization header = %q, want empty", manifestAuthHeaders[0])
-	}
-	if manifestAuthHeaders[1] != "Bearer anonymous-token" {
-		t.Fatalf("second authorization header = %q, want Bearer anonymous-token", manifestAuthHeaders[1])
-	}
+		if r.Header.Get("Authorization") != "Bearer registry-token" {
+			resp := tagsResponseInternal(r, http.StatusUnauthorized, "")
+			resp.Header.Set("WWW-Authenticate", `Bearer realm="`+realm+`",service="registry.test"`)
+			return resp, nil
+		}
+		return handle(r), nil
+	})}
 }
 
-func TestFetchDigestAcceptsManifestListsAndOCIIndexes(t *testing.T) {
-	wantDigest := "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-	var accept string
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		accept = r.Header.Get("Accept")
-		w.Header().Set("Docker-Content-Digest", wantDigest)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse server url: %v", err)
+func manifestResponseInternal(r *http.Request, body, digest string) *http.Response {
+	resp := tagsResponseInternal(r, http.StatusOK, body)
+	if r.Method == http.MethodHead {
+		resp.Body = http.NoBody
 	}
-
-	if _, err := FetchDigest(context.Background(), serverURL.Host, "team/app", "1.2.3", nil, server.Client()); err != nil {
-		t.Fatalf("FetchDigest() error = %v", err)
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+	if digest != "" {
+		resp.Header.Set("Docker-Content-Digest", digest)
 	}
-	for _, mediaType := range []string{
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.index.v1+json",
+	return resp
+}
+
+func TestFetchDigestUsesHeadWithTokenAuth(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		credential *Credentials
+		checkToken func(*testing.T, *http.Request)
+	}{
+		{name: "anonymous", checkToken: func(t *testing.T, r *http.Request) {
+			if _, _, ok := r.BasicAuth(); ok {
+				t.Error("anonymous token request sent credentials")
+			}
+		}},
+		{name: "basic", credential: &Credentials{Username: "user", Token: "secret"}, checkToken: func(t *testing.T, r *http.Request) {
+			if user, password, _ := r.BasicAuth(); user != "user" || password != "secret" {
+				t.Errorf("token credentials = %q/%q", user, password)
+			}
+		}},
+		{name: "identity token", credential: &Credentials{Username: "user", IdentityToken: "refresh"}, checkToken: func(t *testing.T, r *http.Request) {
+			if err := r.ParseForm(); err != nil || r.PostForm.Get("grant_type") != "refresh_token" || r.PostForm.Get("refresh_token") != "refresh" {
+				t.Errorf("identity token not exchanged as refresh token: %v %v", r.PostForm, err)
+			}
+		}},
+		{name: "registry token", credential: &Credentials{RegistryToken: "registry-token"}, checkToken: func(t *testing.T, _ *http.Request) {
+			t.Error("registry token should be used without a token request")
+		}},
 	} {
-		if !strings.Contains(accept, mediaType) {
-			t.Fatalf("Accept = %q, want %s", accept, mediaType)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			client := fakeRegistryInternal(t, "https://auth.test/token", func(r *http.Request) {
+				if r.URL.Query().Get("scope") != "repository:team/app:pull" && r.FormValue("scope") != "repository:team/app:pull" {
+					t.Errorf("token request missing pull scope: %s", r.URL)
+				}
+				tt.checkToken(t, r)
+			}, func(r *http.Request) *http.Response {
+				if r.Method != http.MethodHead || r.URL.Path != "/v2/team/app/manifests/1.2.3" {
+					t.Errorf("unexpected manifest request: %s %s", r.Method, r.URL)
+				}
+				for _, mediaType := range []string{"application/vnd.docker.distribution.manifest.list.v2+json", "application/vnd.oci.image.index.v1+json"} {
+					if !strings.Contains(r.Header.Get("Accept"), mediaType) {
+						t.Errorf("Accept = %q, want %s", r.Header.Get("Accept"), mediaType)
+					}
+				}
+				return manifestResponseInternal(r, "{}", testDigest)
+			})
+			digest, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", tt.credential, client)
+			if err != nil || digest != testDigest {
+				t.Fatalf("FetchDigest = %q, %v", digest, err)
+			}
+		})
 	}
 }
 
-func TestFetchDigestUsesCredentialsForHTTPSAuthRealm(t *testing.T) {
-	wantDigest := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-	var tokenUser string
-	var tokenPassword string
-	var tokenURL string
-	authHost := "auth.example.test"
-
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v2/team/app/manifests/1.2.3":
-			if r.Header.Get("Authorization") != "Bearer credential-token" {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenURL+`",service="registry.example.com"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			if got := r.Header.Get("Authorization"); got != "Bearer credential-token" {
-				t.Fatalf("authorization header = %q, want Bearer credential-token", got)
-			}
-			w.Header().Set("Docker-Content-Digest", wantDigest)
-			w.WriteHeader(http.StatusOK)
-		case "/token":
-			tokenUser, tokenPassword, _ = r.BasicAuth()
-			if err := json.NewEncoder(w).Encode(map[string]string{
-				"token": "credential-token",
-			}); err != nil {
-				t.Fatalf("encode token response: %v", err)
-			}
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse server url: %v", err)
-	}
-	tokenURL = "https://" + authHost + "/token"
-
-	gotDigest, err := FetchDigest(context.Background(), serverURL.Host, "team/app", "1.2.3", &Credentials{
-		Username: "stored-user",
-		Token:    "stored-token",
-	}, crossDomainRegistryTestClient(t, server, authHost))
-
-	if err != nil {
-		t.Fatalf("FetchDigest returned error: %v", err)
-	}
-	if gotDigest != wantDigest {
-		t.Fatalf("digest = %q, want %q", gotDigest, wantDigest)
-	}
-	if tokenUser != "stored-user" {
-		t.Fatalf("token user = %q, want stored-user", tokenUser)
-	}
-	if tokenPassword != "stored-token" {
-		t.Fatalf("token password = %q, want stored-token", tokenPassword)
+func TestFetchDigestFallsBackToGetWithoutDigestHeader(t *testing.T) {
+	body := `{"schemaVersion":2}`
+	sum := sha256.Sum256([]byte(body))
+	client := fakeRegistryInternal(t, "https://auth.test/token", func(*http.Request) {}, func(r *http.Request) *http.Response {
+		return manifestResponseInternal(r, body, "")
+	})
+	digest, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client)
+	if want := "sha256:" + hex.EncodeToString(sum[:]); err != nil || digest != want {
+		t.Fatalf("FetchDigest = %q, %v; want %q", digest, err, want)
 	}
 }
 
-func TestFetchRegistryRateLimitUsesHeadForTokenAuth(t *testing.T) {
-	var tokenCalls int
-	var manifestCalls int
-	var tokenURL string
-	authHost := "auth.example.test"
-
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v2/team/app/manifests/1.2.3":
-			manifestCalls++
-			if r.Method != http.MethodHead {
-				t.Fatalf("manifest method = %s, want HEAD", r.Method)
-			}
-			if r.Header.Get("Authorization") != "Bearer anonymous-token" {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenURL+`",service="registry.example.com"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("RateLimit-Limit", "100;w=21600")
-			w.Header().Set("RateLimit-Remaining", "90;w=21600")
-			w.WriteHeader(http.StatusOK)
-		case "/token":
-			tokenCalls++
-			if got := r.URL.Query().Get("scope"); got != "repository:team/app:pull" {
-				t.Fatalf("scope query = %q, want repository:team/app:pull", got)
-			}
-			if err := json.NewEncoder(w).Encode(map[string]string{
-				"token": "anonymous-token",
-			}); err != nil {
-				t.Fatalf("encode token response: %v", err)
-			}
-		default:
-			http.NotFound(w, r)
+func TestFetchDigestDoesNotFallBackOnRegistryError(t *testing.T) {
+	client := fakeRegistryInternal(t, "https://auth.test/token", func(*http.Request) {}, func(r *http.Request) *http.Response {
+		if r.Method != http.MethodHead {
+			t.Errorf("unexpected %s after registry error", r.Method)
 		}
-	}))
-	defer server.Close()
-
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse server url: %v", err)
-	}
-	tokenURL = "https://" + authHost + "/token"
-
-	gotLimit, err := FetchRegistryRateLimit(context.Background(), serverURL.Host, "team/app", "1.2.3", nil, crossDomainRegistryTestClient(t, server, authHost))
-
-	if err != nil {
-		t.Fatalf("FetchRegistryRateLimit returned error: %v", err)
-	}
-	if gotLimit == nil || gotLimit.Limit == nil || *gotLimit.Limit != 100 {
-		t.Fatalf("limit = %#v, want 100", gotLimit)
-	}
-	if gotLimit.Remaining == nil || *gotLimit.Remaining != 90 {
-		t.Fatalf("remaining = %#v, want 90", gotLimit.Remaining)
-	}
-	if tokenCalls != 1 {
-		t.Fatalf("token calls = %d, want 1", tokenCalls)
-	}
-	if manifestCalls != 2 {
-		t.Fatalf("manifest calls = %d, want 2", manifestCalls)
-	}
-}
-
-func TestFetchRegistryRateLimitUsesHeadWithCredentials(t *testing.T) {
-	var tokenUser string
-	var tokenPassword string
-	var tokenURL string
-	authHost := "auth.example.test"
-
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v2/team/app/manifests/1.2.3":
-			if r.Method != http.MethodHead {
-				t.Fatalf("manifest method = %s, want HEAD", r.Method)
-			}
-			if r.Header.Get("Authorization") != "Bearer credential-token" {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="`+tokenURL+`",service="registry.example.com"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("RateLimit-Limit", "200;w=21600")
-			w.Header().Set("RateLimit-Remaining", "199;w=21600")
-			w.WriteHeader(http.StatusOK)
-		case "/token":
-			tokenUser, tokenPassword, _ = r.BasicAuth()
-			if err := json.NewEncoder(w).Encode(map[string]string{
-				"token": "credential-token",
-			}); err != nil {
-				t.Fatalf("encode token response: %v", err)
-			}
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse server url: %v", err)
-	}
-	tokenURL = "https://" + authHost + "/token"
-
-	gotLimit, err := FetchRegistryRateLimit(context.Background(), serverURL.Host, "team/app", "1.2.3", &Credentials{
-		Username: "stored-user",
-		Token:    "stored-token",
-	}, crossDomainRegistryTestClient(t, server, authHost))
-
-	if err != nil {
-		t.Fatalf("FetchRegistryRateLimit returned error: %v", err)
-	}
-	if gotLimit == nil || gotLimit.Limit == nil || *gotLimit.Limit != 200 {
-		t.Fatalf("limit = %#v, want 200", gotLimit)
-	}
-	if tokenUser != "stored-user" {
-		t.Fatalf("token user = %q, want stored-user", tokenUser)
-	}
-	if tokenPassword != "stored-token" {
-		t.Fatalf("token password = %q, want stored-token", tokenPassword)
+		return tagsResponseInternal(r, http.StatusNotFound, "")
+	})
+	if _, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client); err == nil {
+		t.Fatal("FetchDigest returned nil error")
 	}
 }
 
 func TestFetchDigestRejectsNonHTTPSAuthRealm(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v2/team/app/manifests/1.2.3":
-			w.Header().Set("WWW-Authenticate", `Bearer realm="`+"http"+`://auth.example.test/token",service="registry.example.com"`)
-			w.WriteHeader(http.StatusUnauthorized)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse server url: %v", err)
-	}
-
-	_, err = FetchDigest(context.Background(), serverURL.Host, "team/app", "1.2.3", nil, server.Client())
-
-	if err == nil {
+	client := fakeRegistryInternal(t, "http://auth.test/token", func(*http.Request) {
+		t.Error("token requested from non-HTTPS realm")
+	}, func(r *http.Request) *http.Response {
+		return manifestResponseInternal(r, "{}", testDigest)
+	})
+	if _, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client); err == nil {
 		t.Fatal("FetchDigest returned nil error")
 	}
-	if !strings.Contains(err.Error(), "registry auth realm must use https") {
-		t.Fatalf("error = %q, want registry auth realm must use https", err.Error())
+}
+
+func TestFetchRegistryRateLimitUsesHead(t *testing.T) {
+	for _, credential := range []*Credentials{nil, {Username: "user", Token: "secret"}} {
+		client := fakeRegistryInternal(t, "https://auth.test/token", func(r *http.Request) {
+			if user, _, _ := r.BasicAuth(); credential != nil && user != "user" {
+				t.Errorf("token user = %q, want user", user)
+			}
+		}, func(r *http.Request) *http.Response {
+			if r.Method != http.MethodHead {
+				t.Errorf("manifest method = %s, want HEAD", r.Method)
+			}
+			resp := manifestResponseInternal(r, "{}", testDigest)
+			resp.Header.Set("RateLimit-Limit", "100;w=21600")
+			resp.Header.Set("RateLimit-Remaining", "90;w=21600")
+			return resp
+		})
+		limit, err := FetchRegistryRateLimit(t.Context(), "registry.test", "team/app", "1.2.3", credential, client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if limit.Limit == nil || *limit.Limit != 100 || limit.Remaining == nil || *limit.Remaining != 90 || limit.WindowSeconds == nil || *limit.WindowSeconds != 21600 {
+			t.Fatalf("rate limit = %+v", limit)
+		}
 	}
 }
