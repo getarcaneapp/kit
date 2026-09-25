@@ -1,12 +1,9 @@
-// Package registry talks to container registries over HTTP to resolve image
-// digests and read pull rate limits, handling token auth and the fallbacks
-// needed when a registry answers unexpectedly.
+// Package registry talks to container registries through go-containerregistry
+// to list tags, resolve image digests and read pull rate limits.
 package registry
 
 import (
 	"context"
-	"encoding/base64"
-	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 
 	kitregistry "go.getarcane.app/kit/pkg/registry"
 )
@@ -28,6 +31,9 @@ const (
 type Credentials struct {
 	Username string
 	Token    string
+	// IdentityToken and RegistryToken are OAuth tokens from a Docker config.
+	IdentityToken string
+	RegistryToken string
 }
 
 // RateLimitInfo contains pull quota information returned by registry headers.
@@ -74,227 +80,123 @@ func IsFallbackEligibleDaemonError(err error) bool {
 
 // FetchRegistryRateLimit fetches registry pull rate-limit information.
 func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag string, credential *Credentials, httpClient *http.Client) (*RateLimitInfo, error) {
-	if httpClient == nil {
-		httpClient = NewHTTPClient()
-	}
-
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	header, err := authorizedManifestHeaders(requestCtx, httpClient, http.MethodHead, registryHost, repository, tag, credential)
+	ref, err := manifestReferenceInternal(registryHost, repository, tag)
 	if err != nil {
 		return nil, err
 	}
-	return extractRateLimitFromHeaders(header)
-}
-
-// FetchDigest fetches the manifest digest for a registry image reference.
-func FetchDigest(ctx context.Context, registryHost, repository, tag string, credential *Credentials, httpClient *http.Client) (string, error) {
-	if httpClient == nil {
-		httpClient = NewHTTPClient()
-	}
-
-	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	header, err := authorizedManifestHeaders(requestCtx, httpClient, http.MethodGet, registryHost, repository, tag, credential)
+	repo := ref.Context()
+	authorized, err := transport.NewWithContext(requestCtx, repo.Registry, authenticatorInternal(credential), baseTransportInternal(httpClient), []string{repo.Scope(transport.PullScope)})
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("authorize registry: %w", err)
 	}
 
-	digest := extractDigestFromHeaders(header)
-	if digest == "" {
-		return "", errors.New("no digest header found in response")
-	}
-	return digest, nil
-}
-
-func authorizedManifestHeaders(ctx context.Context, httpClient *http.Client, method, registryHost, repository, tag string, credential *Credentials) (http.Header, error) {
-	resp, err := manifestRequest(ctx, httpClient, method, registryHost, repository, tag, basicAuthHeaderForCredential(credential))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		challenge := resp.Header.Get("WWW-Authenticate")
-		_ = resp.Body.Close()
-		if challenge == "" {
-			return nil, fmt.Errorf("manifest request failed with status: %d", resp.StatusCode)
-		}
-		realm, service, scope := parseWWWAuth(challenge)
-		if realm == "" {
-			return nil, errors.New("no auth realm found")
-		}
-		if err := validateAuthRealm(registryHost, realm); err != nil {
-			return nil, err
-		}
-		token, err := fetchRegistryToken(ctx, httpClient, realm, service, scope, repository, credential)
-		if err != nil {
-			return nil, err
-		}
-		resp, err = manifestRequest(ctx, httpClient, method, registryHost, repository, tag, token)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("authenticated manifest request failed with status: %d", resp.StatusCode)
-		}
-		return resp.Header, nil
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("manifest request failed with status: %d", resp.StatusCode)
-	}
-	return resp.Header, nil
-}
-
-func manifestRequest(ctx context.Context, httpClient *http.Client, method, registryHost, repository, tag, authHeader string) (*http.Response, error) {
-	registryHost = kitregistry.Normalize(registryHost)
-	if registryHost == "docker.io" {
-		registryHost = defaultRegistryHost
-	}
-
-	manifestURL := url.URL{
-		Scheme: "https",
-		Host:   registryHost,
-		Path:   "/v2/" + strings.Trim(repository, "/") + "/manifests/" + strings.TrimSpace(tag),
-	}
-	req, err := http.NewRequestWithContext(ctx, method, manifestURL.String(), nil)
+	// HEAD reads the rate-limit headers without counting as a pull.
+	manifestURL := url.URL{Scheme: repo.Scheme(), Host: repo.RegistryStr(), Path: "/v2/" + repo.RepositoryStr() + "/manifests/" + ref.TagStr()}
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodHead, manifestURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
-		"application/vnd.oci.image.index.v1+json",
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.docker.distribution.manifest.v2+json",
+		string(types.OCIImageIndex),
+		string(types.OCIManifestSchema1),
+		string(types.DockerManifestList),
+		string(types.DockerManifestSchema2),
 	}, ", "))
-	if authHeader != "" {
-		req.Header.Set("Authorization", authHeader)
-	}
-	return httpClient.Do(req)
-}
-
-func fetchRegistryToken(ctx context.Context, httpClient *http.Client, authURL, service, scope, repository string, credential *Credentials) (string, error) {
-	u, err := url.Parse(authURL)
+	resp, err := (&http.Client{Transport: authorized}).Do(req)
 	if err != nil {
-		return "", err
-	}
-	q := u.Query()
-	if service != "" {
-		q.Set("service", service)
-	}
-	// Endpoints can need more than pull; ACR challenges tags/list for metadata_read and refuses pull-only tokens there.
-	if scope == "" {
-		scope = "repository:" + repository + ":pull"
-	}
-	q.Set("scope", scope)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return "", err
-	}
-	if credential != nil && strings.TrimSpace(credential.Username) != "" && strings.TrimSpace(credential.Token) != "" {
-		req.SetBasicAuth(strings.TrimSpace(credential.Username), strings.TrimSpace(credential.Token))
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("token request failed with status: %d", resp.StatusCode)
+	if err := transport.CheckError(resp, http.StatusOK); err != nil {
+		return nil, err
 	}
+	return extractRateLimitFromHeaders(resp.Header)
+}
 
-	var tokenResp struct {
-		Token       string `json:"token"`
-		AccessToken string `json:"access_token"`
-	}
-	if err := json.UnmarshalRead(resp.Body, &tokenResp); err != nil {
+// FetchDigest fetches the manifest digest for a registry image reference.
+func FetchDigest(ctx context.Context, registryHost, repository, tag string, credential *Credentials, httpClient *http.Client) (string, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	ref, err := manifestReferenceInternal(registryHost, repository, tag)
+	if err != nil {
 		return "", err
 	}
-	token := strings.TrimSpace(tokenResp.Token)
-	if token == "" {
-		token = strings.TrimSpace(tokenResp.AccessToken)
-	}
-	if token == "" {
-		return "", errors.New("token response did not contain a token")
-	}
-	return "Bearer " + token, nil
-}
+	options := remoteOptionsInternal(requestCtx, credential, httpClient)
 
-func parseWWWAuth(challenge string) (realm, service, scope string) {
-	challenge = strings.TrimSpace(challenge)
-	if !strings.HasPrefix(strings.ToLower(challenge), "bearer ") {
-		return "", "", ""
-	}
-	params := strings.TrimSpace(challenge[len("Bearer "):])
-	for _, part := range splitAuthParams(params) {
-		key, value, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-		value = strings.Trim(strings.TrimSpace(value), `"`)
-		switch strings.ToLower(strings.TrimSpace(key)) {
-		case "realm":
-			realm = value
-		case "service":
-			service = value
-		case "scope":
-			scope = value
+	// HEAD does not count as a pull. Fall back to GET only when the registry
+	// answered without a digest header, since GET computes it from the manifest.
+	desc, err := remote.Head(ref, options...)
+	var registryErr *transport.Error
+	if err != nil && !errors.As(err, &registryErr) && requestCtx.Err() == nil {
+		var manifest *remote.Descriptor
+		if manifest, err = remote.Get(ref, options...); err == nil {
+			desc = &manifest.Descriptor
 		}
 	}
-	return realm, service, scope
-}
-
-func validateAuthRealm(_ string, realm string) error {
-	u, err := url.Parse(realm)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("fetch manifest digest: %w", err)
 	}
-	if strings.ToLower(u.Scheme) != "https" {
-		return fmt.Errorf("registry auth realm must use https: %s", realm)
-	}
-	if strings.TrimSpace(u.Host) == "" {
-		return fmt.Errorf("invalid registry auth realm host: %s", realm)
-	}
-	return nil
+	return desc.Digest.String(), nil
 }
 
-func splitAuthParams(params string) []string {
-	var parts []string
-	var current strings.Builder
-	inQuote := false
-	for _, r := range params {
-		switch r {
-		case '"':
-			inQuote = !inQuote
-			current.WriteRune(r)
-		case ',':
-			if inQuote {
-				current.WriteRune(r)
-				continue
-			}
-			parts = append(parts, strings.TrimSpace(current.String()))
-			current.Reset()
-		default:
-			current.WriteRune(r)
-		}
+func repositoryInternal(registryHost, repository string) (name.Repository, error) {
+	registryHost = kitregistry.Normalize(registryHost)
+	if registryHost == "docker.io" {
+		registryHost = defaultRegistryHost
 	}
-	if current.Len() > 0 {
-		parts = append(parts, strings.TrimSpace(current.String()))
+	repo, err := name.NewRepository(registryHost + "/" + strings.Trim(repository, "/"))
+	if err != nil {
+		return name.Repository{}, fmt.Errorf("parse registry repository: %w", err)
 	}
-	return parts
+	return repo, nil
 }
 
-func extractDigestFromHeaders(header http.Header) string {
-	for _, key := range []string{"Docker-Content-Digest", "OCI-Content-Digest"} {
-		if value := strings.TrimSpace(header.Get(key)); value != "" {
-			return value
-		}
+func manifestReferenceInternal(registryHost, repository, tag string) (name.Tag, error) {
+	repo, err := repositoryInternal(registryHost, repository)
+	if err != nil {
+		return name.Tag{}, err
 	}
-	return ""
+	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(tag))
+	if err != nil {
+		return name.Tag{}, fmt.Errorf("parse image tag: %w", err)
+	}
+	return ref, nil
+}
+
+func remoteOptionsInternal(ctx context.Context, credential *Credentials, httpClient *http.Client) []remote.Option {
+	return []remote.Option{
+		remote.WithContext(ctx),
+		remote.WithAuth(authenticatorInternal(credential)),
+		remote.WithTransport(baseTransportInternal(httpClient)),
+	}
+}
+
+func baseTransportInternal(httpClient *http.Client) http.RoundTripper {
+	if httpClient != nil && httpClient.Transport != nil {
+		return httpClient.Transport
+	}
+	return http.DefaultTransport
+}
+
+func authenticatorInternal(credential *Credentials) authn.Authenticator {
+	if credential == nil {
+		return authn.Anonymous
+	}
+	config := authn.AuthConfig{
+		IdentityToken: strings.TrimSpace(credential.IdentityToken),
+		RegistryToken: strings.TrimSpace(credential.RegistryToken),
+	}
+	if username, token := strings.TrimSpace(credential.Username), strings.TrimSpace(credential.Token); username != "" && token != "" {
+		config.Username, config.Password = username, token
+	}
+	if config == (authn.AuthConfig{}) {
+		return authn.Anonymous
+	}
+	return authn.FromConfig(config)
 }
 
 func extractRateLimitFromHeaders(header http.Header) (*RateLimitInfo, error) {
@@ -347,11 +249,4 @@ func parseRateLimitHeader(value string) (*int, *int) {
 		}
 	}
 	return &n, window
-}
-
-func basicAuthHeaderForCredential(credential *Credentials) string {
-	if credential == nil || strings.TrimSpace(credential.Username) == "" || strings.TrimSpace(credential.Token) == "" {
-		return ""
-	}
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(strings.TrimSpace(credential.Username)+":"+strings.TrimSpace(credential.Token)))
 }

@@ -3,53 +3,55 @@ package registry
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
+func tagsResponseInternal(r *http.Request, status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}
+}
+
 func TestFetchTagsPaginationAndAuthentication(t *testing.T) {
-	var server *httptest.Server
 	var tokenCalls, pageCalls int
 	pages := map[string]struct{ body, link string }{
 		"":      {body: `{"name":"team/app","tags":["1.0.0"]}`, link: `</v2/team/app/tags/list?last=1.0.0&n=1000>; rel="next"`},
 		"1.0.0": {body: `{"name":"team/app","tags":["1.0.1"]}`, link: `</v2/team/app/tags/list?last=1.0.1&n=1000>; rel="next"`},
 		"1.0.1": {body: `{"name":"team/app","tags":["1.1.0"]}`},
 	}
-	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/token" {
 			tokenCalls++
 			user, password, _ := r.BasicAuth()
 			if user != "user" || password != "password" || r.URL.Query().Get("scope") != "repository:team/app:pull" {
 				t.Error("token request did not preserve credentials and scope")
 			}
-			_, _ = io.WriteString(w, `{"token":"private-token"}`)
-			return
+			return tagsResponseInternal(r, http.StatusOK, `{"token":"private-token"}`), nil
 		}
 		if r.Header.Get("Authorization") != "Bearer private-token" {
-			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s/token",service="registry"`, server.URL))
-			w.WriteHeader(http.StatusUnauthorized)
-			return
+			resp := tagsResponseInternal(r, http.StatusUnauthorized, "")
+			resp.Header.Set("WWW-Authenticate", `Bearer realm="https://registry.test/token",service="registry"`)
+			return resp, nil
+		}
+		if r.URL.Path == "/v2/" {
+			return tagsResponseInternal(r, http.StatusOK, "{}"), nil
 		}
 		pageCalls++
 		if r.URL.Query().Get("n") != "1000" {
 			t.Errorf("page %q requested without explicit page size: %s", r.URL.Query().Get("last"), r.URL.RawQuery)
 		}
 		page := pages[r.URL.Query().Get("last")]
+		resp := tagsResponseInternal(r, http.StatusOK, page.body)
 		if page.link != "" {
-			w.Header().Set("Link", page.link)
+			resp.Header.Set("Link", page.link)
 		}
-		_, _ = io.WriteString(w, page.body)
-	}))
-	defer server.Close()
-	u, _ := url.Parse(server.URL)
-	tags, err := FetchTags(t.Context(), u.Host, "team/app", &Credentials{Username: "user", Token: "password"}, server.Client())
+		return resp, nil
+	})}
+	tags, err := FetchTags(t.Context(), "registry.test", "team/app", &Credentials{Username: "user", Token: "password"}, client)
 	if err != nil || !reflect.DeepEqual(tags, []string{"1.0.0", "1.0.1", "1.1.0"}) {
 		t.Fatalf("FetchTags = %v, %v", tags, err)
 	}
@@ -59,27 +61,32 @@ func TestFetchTagsPaginationAndAuthentication(t *testing.T) {
 }
 
 func TestFetchTagsRequestsChallengeScope(t *testing.T) {
-	var server *httptest.Server
-	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// ACR challenges tags/list for metadata_read and refuses pull-only tokens there.
+	const metadataScope = "repository:team/app:metadata_read"
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/oauth2/token" {
-			user, password, _ := r.BasicAuth()
-			if user != "user" || password != "password" || r.URL.Query().Get("scope") != "repository:team/app:metadata_read" {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
+			if user, password, _ := r.BasicAuth(); user != "user" || password != "password" {
+				return tagsResponseInternal(r, http.StatusUnauthorized, ""), nil
 			}
-			_, _ = io.WriteString(w, `{"access_token":"metadata-token"}`)
-			return
+			if slices.Contains(r.URL.Query()["scope"], metadataScope) {
+				return tagsResponseInternal(r, http.StatusOK, `{"access_token":"metadata-token"}`), nil
+			}
+			return tagsResponseInternal(r, http.StatusOK, `{"access_token":"pull-token"}`), nil
 		}
-		if r.Header.Get("Authorization") != "Bearer metadata-token" {
-			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s/oauth2/token",service="registry",scope="repository:team/app:metadata_read"`, server.URL))
-			w.WriteHeader(http.StatusUnauthorized)
-			return
+		challenge := `Bearer realm="https://registry.test/oauth2/token",service="registry"`
+		switch {
+		case r.URL.Path == "/v2/" && r.Header.Get("Authorization") != "":
+			return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+		case r.URL.Path != "/v2/" && r.Header.Get("Authorization") == "Bearer metadata-token":
+			return tagsResponseInternal(r, http.StatusOK, `{"name":"team/app","tags":["1.1.1-1"]}`), nil
+		case r.URL.Path != "/v2/":
+			challenge += `,scope="` + metadataScope + `"`
 		}
-		_, _ = io.WriteString(w, `{"name":"team/app","tags":["1.1.1-1"]}`)
-	}))
-	defer server.Close()
-	u, _ := url.Parse(server.URL)
-	tags, err := FetchTags(t.Context(), u.Host, "team/app", &Credentials{Username: "user", Token: "password"}, server.Client())
+		resp := tagsResponseInternal(r, http.StatusUnauthorized, "")
+		resp.Header.Set("WWW-Authenticate", challenge)
+		return resp, nil
+	})}
+	tags, err := FetchTags(t.Context(), "registry.test", "team/app", &Credentials{Username: "user", Token: "password"}, client)
 	if err != nil || !reflect.DeepEqual(tags, []string{"1.1.1-1"}) {
 		t.Fatalf("FetchTags = %v, %v", tags, err)
 	}
@@ -91,31 +98,27 @@ func TestFetchTagsFailures(t *testing.T) {
 		status           int
 	}{
 		{name: "malformed JSON", body: `{"tags":[`},
-		{name: "trailing JSON", body: `{"tags":[]} {}`},
-		{name: "missing tags", body: `{}`},
-		{name: "wrong tags type", body: `{"tags":"1.0.0"}`},
-		{name: "wrong repository", body: `{"name":"other","tags":[]}`},
-		{name: "rate limit", status: http.StatusTooManyRequests},
+		{name: "not found", status: http.StatusNotFound},
 		{name: "unauthorized", status: http.StatusUnauthorized},
-		{name: "cycle", body: `{"tags":["1.0.0"]}`, link: `</v2/team/app/tags/list>; rel="next"`},
-		{name: "foreign host", body: `{"tags":[]}`, link: `<https://other.test/v2/team/app/tags/list>; rel="next"`},
-		{name: "foreign endpoint", body: `{"tags":[]}`, link: `</v2/other/tags/list>; rel="next"`},
-		{name: "malformed link", body: `{"tags":[]}`, link: `invalid`},
-		{name: "missing relation", body: `{"tags":[]}`, link: `</v2/team/app/tags/list?last=1>`},
+		{name: "foreign host", body: `{"tags":["1.0.0"]}`, link: `<https://other.test/v2/team/app/tags/list>; rel="next"`},
+		{name: "malformed link", body: `{"tags":["1.0.0"]}`, link: `invalid`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/v2/" {
+					return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+				}
+				status := tt.status
+				if status == 0 {
+					status = http.StatusOK
+				}
+				resp := tagsResponseInternal(r, status, tt.body)
 				if tt.link != "" {
-					w.Header().Set("Link", tt.link)
+					resp.Header.Set("Link", tt.link)
 				}
-				if tt.status != 0 {
-					w.WriteHeader(tt.status)
-				}
-				_, _ = io.WriteString(w, tt.body)
-			}))
-			defer server.Close()
-			u, _ := url.Parse(server.URL)
-			tags, err := FetchTags(t.Context(), u.Host, "team/app", nil, server.Client())
+				return resp, nil
+			})}
+			tags, err := FetchTags(t.Context(), "registry.test", "team/app", nil, client)
 			if err == nil || tags != nil {
 				t.Fatalf("expected failure without partial tags, got %v, %v", tags, err)
 			}
@@ -126,15 +129,39 @@ func TestFetchTagsFailures(t *testing.T) {
 func TestFetchTagsDockerHubAndEmpty(t *testing.T) {
 	for _, body := range []string{`{"tags":[]}`, `{"tags":null}`} {
 		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			if r.URL.Host != "registry-1.docker.io" || r.URL.Path != "/v2/library/alpine/tags/list" {
+			if r.URL.Host != "registry-1.docker.io" {
 				t.Errorf("unexpected URL: %s", r.URL)
 			}
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+			if r.URL.Path == "/v2/" {
+				return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+			}
+			if r.URL.Path != "/v2/library/alpine/tags/list" {
+				t.Errorf("unexpected URL: %s", r.URL)
+			}
+			return tagsResponseInternal(r, http.StatusOK, body), nil
 		})}
 		tags, err := FetchTags(t.Context(), "docker.io", "library/alpine", nil, client)
 		if err != nil || len(tags) != 0 {
 			t.Fatalf("expected empty list: %v, %v", tags, err)
 		}
+	}
+}
+
+func TestFetchTagsDiscardsPartialListing(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.URL.Path == "/v2/":
+			return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+		case r.URL.Query().Has("last"):
+			return tagsResponseInternal(r, http.StatusNotFound, ""), nil
+		}
+		resp := tagsResponseInternal(r, http.StatusOK, `{"tags":["1.0.0"]}`)
+		resp.Header.Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
+		return resp, nil
+	})}
+	tags, err := FetchTags(t.Context(), "registry.test", "team/app", nil, client)
+	if err == nil || tags != nil {
+		t.Fatalf("partial listing escaped: %v, %v", tags, err)
 	}
 }
 
@@ -161,19 +188,18 @@ func TestFetchTagsCancellation(t *testing.T) {
 			if tt.cancelBefore {
 				cancel()
 			}
-			pages := 0
 			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				pages++
-				header := http.Header{}
-				if pages == 1 {
-					header.Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
-				} else {
+				if r.URL.Query().Has("last") {
 					tt.secondPage(cancel)
 				}
 				if err := r.Context().Err(); err != nil {
 					return nil, err
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"tags":["1.0.0"]}`)), Header: header}, nil
+				resp := tagsResponseInternal(r, http.StatusOK, `{"tags":["1.0.0"]}`)
+				if r.URL.Path != "/v2/" && !r.URL.Query().Has("last") {
+					resp.Header.Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
+				}
+				return resp, nil
 			})}
 			tags, err := FetchTags(ctx, "registry.test", "team/app", nil, client)
 			if !errors.Is(err, tt.want) || tags != nil {
@@ -207,7 +233,7 @@ func TestFetchTagsHonorsCallerDeadlineInternal(t *testing.T) {
 				if remaining := time.Until(deadline); remaining < tt.min || remaining > tt.max {
 					t.Fatalf("request deadline %s remaining, want between %s and %s", remaining, tt.min, tt.max)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"tags":["1.0.0"]}`)), Header: http.Header{}}, nil
+				return tagsResponseInternal(r, http.StatusOK, `{"tags":["1.0.0"]}`), nil
 			})}
 			if _, err := FetchTags(ctx, "registry.test", "team/app", nil, client); err != nil {
 				t.Fatal(err)
@@ -216,170 +242,26 @@ func TestFetchTagsHonorsCallerDeadlineInternal(t *testing.T) {
 	}
 }
 
-func TestFetchTagsRejectsCredentialRedirects(t *testing.T) {
-	for _, tokenRedirect := range []bool{false, true} {
-		t.Run(fmt.Sprint(tokenRedirect), func(t *testing.T) {
-			var server *httptest.Server
-			var leaked bool
-			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/leak" {
-					leaked = true
-					return
+func TestFetchTagsFollowsRedirectsWithoutForwardingCredentials(t *testing.T) {
+	// registry.k8s.io redirects tag listings to a regional mirror.
+	for _, credential := range []*Credentials{nil, {Username: "user", Token: "secret"}} {
+		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch {
+			case r.URL.Host == "mirror.test":
+				if r.Header.Get("Authorization") != "" {
+					t.Error("credentials forwarded to redirect target")
 				}
-				if tokenRedirect && r.URL.Path != "/token" {
-					w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s/token"`, server.URL))
-					w.WriteHeader(http.StatusUnauthorized)
-					return
-				}
-				http.Redirect(w, r, "/leak", http.StatusTemporaryRedirect)
-			}))
-			defer server.Close()
-			u, _ := url.Parse(server.URL)
-			_, err := FetchTags(t.Context(), u.Host, "team/app", &Credentials{Username: "user", Token: "secret"}, server.Client())
-			if err == nil || leaked {
-				t.Fatalf("redirect allowed: leaked=%v, err=%v", leaked, err)
+				return tagsResponseInternal(r, http.StatusOK, `{"name":"mirror/team/app","tags":["1.0.0","1.1.0"]}`), nil
+			case r.URL.Path == "/v2/":
+				return tagsResponseInternal(r, http.StatusOK, "{}"), nil
 			}
-		})
-	}
-}
-
-func TestFetchTagsFollowsAnonymousRedirects(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v2/team/app/tags/list":
-			http.Redirect(w, r, "/v2/mirror/team/app/tags/list?rid=1", http.StatusTemporaryRedirect)
-		case "/v2/mirror/team/app/tags/list":
-			_, _ = io.WriteString(w, `{"name":"mirror/team/app","tags":["1.0.0","1.1.0"]}`)
-		default:
-			w.WriteHeader(http.StatusNotFound)
+			resp := tagsResponseInternal(r, http.StatusTemporaryRedirect, "")
+			resp.Header.Set("Location", "https://mirror.test/v2/mirror/team/app/tags/list")
+			return resp, nil
+		})}
+		tags, err := FetchTags(t.Context(), "registry.test", "team/app", credential, client)
+		if err != nil || !reflect.DeepEqual(tags, []string{"1.0.0", "1.1.0"}) {
+			t.Fatalf("credential=%v: FetchTags = %v, %v", credential != nil, tags, err)
 		}
-	}))
-	defer server.Close()
-	u, _ := url.Parse(server.URL)
-	tags, err := FetchTags(t.Context(), u.Host, "team/app", nil, server.Client())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"1.0.0", "1.1.0"}; !reflect.DeepEqual(tags, want) {
-		t.Fatalf("tags = %v, want %v", tags, want)
-	}
-}
-
-func TestFetchTagsRejectsInsecureRedirects(t *testing.T) {
-	var leaked bool
-	plain := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		leaked = true
-	}))
-	defer plain.Close()
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, plain.URL+"/v2/team/app/tags/list", http.StatusTemporaryRedirect)
-	}))
-	defer server.Close()
-	u, _ := url.Parse(server.URL)
-	_, err := FetchTags(t.Context(), u.Host, "team/app", nil, server.Client())
-	if err == nil || leaked {
-		t.Fatalf("insecure redirect allowed: leaked=%v, err=%v", leaked, err)
-	}
-}
-
-func TestFetchTagsKeepsCallerRedirectPolicy(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/v2/mirror/team/app/tags/list", http.StatusTemporaryRedirect)
-	}))
-	defer server.Close()
-	callerErr := errors.New("caller refused redirect")
-	client := server.Client()
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return callerErr }
-	u, _ := url.Parse(server.URL)
-	if _, err := FetchTags(t.Context(), u.Host, "team/app", nil, client); !errors.Is(err, callerErr) {
-		t.Fatalf("err = %v, want %v", err, callerErr)
-	}
-	if client.CheckRedirect(nil, nil) != callerErr {
-		t.Fatal("caller redirect policy was replaced")
-	}
-}
-
-func TestFetchTagsDiscardsPartialListing(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Has("last") {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
-		}
-		w.Header().Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
-		_, _ = io.WriteString(w, `{"tags":["1.0.0"]}`)
-	}))
-	defer server.Close()
-	u, _ := url.Parse(server.URL)
-	tags, err := FetchTags(t.Context(), u.Host, "team/app", nil, server.Client())
-	if err == nil || tags != nil {
-		t.Fatalf("partial listing escaped: %v, %v", tags, err)
-	}
-}
-
-func TestFetchTagsMixedRelationsInternal(t *testing.T) {
-	for _, separate := range []bool{false, true} {
-		t.Run(fmt.Sprint(separate), func(t *testing.T) {
-			calls := 0
-			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				calls++
-				header := http.Header{}
-				body := `{"tags":["1.0.0"]}`
-				if !r.URL.Query().Has("last") {
-					links := []string{`<?first=1>; rel="first"`, `<?last=1.0.0&n=1000>; rel="next"`, `<?prev=1>; rel="prev"`}
-					if separate {
-						for _, link := range links {
-							header.Add("Link", link)
-						}
-					} else {
-						header.Set("Link", strings.Join(links, ", "))
-					}
-				} else {
-					body = `{"tags":["1.0.1"]}`
-					header.Set("Link", `<?prev=1>; rel="prev"`)
-				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
-			})}
-			tags, err := FetchTags(t.Context(), "registry.test", "team/app", nil, client)
-			if err != nil || !reflect.DeepEqual(tags, []string{"1.0.0", "1.0.1"}) || calls != 2 {
-				t.Fatalf("tags=%v err=%v calls=%d", tags, err, calls)
-			}
-		})
-	}
-}
-
-type failingTagsBodyInternal struct {
-	io.Reader
-	closeErr error
-	closed   bool
-}
-
-func (b *failingTagsBodyInternal) Close() error { b.closed = true; return b.closeErr }
-
-func TestFetchTagsCloseErrorsInternal(t *testing.T) {
-	for _, tt := range []struct {
-		name, body  string
-		status      int
-		readFailure bool
-	}{
-		{name: "successful page", body: `{"tags":["1.0.0"]}`, status: 200},
-		{name: "invalid page", body: `{"tags":[`, status: 200, readFailure: true},
-		{name: "authentication challenge", status: 401},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			sentinel := errors.New("close failed")
-			body := &failingTagsBodyInternal{Reader: strings.NewReader(tt.body), closeErr: sentinel}
-			calls := 0
-			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-				calls++
-				return &http.Response{StatusCode: tt.status, Body: body, Header: http.Header{"Www-Authenticate": {`Bearer realm="https://registry.test/token"`}}}, nil
-			})}
-			tags, err := FetchTags(t.Context(), "registry.test", "team/app", nil, client)
-			if !errors.Is(err, sentinel) || tags != nil || !body.closed || calls != 1 {
-				t.Fatalf("tags=%v err=%v closed=%v calls=%d", tags, err, body.closed, calls)
-			}
-			if tt.readFailure && !strings.Contains(err.Error(), "decode registry tags") {
-				t.Fatalf("decode error lost: %v", err)
-			}
-		})
 	}
 }

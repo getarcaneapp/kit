@@ -14,12 +14,13 @@ import (
 func TestDefaultRegistryDigestResolverFetchesDigest(t *testing.T) {
 	want := digest.FromString("manifest").String()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/owner/app/manifests/1.0" {
+		switch r.URL.Path {
+		case "/v2/":
+		case "/v2/owner/app/manifests/1.0":
+			writeManifestHeadersForTest(w, want)
+		default:
 			http.Error(w, "unexpected manifest path", http.StatusNotFound)
-			return
 		}
-		w.Header().Set("Docker-Content-Digest", want)
-		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
@@ -86,4 +87,11 @@ func TestDefaultDockerClientProviderCachesAndRecreatesAfterPingFailure(t *testin
 	if pingCalls < 4 {
 		t.Fatalf("pingCalls = %d, want at least 4", pingCalls)
 	}
+}
+
+func writeManifestHeadersForTest(w http.ResponseWriter, digest string) {
+	w.Header().Set("Content-Type", "application/vnd.oci.image.index.v1+json")
+	w.Header().Set("Content-Length", "2")
+	w.Header().Set("Docker-Content-Digest", digest)
+	w.WriteHeader(http.StatusOK)
 }
