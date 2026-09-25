@@ -18,6 +18,7 @@ import (
 const (
 	tagsPageSize            = "1000"
 	defaultTagsFetchTimeout = 120 * time.Second
+	maxTagsRedirects        = 10
 )
 
 // FetchTags lists all repository tags, including paginated results. A partial
@@ -32,11 +33,9 @@ func FetchTags(
 	if httpClient == nil {
 		httpClient = NewHTTPClient()
 	}
-	// Copy the client so callers' redirect policies remain unchanged. Registry
-	// and token endpoint redirects must not forward credentials to another URL,
-	// so only anonymous requests follow redirects (e.g. registry.k8s.io mirrors).
+	// Copy the client so the caller's redirect policy remains unchanged.
 	client := *httpClient
-	client.CheckRedirect = anonymousRedirectPolicyInternal(httpClient.CheckRedirect)
+	client.CheckRedirect = tagsRedirectPolicyInternal(httpClient.CheckRedirect)
 	requestCtx := ctx
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -110,13 +109,20 @@ func tagsRequestInternal(ctx context.Context, client *http.Client, page *url.URL
 	return client.Do(req)
 }
 
-func anonymousRedirectPolicyInternal(next func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
+// tagsRedirectPolicyInternal only follows HTTPS redirects for anonymous requests.
+func tagsRedirectPolicyInternal(callerPolicy func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
-		if via[0].Header.Get("Authorization") != "" || req.URL.Scheme != "https" || len(via) >= 10 {
-			return http.ErrUseLastResponse
+		if via[0].Header.Get("Authorization") != "" {
+			return errors.New("registry redirect refused for authenticated request")
 		}
-		if next != nil {
-			return next(req, via)
+		if req.URL.Scheme != "https" {
+			return errors.New("registry redirect refused for non-HTTPS URL")
+		}
+		if len(via) >= maxTagsRedirects {
+			return fmt.Errorf("stopped after %d registry redirects", maxTagsRedirects)
+		}
+		if callerPolicy != nil {
+			return callerPolicy(req, via)
 		}
 		return nil
 	}
@@ -141,7 +147,7 @@ func readTagsPageInternal(resp *http.Response, repository string) ([]string, err
 	if err := json.Unmarshal(data, &body); err != nil {
 		return nil, fmt.Errorf("decode registry tags: %w", err)
 	}
-	if body.Name != "" && body.Name != repository && body.Name != redirectedRepositoryInternal(resp) {
+	if body.Name != "" && body.Name != repository && body.Name != servedRepositoryInternal(resp) {
 		return nil, errors.New("registry tag response names a different repository")
 	}
 	if len(body.Tags) == 0 {
@@ -154,18 +160,14 @@ func readTagsPageInternal(resp *http.Response, repository string) ([]string, err
 	return tags, nil
 }
 
-// redirectedRepositoryInternal returns the repository a redirected tag listing
-// was served from, since mirrors name their own repository in the response.
-func redirectedRepositoryInternal(resp *http.Response) string {
-	if resp.Request == nil || resp.Request.Response == nil {
+// servedRepositoryInternal returns the repository of the URL that served resp.
+func servedRepositoryInternal(resp *http.Response) string {
+	if resp.Request == nil {
 		return ""
 	}
-	name, ok := strings.CutPrefix(resp.Request.URL.Path, "/v2/")
-	if !ok {
-		return ""
-	}
-	name, ok = strings.CutSuffix(name, "/tags/list")
-	if !ok {
+	name, hasPrefix := strings.CutPrefix(resp.Request.URL.Path, "/v2/")
+	name, hasSuffix := strings.CutSuffix(name, "/tags/list")
+	if !hasPrefix || !hasSuffix {
 		return ""
 	}
 	return name

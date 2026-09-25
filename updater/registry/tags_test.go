@@ -244,8 +244,6 @@ func TestFetchTagsRejectsCredentialRedirects(t *testing.T) {
 }
 
 func TestFetchTagsFollowsAnonymousRedirects(t *testing.T) {
-	// registry.k8s.io redirects tag listings to a regional mirror whose
-	// response names the mirrored repository.
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v2/team/app/tags/list":
@@ -269,7 +267,7 @@ func TestFetchTagsFollowsAnonymousRedirects(t *testing.T) {
 
 func TestFetchTagsRejectsInsecureRedirects(t *testing.T) {
 	var leaked bool
-	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	plain := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		leaked = true
 	}))
 	defer plain.Close()
@@ -281,6 +279,23 @@ func TestFetchTagsRejectsInsecureRedirects(t *testing.T) {
 	_, err := FetchTags(t.Context(), u.Host, "team/app", nil, server.Client())
 	if err == nil || leaked {
 		t.Fatalf("insecure redirect allowed: leaked=%v, err=%v", leaked, err)
+	}
+}
+
+func TestFetchTagsKeepsCallerRedirectPolicy(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/v2/mirror/team/app/tags/list", http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	callerErr := errors.New("caller refused redirect")
+	client := server.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return callerErr }
+	u, _ := url.Parse(server.URL)
+	if _, err := FetchTags(t.Context(), u.Host, "team/app", nil, client); !errors.Is(err, callerErr) {
+		t.Fatalf("err = %v, want %v", err, callerErr)
+	}
+	if client.CheckRedirect(nil, nil) != callerErr {
+		t.Fatal("caller redirect policy was replaced")
 	}
 }
 
