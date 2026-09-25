@@ -120,14 +120,14 @@ func authorizedManifestHeaders(ctx context.Context, httpClient *http.Client, met
 		if challenge == "" {
 			return nil, fmt.Errorf("manifest request failed with status: %d", resp.StatusCode)
 		}
-		realm, service := parseWWWAuth(challenge)
+		realm, service, scope := parseWWWAuth(challenge)
 		if realm == "" {
 			return nil, errors.New("no auth realm found")
 		}
 		if err := validateAuthRealm(registryHost, realm); err != nil {
 			return nil, err
 		}
-		token, err := fetchRegistryToken(ctx, httpClient, realm, service, repository, credential)
+		token, err := fetchRegistryToken(ctx, httpClient, realm, service, scope, repository, credential)
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +175,7 @@ func manifestRequest(ctx context.Context, httpClient *http.Client, method, regis
 	return httpClient.Do(req)
 }
 
-func fetchRegistryToken(ctx context.Context, httpClient *http.Client, authURL, service, repository string, credential *Credentials) (string, error) {
+func fetchRegistryToken(ctx context.Context, httpClient *http.Client, authURL, service, scope, repository string, credential *Credentials) (string, error) {
 	u, err := url.Parse(authURL)
 	if err != nil {
 		return "", err
@@ -184,7 +184,11 @@ func fetchRegistryToken(ctx context.Context, httpClient *http.Client, authURL, s
 	if service != "" {
 		q.Set("service", service)
 	}
-	q.Set("scope", "repository:"+repository+":pull")
+	// Endpoints can need more than pull; ACR challenges tags/list for metadata_read and refuses pull-only tokens there.
+	if scope == "" {
+		scope = "repository:" + repository + ":pull"
+	}
+	q.Set("scope", scope)
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -220,10 +224,10 @@ func fetchRegistryToken(ctx context.Context, httpClient *http.Client, authURL, s
 	return "Bearer " + token, nil
 }
 
-func parseWWWAuth(challenge string) (realm, service string) {
+func parseWWWAuth(challenge string) (realm, service, scope string) {
 	challenge = strings.TrimSpace(challenge)
 	if !strings.HasPrefix(strings.ToLower(challenge), "bearer ") {
-		return "", ""
+		return "", "", ""
 	}
 	params := strings.TrimSpace(challenge[len("Bearer "):])
 	for _, part := range splitAuthParams(params) {
@@ -237,9 +241,11 @@ func parseWWWAuth(challenge string) (realm, service string) {
 			realm = value
 		case "service":
 			service = value
+		case "scope":
+			scope = value
 		}
 	}
-	return realm, service
+	return realm, service, scope
 }
 
 func validateAuthRealm(_ string, realm string) error {
