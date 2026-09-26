@@ -340,7 +340,7 @@ func pathContainsInternal(parent, child string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))), nil
+	return filepath.IsLocal(relative), nil
 }
 
 func validateDistinctRootsInternal(rootPath, stagingPath string) error {

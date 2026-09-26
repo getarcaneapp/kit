@@ -35,7 +35,7 @@ func LogicalPath(rootPath, absPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %q is not relative to %q", ErrOutsideRoot, absPath, rootPath)
 	}
-	if relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+	if !filepath.IsLocal(relative) {
 		return "", fmt.Errorf("%w: %q is outside %q", ErrOutsideRoot, absPath, rootPath)
 	}
 	return kitfs.LogicalPath(filepath.ToSlash(relative)), nil

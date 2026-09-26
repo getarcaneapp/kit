@@ -135,6 +135,28 @@ func TestCopyDirRejectsNestedRoots(t *testing.T) {
 	}
 }
 
+func TestCopyDirAcceptsSiblingWithDotDotPrefix(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "src")
+	destination := filepath.Join(root, "..dst")
+	for _, dir := range []string{source, destination} {
+		if err := os.Mkdir(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFixtureFile(t, filepath.Join(source, "compose.yaml"), "services: {}", 0o640)
+
+	result, err := CopyDir(t.Context(), source, destination, acfstypes.CopyOptions{})
+	if err != nil {
+		t.Fatalf("CopyDir rejected a sibling destination named ..dst: %v", err)
+	}
+	if result.Copied != 1 {
+		t.Fatalf("CopyDir copied = %d, want 1", result.Copied)
+	}
+}
+
 func TestMirrorDirPreservesListedEntriesAndDestinationInodes(t *testing.T) {
 	t.Parallel()
 

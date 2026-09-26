@@ -190,4 +190,13 @@ func TestExistsAndLogicalPath(t *testing.T) {
 	if _, err := LogicalPath(root, filepath.Dir(root)); !errors.Is(err, ErrOutsideRoot) {
 		t.Fatalf("LogicalPath escape error = %v, want ErrOutsideRoot", err)
 	}
+
+	// A directory whose name merely starts with ".." still lives inside the root.
+	dotted, err := LogicalPath(root, filepath.Join(root, "..hidden", "file"))
+	if err != nil {
+		t.Fatalf("LogicalPath(..hidden) error = %v, want nil", err)
+	}
+	if dotted != "/..hidden/file" {
+		t.Fatalf("LogicalPath(..hidden) = %q, want %q", dotted, "/..hidden/file")
+	}
 }
