@@ -152,7 +152,9 @@ func anyNodeInternal(value any) *yaml.Node {
 		}
 		return &yaml.Node{Kind: yaml.ScalarNode, Value: "false"}
 	case int:
-		return scalarNodeInternal(strconv.Itoa(v))
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: strconv.Itoa(v)}
+	case int64:
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: strconv.FormatInt(v, 10)}
 	case []string:
 		node := &yaml.Node{Kind: yaml.SequenceNode}
 		for _, item := range v {
@@ -164,7 +166,7 @@ func anyNodeInternal(value any) *yaml.Node {
 	case types.Service:
 		return serviceNodeInternal(v)
 	default:
-		return scalarNodeInternal(fmt.Sprintf("%v", v))
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprintf("%v", v)}
 	}
 }
 
@@ -197,11 +199,11 @@ func orderedKeysInternal(values map[string]any) []string {
 	return append(keys, extras...)
 }
 
+// scalarNodeInternal returns a string node. The encoder quotes it only when
+// the plain form would resolve to another type, such as "0.5" or "30".
 func scalarNodeInternal(value string) *yaml.Node {
-	node := &yaml.Node{Kind: yaml.ScalarNode, Value: value}
-	if value == "0.5" {
-		node.Style = yaml.DoubleQuotedStyle
-	}
+	node := &yaml.Node{}
+	node.SetString(value)
 	return node
 }
 

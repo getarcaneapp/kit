@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
+	"github.com/compose-spec/compose-go/v2/format"
+	compose "github.com/compose-spec/compose-go/v2/types"
+	"github.com/docker/go-units"
 	"go.getarcane.app/docker/convert/types"
 	"go.yaml.in/yaml/v4"
 )
@@ -52,7 +54,9 @@ func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Servic
 			appendStringInternal(service, "ports", flag.Value)
 		case "volumes":
 			appendStringInternal(service, "volumes", flag.Value)
-			registerVolumeInternal(doc, flag.Value)
+			if err := registerVolumeInternal(doc, flag.Value); err != nil {
+				return nil, err
+			}
 		case "environment":
 			appendStringInternal(service, "environment", flag.Value)
 		case "env_file":
@@ -67,7 +71,10 @@ func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Servic
 		case "restart", "working_dir", "user", "platform", "pull_policy", "stop_signal", "stop_grace_period":
 			service[flag.Name] = flag.Value
 		case "entrypoint":
-			service["entrypoint"] = flag.Value
+			// docker run --entrypoint takes a single executable, not a command line.
+			if flag.Value != "" {
+				service["entrypoint"] = []string{flag.Value}
+			}
 		case "healthcheck":
 			service["healthcheck"] = map[string]any{"test": flag.Value}
 		case "memory":
@@ -107,28 +114,10 @@ func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Servic
 	}
 
 	if len(cmd.Command) > 0 {
-		service["command"] = joinCommandInternal(cmd.Command)
+		service["command"] = slices.Clone(cmd.Command)
 	}
 
 	return service, nil
-}
-
-func joinCommandInternal(args []string) string {
-	parts := make([]string, 0, len(args))
-	for _, arg := range args {
-		parts = append(parts, quoteCommandArgInternal(arg))
-	}
-	return strings.Join(parts, " ")
-}
-
-func quoteCommandArgInternal(arg string) string {
-	if arg == "" {
-		return "''"
-	}
-	if !strings.ContainsAny(arg, " \t\n;") {
-		return arg
-	}
-	return "'" + strings.ReplaceAll(arg, "'", "'\"'\"'") + "'"
 }
 
 func appendStringInternal(service types.Service, key, value string) {
@@ -166,31 +155,18 @@ func setResourceLimitInternal(service types.Service, key, value string) {
 }
 
 func setUlimitInternal(service types.Service, value string) error {
-	name, limit, ok := strings.Cut(value, "=")
-	if !ok || name == "" || limit == "" {
-		return types.NewConversionError("invalid ulimit %q", value)
-	}
-	softText, hardText, ok := strings.Cut(limit, ":")
-	if !ok {
-		softText = limit
-		hardText = limit
-	}
-	soft, err := strconv.Atoi(softText)
+	ulimit, err := units.ParseUlimit(value)
 	if err != nil {
-		return types.NewConversionError("invalid ulimit soft value %q: %v", softText, err)
-	}
-	hard, err := strconv.Atoi(hardText)
-	if err != nil {
-		return types.NewConversionError("invalid ulimit hard value %q: %v", hardText, err)
+		return types.NewConversionError("invalid ulimit %q: %v", value, err)
 	}
 	ulimits := ensureMapInternal(service, "ulimits")
-	ulimits[name] = map[string]any{"soft": soft, "hard": hard}
+	ulimits[ulimit.Name] = map[string]any{"soft": ulimit.Soft, "hard": ulimit.Hard}
 	return nil
 }
 
-func registerVolumeInternal(doc *types.Document, value string) {
-	source := value
+func registerVolumeInternal(doc *types.Document, value string) error {
 	if strings.HasPrefix(value, "type=") {
+		source := value
 		for part := range strings.SplitSeq(value, ",") {
 			key, val, ok := strings.Cut(part, "=")
 			if ok && (key == "source" || key == "src") {
@@ -198,14 +174,22 @@ func registerVolumeInternal(doc *types.Document, value string) {
 				break
 			}
 		}
-	} else if before, _, ok := strings.Cut(value, ":"); ok {
-		source = before
+		if source == "" || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") || strings.Contains(source, "$") {
+			return nil
+		}
+		doc.Volumes[source] = map[string]any{"external": true}
+		return nil
 	}
 
-	if source == "" || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") || strings.Contains(source, "$") {
-		return
+	volume, err := format.ParseVolume(value)
+	if err != nil {
+		return types.NewConversionError("invalid volume %q: %v", value, err)
 	}
-	doc.Volumes[source] = map[string]any{"external": true}
+	if volume.Type != compose.VolumeTypeVolume || volume.Source == "" || strings.Contains(volume.Source, "$") {
+		return nil
+	}
+	doc.Volumes[volume.Source] = map[string]any{"external": true}
+	return nil
 }
 
 func serviceNameInternal(cmd types.RunCommand) string {

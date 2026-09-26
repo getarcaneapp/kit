@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/mattn/go-shellwords"
@@ -70,21 +71,17 @@ var boolFlags = map[string]string{
 
 func Parse(input string, opts types.ParseOptions) ([]types.RunCommand, error) {
 	normalized := normalizeInputInternal(input)
-	if strings.TrimSpace(normalized) == "" {
+	if normalized == "" {
 		return nil, types.NewParseError("docker command must be a non-empty string")
 	}
 
-	parts := splitCommandsInternal(normalized)
-	commands := make([]types.RunCommand, 0, len(parts))
-	for _, part := range parts {
-		tokens, err := shellTokensInternal(part)
-		if err != nil {
-			return nil, types.NewParseError("parse command tokens: %v", err)
-		}
-		if len(tokens) == 0 {
-			continue
-		}
+	statements, err := splitStatementsInternal(normalized)
+	if err != nil {
+		return nil, types.NewParseError("parse command tokens: %v", err)
+	}
 
+	commands := make([]types.RunCommand, 0, len(statements))
+	for _, tokens := range statements {
 		tokens, ok := trimCommandPrefixInternal(tokens)
 		if !ok {
 			return nil, types.NewParseError("expected docker or podman run/create command")
@@ -105,98 +102,69 @@ func Parse(input string, opts types.ParseOptions) ([]types.RunCommand, error) {
 }
 
 func normalizeInputInternal(input string) string {
-	lines := strings.Split(input, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = stripCommentInternal(line)
-		out = append(out, line)
-	}
-
-	joined := strings.Join(out, "\n")
-	joined = strings.ReplaceAll(joined, "\\\r\n", " ")
-	joined = strings.ReplaceAll(joined, "\\\n", " ")
-	return strings.TrimSpace(joined)
+	input = strings.ReplaceAll(input, "\r\n", "\n")
+	input = strings.ReplaceAll(input, "\\\n", " ")
+	return strings.TrimSpace(input)
 }
 
-func stripCommentInternal(line string) string {
-	var b strings.Builder
-	var quote rune
-	escaped := false
-	for _, r := range line {
-		if escaped {
-			b.WriteRune(r)
-			escaped = false
+// splitStatementsInternal tokenizes input line by line. A line that
+// go-shellwords rejects (for example an unterminated quote) is joined with the
+// next line and retried, so a newline inside quotes stays part of the argument.
+func splitStatementsInternal(input string) ([][]string, error) {
+	var statements [][]string
+	pending := ""
+	var pendingErr error
+	for line := range strings.SplitSeq(input, "\n") {
+		if pendingErr != nil {
+			line = pending + "\n" + line
+		}
+		parsed, err := splitLineInternal(line)
+		if err != nil {
+			pending, pendingErr = line, err
 			continue
 		}
-		if r == '\\' {
-			b.WriteRune(r)
-			escaped = true
-			continue
-		}
-		if quote == 0 && (r == '\'' || r == '"') {
-			quote = r
-			b.WriteRune(r)
-			continue
-		}
-		if quote != 0 && r == quote {
-			quote = 0
-			b.WriteRune(r)
-			continue
-		}
-		if quote == 0 && r == '#' {
-			break
-		}
-		b.WriteRune(r)
+		pending, pendingErr = "", nil
+		statements = append(statements, parsed...)
 	}
-	return b.String()
+	if pendingErr != nil {
+		return nil, pendingErr
+	}
+	return statements, nil
 }
 
-func splitCommandsInternal(input string) []string {
-	var parts []string
-	var b strings.Builder
-	var quote rune
-	escaped := false
-	for _, r := range input {
-		if escaped {
-			b.WriteRune(r)
-			escaped = false
-			continue
-		}
-		if r == '\\' {
-			b.WriteRune(r)
-			escaped = true
-			continue
-		}
-		if quote == 0 && (r == '\'' || r == '"') {
-			quote = r
-			b.WriteRune(r)
-			continue
-		}
-		if quote != 0 && r == quote {
-			quote = 0
-			b.WriteRune(r)
-			continue
-		}
-		if quote == 0 && r == ';' {
-			if part := strings.TrimSpace(b.String()); part != "" {
-				parts = append(parts, part)
-			}
-			b.Reset()
-			continue
-		}
-		b.WriteRune(r)
-	}
-	if part := strings.TrimSpace(b.String()); part != "" {
-		parts = append(parts, part)
-	}
-	return parts
-}
+// splitLineInternal splits one logical line on the shell control operators
+// "&&", "||", ";", "&" and "|". go-shellwords stops at each operator and
+// reports its rune position; redirections are rejected because a compose
+// service has nowhere to send them.
+func splitLineInternal(line string) ([][]string, error) {
+	var statements [][]string
+	for {
+		parser := shellwords.NewParser()
+		parser.ParseEnv = false
+		parser.ParseBacktick = false
+		parser.ParseComment = true
 
-func shellTokensInternal(command string) ([]string, error) {
-	parser := shellwords.NewParser()
-	parser.ParseEnv = false
-	parser.ParseBacktick = false
-	return parser.Parse(command)
+		tokens, err := parser.Parse(line)
+		if err != nil {
+			return nil, err
+		}
+		if len(tokens) > 0 {
+			statements = append(statements, tokens)
+		}
+		if parser.Position < 0 {
+			return statements, nil
+		}
+
+		rest := line[len(string([]rune(line)[:parser.Position])):]
+		width := 1
+		switch {
+		case strings.HasPrefix(rest, "&&"), strings.HasPrefix(rest, "||"):
+			width = 2
+		case strings.HasPrefix(rest, "&>"), rest[0] == '<', rest[0] == '>', rest[0] >= '0' && rest[0] <= '9':
+			return nil, fmt.Errorf("unsupported shell redirection near %q", rest)
+		}
+		line = rest[width:]
+	}
 }
 
 func trimCommandPrefixInternal(tokens []string) ([]string, bool) {

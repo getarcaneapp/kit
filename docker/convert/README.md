@@ -22,14 +22,16 @@ extraction for inline environment variables.
 Using Arcane Docker Convert is a small conversion flow:
 
 1. Pass a Docker or Podman command string to `convert.Convert`.
-2. The parser removes shell comments, joins line continuations, splits semicolon-separated commands, and tokenizes
-   arguments without expanding environment variables or backticks.
+2. The parser joins line continuations, splits commands on newlines and the shell operators `;`, `&&`, `||`, `&` and
+   `|`, drops shell comments, and tokenizes arguments without expanding environment variables or backticks. Shell
+   redirections (`>`, `<`, `2>&1`) are rejected.
 3. Supported Docker flags are mapped to Docker Compose service fields such as `ports`, `volumes`, `environment`,
    `env_file`, `network_mode`, `restart`, `deploy.resources.limits`, `ulimits`, `logging`, and container capability
    fields.
 4. Service names are taken from `--name` or derived from the image name, sanitized, and made unique when multiple
    commands produce the same name.
-5. Named volumes and external networks are registered when the command references them.
+5. Named volumes and external networks are registered when the command references them. `command` and `entrypoint`
+   are written as YAML lists, so arguments keep their exact values without shell quoting.
 6. Existing Compose YAML can be merged before converted services are added by passing
    `types.Options.ExistingComposeYAML`.
 7. The generated YAML is rendered with stable key ordering, optionally prefixed with conversion warnings, then loaded
@@ -101,8 +103,9 @@ The parser accepts these command forms:
 - `podman run`
 - `podman create`
 
-Multiple commands can be provided in one string when separated by semicolons. Shell line continuations are joined before
-parsing, and comments outside quoted strings are removed.
+Multiple commands can be provided in one string when separated by newlines, `;`, `&&`, `||`, `&` or `|`. Shell line
+continuations are joined before parsing, a newline inside quotes stays part of the argument, and `#` starts a comment
+only at the start of a word outside quotes.
 
 ## Package layout
 

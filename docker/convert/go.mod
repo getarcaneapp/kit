@@ -4,6 +4,7 @@ go 1.27
 
 require (
 	github.com/compose-spec/compose-go/v2 v2.15.0
+	github.com/docker/go-units v0.5.0
 	github.com/mattn/go-shellwords v1.0.15
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 )
@@ -11,7 +12,6 @@ require (
 require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
-	github.com/docker/go-units v0.5.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
