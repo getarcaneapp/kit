@@ -1,3 +1,13 @@
+## sys/crypto/v0.2.2
+
+### Bug fixes
+
+* seal with cipher.NewGCMWithRandomNonce([c2f6695](https://github.com/getarcaneapp/kit/commit/c2f6695bf7ad8607f7768b269b5c5568f04d8fa3) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/crypto/v0.2.1...sys/crypto/v0.2.2
+
 ## sys/crypto/v0.2.1
 
 ### Bug fixes
