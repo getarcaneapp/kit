@@ -117,6 +117,36 @@ func TestEncryptorEncryptDecrypt(t *testing.T) {
 	if plaintext != "secret" {
 		t.Fatalf("Decrypt = %q, want secret", plaintext)
 	}
+
+	decoded, err := base64.StdEncoding.DecodeString(ciphertext)
+	if err != nil {
+		t.Fatalf("ciphertext is not base64: %v", err)
+	}
+	// 12-byte nonce prefix plus 16-byte GCM tag.
+	if want := len("secret") + 28; len(decoded) != want {
+		t.Fatalf("decoded ciphertext length = %d, want %d", len(decoded), want)
+	}
+	again, err := encryptor.Encrypt("secret")
+	if err != nil {
+		t.Fatalf("Encrypt returned error: %v", err)
+	}
+	if again == ciphertext {
+		t.Fatal("Encrypt returned identical ciphertext for two calls")
+	}
+}
+
+func TestEncryptorDecryptRejectsShortCiphertext(t *testing.T) {
+	encryptor, err := New(bytes.Repeat([]byte{0x42}, KeySize))
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	_, err = encryptor.Decrypt(base64.StdEncoding.EncodeToString(make([]byte, 27)))
+	if err == nil {
+		t.Fatal("Decrypt returned nil error")
+	}
+	if _, ok := errors.AsType[*CiphertextError](err); !ok {
+		t.Fatalf("Decrypt error = %v (%T), want *CiphertextError", err, err)
+	}
 }
 
 func TestEncryptorDecryptsWithOldKey(t *testing.T) {
@@ -149,25 +179,20 @@ func TestEncryptorDecryptsWithOldKey(t *testing.T) {
 	}
 }
 
-func TestEncryptorEncryptReturnsRandomFailure(t *testing.T) {
-	key, err := ParseKey("primary-key-material")
-	if err != nil {
-		t.Fatalf("ParseKey returned error: %v", err)
-	}
-	encryptor, err := New(key)
+func TestEncryptorDecryptsKnownAnswer(t *testing.T) {
+	// Produced by an earlier Encrypt that prepended a manually read nonce; it
+	// locks in the base64(nonce || ciphertext || tag) layout for stored values.
+	const ciphertext = "jMk330Va3XkU6mvwnmXGRJPsOmGksAQMLrF4fxVr/FHncDcMSbXvJg=="
+	encryptor, err := New(bytes.Repeat([]byte{0x42}, KeySize))
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
-	oldReader := randReader
-	randReader = errReader{}
-	t.Cleanup(func() { randReader = oldReader })
-
-	_, err = encryptor.Encrypt("secret")
-	if err == nil {
-		t.Fatal("Encrypt returned nil error")
+	plaintext, err := encryptor.Decrypt(ciphertext)
+	if err != nil {
+		t.Fatalf("Decrypt returned error: %v", err)
 	}
-	if _, ok := errors.AsType[*RandomError](err); !ok {
-		t.Fatalf("Encrypt error type = %T, want *RandomError", err)
+	if plaintext != "known answer" {
+		t.Fatalf("Decrypt = %q, want known answer", plaintext)
 	}
 }
 

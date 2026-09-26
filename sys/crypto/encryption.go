@@ -173,7 +173,9 @@ func SaveKeyFile(path string, key []byte) error {
 }
 
 // Encrypt encrypts a plaintext string. The empty string is returned unchanged
-// so existing nullable stored-credential behavior remains explicit.
+// so existing nullable stored-credential behavior remains explicit. Each call
+// uses a fresh random 96-bit nonce, so a key must not seal more than 2^32
+// messages.
 func (e *Encryptor) Encrypt(plaintext string) (string, error) {
 	if e == nil || len(e.keys) == 0 {
 		return "", &InvalidKeyError{Reason: "encryptor has no keys"}
@@ -185,11 +187,7 @@ func (e *Encryptor) Encrypt(plaintext string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(randReader, nonce); err != nil {
-		return "", &RandomError{Op: "generate nonce", Err: err}
-	}
-	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	ciphertext := gcm.Seal(nil, nil, []byte(plaintext), nil)
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
@@ -222,11 +220,10 @@ func decryptWithKeyInternal(key []byte, data []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	nonceSize := gcm.NonceSize()
-	if len(data) < nonceSize {
+	if len(data) < gcm.Overhead() {
 		return "", &CiphertextError{Reason: "too short"}
 	}
-	plaintext, err := gcm.Open(nil, data[:nonceSize], data[nonceSize:], nil)
+	plaintext, err := gcm.Open(nil, nil, data, nil)
 	if err != nil {
 		return "", err
 	}
@@ -238,7 +235,7 @@ func newGCMInternal(key []byte) (cipher.AEAD, error) {
 	if err != nil {
 		return nil, &InvalidKeyError{Reason: err.Error()}
 	}
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := cipher.NewGCMWithRandomNonce(block)
 	if err != nil {
 		return nil, err
 	}
