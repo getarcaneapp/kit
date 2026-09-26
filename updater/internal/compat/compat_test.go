@@ -65,3 +65,20 @@ func dockerAPIPathForTest(path string) string {
 	}
 	return path
 }
+
+func TestAPIVersionAtLeast(t *testing.T) {
+	for _, tc := range []struct {
+		current string
+		want    bool
+	}{
+		{current: "1.44", want: true},
+		{current: "1.45", want: true},
+		{current: " 1.51 ", want: true},
+		{current: "1.43", want: false},
+		{current: "", want: false},
+	} {
+		if got := apiVersionAtLeast(tc.current, "1.44"); got != tc.want {
+			t.Errorf("apiVersionAtLeast(%q, %q) = %v, want %v", tc.current, "1.44", got, tc.want)
+		}
+	}
+}

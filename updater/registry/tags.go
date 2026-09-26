@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
@@ -20,7 +21,7 @@ const (
 func FetchTags(
 	ctx context.Context,
 	registryHost, repository string,
-	credential *Credentials,
+	credential *authn.AuthConfig,
 	httpClient *http.Client,
 ) ([]string, error) {
 	if _, ok := ctx.Deadline(); !ok {

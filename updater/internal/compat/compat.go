@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+	"github.com/moby/moby/client/pkg/versions"
 )
 
 const networkScopedMacAddressMinAPIVersion = "1.44"
@@ -158,50 +158,11 @@ func connectExtraNetworks(ctx context.Context, dockerClient client.APIClient, co
 	return nil
 }
 
-// apiVersionAtLeast compares Docker API versions numerically.
+// apiVersionAtLeast compares Docker API versions numerically. An unknown
+// (empty) current version never satisfies the minimum.
 func apiVersionAtLeast(current, minimum string) bool {
-	cur, ok := parseAPIVersion(current)
-	if !ok {
-		return false
-	}
-	minimumVersion, ok := parseAPIVersion(minimum)
-	if !ok {
-		return false
-	}
-	for i := range cur {
-		if cur[i] > minimumVersion[i] {
-			return true
-		}
-		if cur[i] < minimumVersion[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func parseAPIVersion(version string) ([3]int, bool) {
-	parsed := [3]int{}
-	version = strings.TrimSpace(strings.TrimPrefix(version, "v"))
-	if version == "" {
-		return parsed, false
-	}
-
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 {
-		return parsed, false
-	}
-	for i := 0; i < len(parsed) && i < len(parts); i++ {
-		part := strings.TrimSpace(parts[i])
-		if part == "" {
-			return [3]int{}, false
-		}
-		n, err := strconv.Atoi(part)
-		if err != nil {
-			return [3]int{}, false
-		}
-		parsed[i] = n
-	}
-	return parsed, true
+	current = strings.TrimSpace(current)
+	return current != "" && versions.GreaterThanOrEqualTo(current, minimum)
 }
 
 func resolvePrimaryNetwork(hostConfig *container.HostConfig, endpoints map[string]*network.EndpointSettings) string {

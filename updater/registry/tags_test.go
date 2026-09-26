@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-containerregistry/pkg/authn"
 )
 
 func tagsResponseInternal(r *http.Request, status int, body string) *http.Response {
@@ -51,7 +53,7 @@ func TestFetchTagsPaginationAndAuthentication(t *testing.T) {
 		}
 		return resp, nil
 	})}
-	tags, err := FetchTags(t.Context(), "registry.test", "team/app", &Credentials{Username: "user", Token: "password"}, client)
+	tags, err := FetchTags(t.Context(), "registry.test", "team/app", &authn.AuthConfig{Username: "user", Password: "password"}, client)
 	if err != nil || !reflect.DeepEqual(tags, []string{"1.0.0", "1.0.1", "1.1.0"}) {
 		t.Fatalf("FetchTags = %v, %v", tags, err)
 	}
@@ -86,7 +88,7 @@ func TestFetchTagsRequestsChallengeScope(t *testing.T) {
 		resp.Header.Set("WWW-Authenticate", challenge)
 		return resp, nil
 	})}
-	tags, err := FetchTags(t.Context(), "registry.test", "team/app", &Credentials{Username: "user", Token: "password"}, client)
+	tags, err := FetchTags(t.Context(), "registry.test", "team/app", &authn.AuthConfig{Username: "user", Password: "password"}, client)
 	if err != nil || !reflect.DeepEqual(tags, []string{"1.1.1-1"}) {
 		t.Fatalf("FetchTags = %v, %v", tags, err)
 	}
@@ -244,7 +246,7 @@ func TestFetchTagsHonorsCallerDeadlineInternal(t *testing.T) {
 
 func TestFetchTagsFollowsRedirectsWithoutForwardingCredentials(t *testing.T) {
 	// registry.k8s.io redirects tag listings to a regional mirror.
-	for _, credential := range []*Credentials{nil, {Username: "user", Token: "secret"}} {
+	for _, credential := range []*authn.AuthConfig{nil, {Username: "user", Password: "secret"}} {
 		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			switch {
 			case r.URL.Host == "mirror.test":

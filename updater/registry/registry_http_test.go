@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/google/go-containerregistry/pkg/authn"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -75,7 +77,7 @@ func manifestResponseInternal(r *http.Request, body, digest string) *http.Respon
 func TestFetchDigestUsesHeadWithTokenAuth(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
-		credential *Credentials
+		credential *authn.AuthConfig
 		checkToken func(*testing.T, *http.Request)
 	}{
 		{name: "anonymous", checkToken: func(t *testing.T, r *http.Request) {
@@ -83,17 +85,17 @@ func TestFetchDigestUsesHeadWithTokenAuth(t *testing.T) {
 				t.Error("anonymous token request sent credentials")
 			}
 		}},
-		{name: "basic", credential: &Credentials{Username: "user", Token: "secret"}, checkToken: func(t *testing.T, r *http.Request) {
+		{name: "basic", credential: &authn.AuthConfig{Username: "user", Password: "secret"}, checkToken: func(t *testing.T, r *http.Request) {
 			if user, password, _ := r.BasicAuth(); user != "user" || password != "secret" {
 				t.Errorf("token credentials = %q/%q", user, password)
 			}
 		}},
-		{name: "identity token", credential: &Credentials{Username: "user", IdentityToken: "refresh"}, checkToken: func(t *testing.T, r *http.Request) {
+		{name: "identity token", credential: &authn.AuthConfig{Username: "user", IdentityToken: "refresh"}, checkToken: func(t *testing.T, r *http.Request) {
 			if err := r.ParseForm(); err != nil || r.PostForm.Get("grant_type") != "refresh_token" || r.PostForm.Get("refresh_token") != "refresh" {
 				t.Errorf("identity token not exchanged as refresh token: %v %v", r.PostForm, err)
 			}
 		}},
-		{name: "registry token", credential: &Credentials{RegistryToken: "registry-token"}, checkToken: func(t *testing.T, _ *http.Request) {
+		{name: "registry token", credential: &authn.AuthConfig{RegistryToken: "registry-token"}, checkToken: func(t *testing.T, _ *http.Request) {
 			t.Error("registry token should be used without a token request")
 		}},
 	} {
@@ -158,7 +160,7 @@ func TestFetchDigestRejectsNonHTTPSAuthRealm(t *testing.T) {
 }
 
 func TestFetchRegistryRateLimitUsesHead(t *testing.T) {
-	for _, credential := range []*Credentials{nil, {Username: "user", Token: "secret"}} {
+	for _, credential := range []*authn.AuthConfig{nil, {Username: "user", Password: "secret"}} {
 		client := fakeRegistryInternal(t, "https://auth.test/token", func(r *http.Request) {
 			if user, _, _ := r.BasicAuth(); credential != nil && user != "user" {
 				t.Errorf("token user = %q, want user", user)

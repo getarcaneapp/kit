@@ -9,12 +9,12 @@ import (
 
 	dockerCliConfig "github.com/docker/cli/cli/config"
 	dockerCliConfigTypes "github.com/docker/cli/cli/config/types"
+	"github.com/google/go-containerregistry/pkg/authn"
 	dockerauthconfig "github.com/moby/moby/api/pkg/authconfig"
 	dockerregistry "github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
 	kitregistry "go.getarcane.app/kit/pkg/registry"
 	"go.getarcane.app/updater/internal/registryhost"
-	updaterregistry "go.getarcane.app/updater/registry"
 )
 
 func defaultImagePullOptions(ctx context.Context, imageRef string) (client.ImagePullOptions, error) {
@@ -38,7 +38,7 @@ func defaultImagePullOptions(ctx context.Context, imageRef string) (client.Image
 	}, nil
 }
 
-func defaultDigestCredentials(ctx context.Context, imageRef string) (*updaterregistry.Credentials, error) {
+func defaultDigestCredentials(ctx context.Context, imageRef string) (*authn.AuthConfig, error) {
 	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
 	if err != nil {
 		return nil, err
@@ -48,14 +48,14 @@ func defaultDigestCredentials(ctx context.Context, imageRef string) (*updaterreg
 		return nil, nil
 	}
 
-	credential := &updaterregistry.Credentials{
+	credential := &authn.AuthConfig{
 		Username:      authConfig.Username,
-		Token:         authConfig.Password,
+		Password:      authConfig.Password,
 		IdentityToken: authConfig.IdentityToken,
 		RegistryToken: authConfig.RegistryToken,
 	}
-	if (credential.Username == "" || credential.Token == "") && credential.IdentityToken == "" && credential.RegistryToken == "" {
-		logAnonymousRegistryFallback(ctx, imageRef, "credentials missing username or token", nil)
+	if (credential.Username == "" || credential.Password == "") && credential.IdentityToken == "" && credential.RegistryToken == "" {
+		logAnonymousRegistryFallback(ctx, imageRef, "no usable username/password or token", nil)
 		return nil, nil
 	}
 	return credential, nil

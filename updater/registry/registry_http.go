@@ -27,15 +27,6 @@ const (
 	registryRateLimitHeaderSource = "rate" + "limit"
 )
 
-// Credentials contains registry credentials used for manifest requests.
-type Credentials struct {
-	Username string
-	Token    string
-	// IdentityToken and RegistryToken are OAuth tokens from a Docker config.
-	IdentityToken string
-	RegistryToken string
-}
-
 // RateLimitInfo contains pull quota information returned by registry headers.
 type RateLimitInfo struct {
 	Limit         *int   `json:"limit,omitempty"`
@@ -43,11 +34,6 @@ type RateLimitInfo struct {
 	Used          *int   `json:"used,omitempty"`
 	WindowSeconds *int   `json:"windowSeconds,omitempty"`
 	Source        string `json:"source,omitempty"`
-}
-
-// NewHTTPClient creates the default registry HTTP client.
-func NewHTTPClient() *http.Client {
-	return &http.Client{Timeout: 30 * time.Second}
 }
 
 // IsFallbackEligibleDaemonError reports whether a daemon registry error should use direct HTTP fallback.
@@ -79,7 +65,7 @@ func IsFallbackEligibleDaemonError(err error) bool {
 }
 
 // FetchRegistryRateLimit fetches registry pull rate-limit information.
-func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag string, credential *Credentials, httpClient *http.Client) (*RateLimitInfo, error) {
+func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag string, credential *authn.AuthConfig, httpClient *http.Client) (*RateLimitInfo, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -117,7 +103,7 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 }
 
 // FetchDigest fetches the manifest digest for a registry image reference.
-func FetchDigest(ctx context.Context, registryHost, repository, tag string, credential *Credentials, httpClient *http.Client) (string, error) {
+func FetchDigest(ctx context.Context, registryHost, repository, tag string, credential *authn.AuthConfig, httpClient *http.Client) (string, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -167,7 +153,7 @@ func manifestReferenceInternal(registryHost, repository, tag string) (name.Tag, 
 	return ref, nil
 }
 
-func remoteOptionsInternal(ctx context.Context, credential *Credentials, httpClient *http.Client) []remote.Option {
+func remoteOptionsInternal(ctx context.Context, credential *authn.AuthConfig, httpClient *http.Client) []remote.Option {
 	return []remote.Option{
 		remote.WithContext(ctx),
 		remote.WithAuth(authenticatorInternal(credential)),
@@ -182,21 +168,11 @@ func baseTransportInternal(httpClient *http.Client) http.RoundTripper {
 	return http.DefaultTransport
 }
 
-func authenticatorInternal(credential *Credentials) authn.Authenticator {
-	if credential == nil {
+func authenticatorInternal(credential *authn.AuthConfig) authn.Authenticator {
+	if credential == nil || *credential == (authn.AuthConfig{}) {
 		return authn.Anonymous
 	}
-	config := authn.AuthConfig{
-		IdentityToken: strings.TrimSpace(credential.IdentityToken),
-		RegistryToken: strings.TrimSpace(credential.RegistryToken),
-	}
-	if username, token := strings.TrimSpace(credential.Username), strings.TrimSpace(credential.Token); username != "" && token != "" {
-		config.Username, config.Password = username, token
-	}
-	if config == (authn.AuthConfig{}) {
-		return authn.Anonymous
-	}
-	return authn.FromConfig(config)
+	return authn.FromConfig(*credential)
 }
 
 func extractRateLimitFromHeaders(header http.Header) (*RateLimitInfo, error) {

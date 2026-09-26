@@ -128,7 +128,7 @@ v0.7.0 collapses `api` and `types` into the module root, so one import replaces 
 | `pkg/digest.RemoteResolver` (`GetImageDigest`) | `updater.RegistryDigestResolver` (`ImageDigest`) |
 | `pkg/labels.DefaultLabelPolicy` | `updater.DefaultLabelPolicy` |
 | `pkg/labels.GetStopSignal` | `labels.StopSignal` |
-| `pkg/registry.NewRegistryHTTPClient` | `registry.NewHTTPClient` |
+| `pkg/registry.NewRegistryHTTPClient` | removed; pass any `*http.Client` (or `nil`) to the `registry` functions |
 | `pkg/{refs,digest,labels,registry}` | `{refs,digest,labels,registry}` — drop the `pkg/` |
 | `pkg/{match,deps,utils}`, digest `Checker`/`RefIDCache` | moved to `internal/`; no longer public |
 | `pkg/logs` | removed |
