@@ -1,3 +1,13 @@
+## updater/v0.11.0
+
+### Bug fixes
+
+* take authn credentials and compare API versions with moby's package([dde730c](https://github.com/getarcaneapp/kit/commit/dde730cae1a8a737fedbf1910926983db8d9c1f7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.10.2...updater/v0.11.0
+
 ## updater/v0.10.2
 
 ### Bug fixes
