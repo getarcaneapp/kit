@@ -1,14 +1,15 @@
 package api
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	buildkitclient "github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/frontend/dockerfile/parser"
 	docker "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
 )
@@ -54,7 +55,7 @@ func requiresDirectLocalBuildkitSessionInternal(req types.BuildRequest) (bool, e
 		return false, err
 	}
 
-	return dockerfileRequiresDirectBuildkitSessionInternal(contents), nil
+	return dockerfileRequiresDirectBuildkitSessionInternal(contents)
 }
 
 func readDockerfileContentsInternal(input buildFilesystemInput) (string, error) {
@@ -70,33 +71,36 @@ func readDockerfileContentsInternal(input buildFilesystemInput) (string, error) 
 	return string(raw), nil
 }
 
-func dockerfileRequiresDirectBuildkitSessionInternal(contents string) bool {
-	scanner := bufio.NewScanner(strings.NewReader(contents))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+// dockerfileRequiresDirectBuildkitSessionInternal reports whether the Dockerfile
+// declares a syntax frontend or uses BuildKit-only instruction flags that the
+// Docker Engine build API does not accept.
+func dockerfileRequiresDirectBuildkitSessionInternal(contents string) (bool, error) {
+	if _, _, _, ok := parser.DetectSyntax([]byte(contents)); ok {
+		return true, nil
+	}
+
+	result, err := parser.Parse(strings.NewReader(contents))
+	if err != nil {
+		return false, fmt.Errorf("failed to parse Dockerfile: %w", err)
+	}
+
+	for _, node := range result.AST.Children {
+		var buildkitFlags []string
+		switch strings.ToLower(node.Value) {
+		case "run":
+			buildkitFlags = []string{"--mount", "--network", "--security"}
+		case "copy", "add":
+			buildkitFlags = []string{"--link"}
+		default:
 			continue
 		}
-
-		lower := strings.ToLower(line)
-		if strings.HasPrefix(lower, "# syntax=") {
-			return true
-		}
-
-		if strings.HasPrefix(lower, "#") {
-			continue
-		}
-
-		if strings.HasPrefix(lower, "run ") {
-			if strings.Contains(lower, "--mount=") || strings.Contains(lower, "--network=") || strings.Contains(lower, "--security=") {
-				return true
+		for _, flag := range node.Flags {
+			name, _, _ := strings.Cut(flag, "=")
+			if slices.Contains(buildkitFlags, name) {
+				return true, nil
 			}
-		}
-
-		if (strings.HasPrefix(lower, "copy ") || strings.HasPrefix(lower, "add ")) && strings.Contains(lower, "--link") {
-			return true
 		}
 	}
 
-	return false
+	return false, nil
 }

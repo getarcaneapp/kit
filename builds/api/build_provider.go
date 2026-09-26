@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/platforms"
 	depotbuild "github.com/depot/depot-go/build"
 	depotmachine "github.com/depot/depot-go/machine"
 	cliv1 "github.com/depot/depot-go/proto/depot/cli/v1"
@@ -83,14 +84,15 @@ func (p *depotBuildKitProvider) NewSession(ctx context.Context, req types.BuildR
 	}, nil
 }
 
-func selectDepotArchInternal(platforms []string) string {
-	for _, platform := range platforms {
-		p := strings.ToLower(strings.TrimSpace(platform))
-		switch {
-		case strings.Contains(p, "arm64"):
-			return "arm64"
-		case strings.Contains(p, "amd64"):
-			return "amd64"
+func selectDepotArchInternal(requested []string) string {
+	for _, value := range requested {
+		platform, err := platforms.Parse(strings.TrimSpace(value))
+		if err != nil {
+			continue
+		}
+		switch platform.Architecture {
+		case "arm64", "amd64":
+			return platform.Architecture
 		}
 	}
 

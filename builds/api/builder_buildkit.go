@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -13,7 +14,10 @@ import (
 	"go.getarcane.app/builds/types"
 )
 
-func parseBuildkitCacheEntriesInternal(values []string) []buildkit.CacheOptionsEntry {
+// parseBuildkitCacheEntriesInternal parses --cache-from/--cache-to style values.
+// A value without "=" is shorthand for a registry cache ref; otherwise it is a
+// CSV list of key=value attributes, so quoted fields may contain commas.
+func parseBuildkitCacheEntriesInternal(values []string) ([]buildkit.CacheOptionsEntry, error) {
 	entries := make([]buildkit.CacheOptionsEntry, 0, len(values))
 
 	for _, raw := range values {
@@ -22,7 +26,7 @@ func parseBuildkitCacheEntriesInternal(values []string) []buildkit.CacheOptionsE
 			continue
 		}
 
-		if !strings.Contains(raw, "type=") {
+		if !strings.Contains(raw, "=") {
 			entries = append(entries, buildkit.CacheOptionsEntry{
 				Type:  "registry",
 				Attrs: map[string]string{"ref": raw},
@@ -30,21 +34,25 @@ func parseBuildkitCacheEntriesInternal(values []string) []buildkit.CacheOptionsE
 			continue
 		}
 
+		fields, err := csv.NewReader(strings.NewReader(raw)).Read()
+		if err != nil {
+			return nil, fmt.Errorf("invalid cache entry %q: %w", raw, err)
+		}
+
 		entry := buildkit.CacheOptionsEntry{Attrs: map[string]string{}}
-		for segment := range strings.SplitSeq(raw, ",") {
-			segment = strings.TrimSpace(segment)
-			if segment == "" {
+		for _, field := range fields {
+			field = strings.TrimSpace(field)
+			if field == "" {
 				continue
 			}
 
-			parts := strings.SplitN(segment, "=", 2)
-			if len(parts) != 2 {
-				continue
+			key, value, ok := strings.Cut(field, "=")
+			key = strings.TrimSpace(key)
+			if !ok || key == "" {
+				return nil, fmt.Errorf("invalid cache entry %q: field %q is not key=value", raw, field)
 			}
-
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			if key == "" || value == "" {
+			value = strings.TrimSpace(value)
+			if value == "" {
 				continue
 			}
 
@@ -63,11 +71,12 @@ func parseBuildkitCacheEntriesInternal(values []string) []buildkit.CacheOptionsE
 	}
 
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	return entries
+	return entries, nil
 }
+
 func normalizeEntitlementsInternal(entitlements []string, privileged bool) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(entitlements)+1)
@@ -100,6 +109,15 @@ func normalizeEntitlementsInternal(entitlements []string, privileged bool) []str
 
 func (b *Service) buildSolveOptInternal(ctx context.Context, req types.BuildRequest, providerName string) (buildkit.SolveOpt, <-chan error, func(), error) {
 	fsInput, err := prepareBuildFilesystemInputInternal(req)
+	if err != nil {
+		return buildkit.SolveOpt{}, nil, nil, err
+	}
+
+	cacheImports, err := parseBuildkitCacheEntriesInternal(req.CacheFrom)
+	if err != nil {
+		return buildkit.SolveOpt{}, nil, nil, err
+	}
+	cacheExports, err := parseBuildkitCacheEntriesInternal(req.CacheTo)
 	if err != nil {
 		return buildkit.SolveOpt{}, nil, nil, err
 	}
@@ -160,8 +178,8 @@ func (b *Service) buildSolveOptInternal(ctx context.Context, req types.BuildRequ
 			"context":    contextMount,
 			"dockerfile": dockerfileMount,
 		},
-		CacheImports:        parseBuildkitCacheEntriesInternal(req.CacheFrom),
-		CacheExports:        parseBuildkitCacheEntriesInternal(req.CacheTo),
+		CacheImports:        cacheImports,
+		CacheExports:        cacheExports,
 		AllowedEntitlements: normalizeEntitlementsInternal(req.Entitlements, req.Privileged),
 	}
 

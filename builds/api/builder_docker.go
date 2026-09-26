@@ -1,16 +1,19 @@
 package api
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
-	"strconv"
+	"slices"
 	"strings"
 
+	"github.com/containerd/platforms"
+	"github.com/docker/go-units"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/go-archive"
 	dockerbuild "github.com/moby/moby/api/types/build"
@@ -18,6 +21,7 @@ import (
 	dockerregistry "github.com/moby/moby/api/types/registry"
 	dockerclient "github.com/moby/moby/client"
 	"github.com/moby/patternmatcher"
+	"github.com/moby/patternmatcher/ignorefile"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	dockerutils "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
@@ -47,43 +51,31 @@ type buildFilesystemInput struct {
 	dockerfileInline     string
 }
 
-func parseUlimitsInternal(values map[string]string) []*dockercontainer.Ulimit {
+func parseUlimitsInternal(values map[string]string) ([]*dockercontainer.Ulimit, error) {
 	if len(values) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	out := make([]*dockercontainer.Ulimit, 0, len(values))
-	for name, raw := range values {
-		name = strings.TrimSpace(name)
-		raw = strings.TrimSpace(raw)
-		if name == "" || raw == "" {
+	for _, name := range slices.Sorted(maps.Keys(values)) {
+		spec := strings.TrimSpace(name)
+		raw := strings.TrimSpace(values[name])
+		if spec == "" || raw == "" {
 			continue
 		}
 
-		parts := strings.Split(raw, ":")
-		if len(parts) == 1 {
-			single, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
-			if err != nil {
-				continue
-			}
-			out = append(out, &dockercontainer.Ulimit{Name: name, Soft: single, Hard: single})
-			continue
+		ulimit, err := units.ParseUlimit(spec + "=" + raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ulimit %q: %w", spec+"="+raw, err)
 		}
-
-		soft, softErr := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
-		hard, hardErr := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-		if softErr != nil || hardErr != nil {
-			continue
-		}
-
-		out = append(out, &dockercontainer.Ulimit{Name: name, Soft: soft, Hard: hard})
+		out = append(out, ulimit)
 	}
 
 	if len(out) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	return out
+	return out, nil
 }
 
 func prepareBuildFilesystemInputInternal(req types.BuildRequest) (buildFilesystemInput, error) {
@@ -112,7 +104,7 @@ func prepareBuildFilesystemInputInternal(req types.BuildRequest) (buildFilesyste
 	}
 
 	relDockerfile, relErr := filepath.Rel(contextDir, fullDockerfilePath)
-	dockerfileOutsideCtx := relErr != nil || strings.HasPrefix(relDockerfile, "..")
+	dockerfileOutsideCtx := relErr != nil || !filepath.IsLocal(relDockerfile)
 	if !dockerfileOutsideCtx {
 		excluded, err := dockerfileExcludedByDockerignoreInternal(contextDir, relDockerfile)
 		if err != nil {
@@ -147,6 +139,11 @@ func prepareDockerBuildInputInternal(req types.BuildRequest) (dockerBuildInput, 
 	platform := ""
 	if len(req.Platforms) == 1 {
 		platform = strings.TrimSpace(req.Platforms[0])
+	}
+
+	ulimits, err := parseUlimitsInternal(req.Ulimits)
+	if err != nil {
+		return dockerBuildInput{}, false, err
 	}
 
 	buildArgs := map[string]*string{}
@@ -201,7 +198,7 @@ func prepareDockerBuildInputInternal(req types.BuildRequest) (dockerBuildInput, 
 		networkMode:          strings.TrimSpace(req.Network),
 		isolation:            strings.TrimSpace(req.Isolation),
 		shmSize:              req.ShmSize,
-		ulimits:              parseUlimitsInternal(req.Ulimits),
+		ulimits:              ulimits,
 		extraHosts:           extraHosts,
 	}, false, nil
 }
@@ -404,27 +401,6 @@ func (b *Service) pushDockerImagesInternal(
 	return nil
 }
 
-func parseOCIPlatformInternal(value string) (ocispec.Platform, error) {
-	parts := strings.Split(strings.TrimSpace(value), "/")
-	if len(parts) < 2 {
-		return ocispec.Platform{}, fmt.Errorf("invalid platform: %q", value)
-	}
-
-	platform := ocispec.Platform{
-		OS:           strings.TrimSpace(parts[0]),
-		Architecture: strings.TrimSpace(parts[1]),
-	}
-	if len(parts) >= 3 {
-		platform.Variant = strings.TrimSpace(parts[2])
-	}
-
-	if platform.OS == "" || platform.Architecture == "" {
-		return ocispec.Platform{}, fmt.Errorf("invalid platform: %q", value)
-	}
-
-	return platform, nil
-}
-
 func buildDockerImageOptionsInternal(
 	req types.BuildRequest,
 	input dockerBuildInput,
@@ -455,7 +431,7 @@ func buildDockerImageOptionsInternal(
 	}
 
 	if input.platform != "" {
-		platform, parseErr := parseOCIPlatformInternal(input.platform)
+		platform, parseErr := platforms.Parse(input.platform)
 		if parseErr != nil {
 			return dockerclient.ImageBuildOptions{}, parseErr
 		}
@@ -526,23 +502,17 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 }
 
 func readDockerignoreInternal(contextDir string) ([]string, error) {
-	ignorePath := filepath.Join(contextDir, ".dockerignore")
-	file, err := os.Open(ignorePath)
-	if err != nil {
+	file, err := os.Open(filepath.Join(contextDir, ".dockerignore"))
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read .dockerignore: %w", err)
 	}
 	defer file.Close()
 
-	patterns := []string{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		patterns = append(patterns, line)
-	}
-	if err := scanner.Err(); err != nil {
+	patterns, err := ignorefile.ReadAll(file)
+	if err != nil {
 		return nil, fmt.Errorf("failed to read .dockerignore: %w", err)
 	}
 

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/moby/buildkit/session"
 	sessionauth "github.com/moby/buildkit/session/auth"
 	dockerbuild "github.com/moby/moby/api/types/build"
+	dockercontainer "github.com/moby/moby/api/types/container"
 	dockerregistry "github.com/moby/moby/api/types/registry"
 	dockerclient "github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
@@ -335,4 +337,109 @@ func TestDockerfileExcludedByDockerignoreInternal_ReturnsScannerError(t *testing
 	require.Error(t, err)
 	assert.False(t, excluded)
 	assert.Contains(t, err.Error(), "failed to read .dockerignore")
+}
+
+func TestPrepareDockerBuildContextInternal_StagesDockerfileExcludedByRootedDockerignorePattern(t *testing.T) {
+	contextDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, ".dockerignore"), []byte("/Dockerfile\n"), 0o644))
+
+	input, _, err := prepareDockerBuildInputInternal(types.BuildRequest{ContextDir: contextDir, Dockerfile: "Dockerfile"})
+	require.NoError(t, err)
+	assert.True(t, input.dockerfileOutsideCtx)
+
+	buildContextDir, dockerfileForBuild, cleanup, err := prepareDockerBuildContextInternal(input)
+	require.NoError(t, err)
+	defer cleanup()
+
+	assert.Equal(t, ".arcane.external.Dockerfile", dockerfileForBuild)
+	contents, err := os.ReadFile(filepath.Join(buildContextDir, dockerfileForBuild))
+	require.NoError(t, err)
+	assert.Equal(t, "FROM alpine:3.20\n", string(contents))
+}
+
+func TestReadDockerignoreInternal_ReturnsOpenError(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission bits are not enforced on Windows or when running as root")
+	}
+
+	contextDir := t.TempDir()
+	ignorePath := filepath.Join(contextDir, ".dockerignore")
+	require.NoError(t, os.WriteFile(ignorePath, []byte("Dockerfile\n"), 0o000))
+
+	patterns, err := readDockerignoreInternal(contextDir)
+	require.Error(t, err)
+	assert.Nil(t, patterns)
+	assert.Contains(t, err.Error(), "failed to read .dockerignore")
+}
+
+func TestReadDockerignoreInternal_MissingFileHasNoPatterns(t *testing.T) {
+	patterns, err := readDockerignoreInternal(t.TempDir())
+	require.NoError(t, err)
+	assert.Nil(t, patterns)
+}
+
+func TestPrepareBuildFilesystemInputInternal_DotDotPrefixedDockerfileIsInsideContext(t *testing.T) {
+	contextDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "..Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
+
+	input, err := prepareBuildFilesystemInputInternal(types.BuildRequest{ContextDir: contextDir, Dockerfile: "..Dockerfile"})
+	require.NoError(t, err)
+	assert.False(t, input.dockerfileOutsideCtx)
+	assert.Equal(t, "..Dockerfile", input.relDockerfile)
+}
+
+func TestParseUlimitsInternal(t *testing.T) {
+	testCases := []struct {
+		name    string
+		values  map[string]string
+		want    []*dockercontainer.Ulimit
+		wantErr bool
+	}{
+		{name: "soft and hard", values: map[string]string{"nofile": "1024:2048"}, want: []*dockercontainer.Ulimit{{Name: "nofile", Soft: 1024, Hard: 2048}}},
+		{name: "single value sets soft and hard", values: map[string]string{"nofile": "4096"}, want: []*dockercontainer.Ulimit{{Name: "nofile", Soft: 4096, Hard: 4096}}},
+		{name: "sorted by name", values: map[string]string{"nproc": "10", "nofile": "20"}, want: []*dockercontainer.Ulimit{{Name: "nofile", Soft: 20, Hard: 20}, {Name: "nproc", Soft: 10, Hard: 10}}},
+		{name: "empty map", values: map[string]string{}, want: nil},
+		{name: "soft above hard", values: map[string]string{"nofile": "2048:1024"}, wantErr: true},
+		{name: "unknown name", values: map[string]string{"bogus": "1"}, wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseUlimitsInternal(tc.values)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid ulimit")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPrepareDockerBuildInputInternal_RejectsInvalidUlimit(t *testing.T) {
+	_, _, err := prepareDockerBuildInputInternal(types.BuildRequest{
+		ContextDir: createBuildContextWithDockerfileInternal(t),
+		Dockerfile: "Dockerfile",
+		Ulimits:    map[string]string{"nofile": "2048:1024"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ulimit")
+}
+
+func TestBuildDockerImageOptionsInternal_NormalizesPlatformArchitecture(t *testing.T) {
+	req := types.BuildRequest{
+		ContextDir: createBuildContextWithDockerfileInternal(t),
+		Dockerfile: "Dockerfile",
+		Platforms:  []string{"linux/x86_64"},
+	}
+	input, _, err := prepareDockerBuildInputInternal(req)
+	require.NoError(t, err)
+
+	buildOpts, err := buildDockerImageOptionsInternal(req, input, "Dockerfile", nil)
+	require.NoError(t, err)
+	require.Len(t, buildOpts.Platforms, 1)
+	assert.Equal(t, "linux", buildOpts.Platforms[0].OS)
+	assert.Equal(t, "amd64", buildOpts.Platforms[0].Architecture)
 }

@@ -5,9 +5,11 @@ go 1.27
 replace go.getarcane.app/kit => ../
 
 require (
+	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/depot/depot-go v0.5.3
 	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v29.8.1+incompatible
+	github.com/docker/go-units v0.5.0
 	github.com/moby/buildkit v0.33.0
 	github.com/moby/go-archive v0.3.3
 	github.com/moby/moby/api v1.56.0
@@ -31,12 +33,10 @@ require (
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/containerd/platforms v1.0.0-rc.5 // indirect
 	github.com/containerd/ttrpc v1.2.9 // indirect
 	github.com/containerd/typeurl/v2 v2.3.0 // indirect
 	github.com/docker/docker-credential-helpers v0.9.9 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
-	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

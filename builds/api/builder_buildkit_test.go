@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	buildkit "github.com/moby/buildkit/client"
 	moby "github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -151,4 +152,49 @@ type testDockerClientProvider struct {
 
 func (p testDockerClientProvider) GetClient(context.Context) (*moby.Client, error) {
 	return p.client, nil
+}
+
+func TestParseBuildkitCacheEntriesInternal(t *testing.T) {
+	testCases := []struct {
+		name    string
+		values  []string
+		want    []buildkit.CacheOptionsEntry
+		wantErr bool
+	}{
+		{
+			name:   "plain ref shorthand",
+			values: []string{"ghcr.io/getarcaneapp/cache:main"},
+			want:   []buildkit.CacheOptionsEntry{{Type: "registry", Attrs: map[string]string{"ref": "ghcr.io/getarcaneapp/cache:main"}}},
+		},
+		{
+			name:   "quoted field keeps its comma",
+			values: []string{`type=registry,ref=foo,"mode=max,compression=zstd"`},
+			want:   []buildkit.CacheOptionsEntry{{Type: "registry", Attrs: map[string]string{"ref": "foo", "mode": "max,compression=zstd"}}},
+		},
+		{
+			name:   "type defaults to registry",
+			values: []string{"ref=foo,mode=max"},
+			want:   []buildkit.CacheOptionsEntry{{Type: "registry", Attrs: map[string]string{"ref": "foo", "mode": "max"}}},
+		},
+		{
+			name:   "blank values are skipped",
+			values: []string{"", "  "},
+			want:   nil,
+		},
+		{name: "bad quote", values: []string{`type=registry,ref="foo`}, wantErr: true},
+		{name: "field without equals", values: []string{"type=local,dest"}, wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseBuildkitCacheEntriesInternal(tc.values)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid cache entry")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
