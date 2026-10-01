@@ -1,3 +1,13 @@
+## v0.3.2
+
+### Bug fixes
+
+* add FromPtr function([6c850e6](https://github.com/getarcaneapp/kit/commit/6c850e62bcaff14689063043cb84dc1e08d920b8) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/v0.3.1...v0.3.2
+
 ## v0.3.1
 
 ### Bug fixes
