@@ -19,6 +19,13 @@ const (
 	ErrorSizeMismatch ErrorCode = "size_mismatch"
 	ErrorRootRemoval  ErrorCode = "root_removal"
 	ErrorInternal     ErrorCode = "internal"
+
+	ApplyCreateFile   ApplyOperation = "create_file"
+	ApplyUpdateFile   ApplyOperation = "update_file"
+	ApplyCreateFolder ApplyOperation = "create_folder"
+	ApplyRename       ApplyOperation = "rename"
+	ApplyMove         ApplyOperation = "move"
+	ApplyDelete       ApplyOperation = "delete"
 )
 
 // ErrorResponse is emitted as one JSON line on stderr when a command fails.
@@ -33,15 +40,6 @@ type ErrorResponse struct {
 
 // ApplyOperation identifies one ordered filesystem mutation.
 type ApplyOperation string
-
-const (
-	ApplyCreateFile   ApplyOperation = "create_file"
-	ApplyUpdateFile   ApplyOperation = "update_file"
-	ApplyCreateFolder ApplyOperation = "create_folder"
-	ApplyRename       ApplyOperation = "rename"
-	ApplyMove         ApplyOperation = "move"
-	ApplyDelete       ApplyOperation = "delete"
-)
 
 // ApplyChange describes one ordered root-confined filesystem mutation.
 type ApplyChange struct {
