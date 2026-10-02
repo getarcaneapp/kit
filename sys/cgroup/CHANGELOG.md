@@ -1,3 +1,21 @@
+## sys/cgroup/v0.2.4
+
+### New features
+
+* move over helpers from arcane codebase([b4272a8](https://github.com/getarcaneapp/kit/commit/b4272a870d13199eda8d13493ac86b1ad657b7f5) by @kmendell)
+
+### Bug fixes
+
+* update deps([03fe0c8](https://github.com/getarcaneapp/kit/commit/03fe0c8e1d6670abead50f9efd8628e9cb67592c) by @kmendell)
+
+### Dependencies
+
+* bump golang.org/x/text from 0.41.0 to 0.42.0 ([#6](https://github.com/getarcaneapp/kit/pull/6) by @dependabot[bot])
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.2.3...sys/cgroup/v0.2.4
+
 ## sys/cgroup/v0.2.3
 
 ### Bug fixes
