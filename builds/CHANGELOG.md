@@ -1,3 +1,21 @@
+## builds/v0.4.3
+
+### New features
+
+* move over helpers from arcane codebase([b4272a8](https://github.com/getarcaneapp/kit/commit/b4272a870d13199eda8d13493ac86b1ad657b7f5) by @kmendell)
+
+### Bug fixes
+
+* update deps([03fe0c8](https://github.com/getarcaneapp/kit/commit/03fe0c8e1d6670abead50f9efd8628e9cb67592c) by @kmendell)
+
+### Dependencies
+
+* bump github.com/docker/cli from 29.8.1+incompatible to 29.8.2+incompatible ([#15](https://github.com/getarcaneapp/kit/pull/15) by @dependabot[bot])
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.4.2...builds/v0.4.3
+
 ## builds/v0.4.2
 
 ### Bug fixes
