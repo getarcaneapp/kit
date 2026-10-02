@@ -48,10 +48,10 @@ const (
 	Tebibyte = Gibibyte << 10
 	Pebibyte = Tebibyte << 10
 	Exbibyte = Pebibyte << 10
-)
 
-// maxCapacity is the largest representable Capacity.
-const maxCapacity = Capacity(^uint64(0))
+	// maxCapacity is the largest representable Capacity.
+	maxCapacity = Capacity(^uint64(0))
+)
 
 // ErrInvalidCapacity is returned by ParseCapacity for any input it cannot
 // parse. Errors returned by ParseCapacity wrap it, so callers can test with

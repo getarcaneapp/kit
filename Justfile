@@ -84,6 +84,47 @@ fix:
         (cd "$module" && go fix ./...)
     done
 
+# Update direct dependencies: just deps update [--patch] (requires jq).
+# Local replacements stay unchanged; indirect versions may move to satisfy direct updates.
+[group('dependencies')]
+deps action *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{ action }}" != "update" ]; then
+        echo 'Usage: just deps update [--patch]' >&2
+        exit 1
+    fi
+    version=upgrade
+    set -- {{ args }}
+    case "$#:$*" in
+        0:) ;;
+        1:--patch) version=patch ;;
+        *) echo 'Usage: just deps update [--patch]' >&2; exit 1 ;;
+    esac
+    command -v jq >/dev/null || { echo 'jq is required.' >&2; exit 1; }
+    for module in {{ modules }}; do
+        (
+            cd "$module"
+            export GOWORK=off
+            echo "Updating direct dependencies in $module..."
+            direct=$(go list -mod=mod -m -json all | jq -r '
+                select(.Main != true and .Indirect != true)
+                | select(.Replace == null or .Replace.Version != null)
+                | .Path')
+            dependencies=()
+            while IFS= read -r dependency; do
+                if [ -n "$dependency" ]; then
+                    dependencies+=("$dependency@$version")
+                fi
+            done <<<"$direct"
+            if [ "${#dependencies[@]}" -gt 0 ]; then
+                go get "${dependencies[@]}"
+            fi
+            go mod tidy
+        )
+        go work sync
+    done
+
 [group('test')]
 test:
     #!/usr/bin/env bash

@@ -187,6 +187,7 @@ func (e *Encryptor) Encrypt(plaintext string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	//nolint:gosec // G407: NewGCMWithRandomNonce generates and prepends a fresh nonce; Seal requires a nil nonce.
 	ciphertext := gcm.Seal(nil, nil, []byte(plaintext), nil)
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }

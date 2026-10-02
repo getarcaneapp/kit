@@ -3,9 +3,9 @@ module go.getarcane.app/docker/convert
 go 1.27
 
 require (
-	github.com/compose-spec/compose-go/v2 v2.15.0
+	github.com/compose-spec/compose-go/v2 v2.16.1
 	github.com/docker/go-units v0.5.0
-	github.com/mattn/go-shellwords v1.0.15
+	github.com/mattn/go-shellwords v1.0.16
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 )
 
@@ -19,6 +19,6 @@ require (
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
