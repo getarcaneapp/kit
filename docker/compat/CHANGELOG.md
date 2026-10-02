@@ -1,3 +1,17 @@
+## docker/compat/v0.1.1
+
+### Bug fixes
+
+* update deps([03fe0c8](https://github.com/getarcaneapp/kit/commit/03fe0c8e1d6670abead50f9efd8628e9cb67592c) by @kmendell)
+
+### Dependencies
+
+* bump github.com/docker/cli from 29.8.1+incompatible to 29.8.2+incompatible ([#15](https://github.com/getarcaneapp/kit/pull/15) by @dependabot[bot])
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/compat/v0.1.0...docker/compat/v0.1.1
+
 ## docker/compat/v0.1.0
 
 ### New features
