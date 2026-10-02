@@ -1,3 +1,17 @@
+## streams/v0.4.4
+
+### Bug fixes
+
+* update deps([03fe0c8](https://github.com/getarcaneapp/kit/commit/03fe0c8e1d6670abead50f9efd8628e9cb67592c) by @kmendell)
+
+### Dependencies
+
+* bump golang.org/x/text from 0.41.0 to 0.42.0 ([#6](https://github.com/getarcaneapp/kit/pull/6) by @dependabot[bot])
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/streams/v0.4.3...streams/v0.4.4
+
 ## streams/v0.4.3
 
 ### Bug fixes
