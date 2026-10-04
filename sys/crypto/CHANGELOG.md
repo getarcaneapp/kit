@@ -1,3 +1,13 @@
+## sys/crypto/v0.3.0
+
+### New features
+
+* add docker module([fe017e1](https://github.com/getarcaneapp/kit/commit/fe017e1069781aa53a6a9e98bd7df13616710b15) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/crypto/v0.2.3...sys/crypto/v0.3.0
+
 ## sys/crypto/v0.2.3
 
 ### Bug fixes
