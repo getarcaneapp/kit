@@ -1,3 +1,13 @@
+## sys/crypto/v0.2.3
+
+### Bug fixes
+
+* update deps([03fe0c8](https://github.com/getarcaneapp/kit/commit/03fe0c8e1d6670abead50f9efd8628e9cb67592c) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/crypto/v0.2.2...sys/crypto/v0.2.3
+
 ## sys/crypto/v0.2.2
 
 ### Bug fixes
