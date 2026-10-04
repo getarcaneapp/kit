@@ -45,9 +45,10 @@ func IsArcaneServerContainer(labels map[string]string) bool {
 	return (hasTruthyLabel(labels, LabelArcane) || hasTruthyLabel(labels, LabelArcaneLegacyServer)) && !IsArcaneAgentContainer(labels)
 }
 
-// ShouldDisableArcaneServerRedeploy reports whether redeploy should be blocked for a container.
+// ShouldDisableArcaneServerRedeploy reports whether redeploy or edit should be blocked
+// because the container is the running Arcane server or agent.
 func ShouldDisableArcaneServerRedeploy(labels map[string]string, containerID, currentContainerID string, currentErr error) bool {
-	if !IsArcaneServerContainer(labels) {
+	if !IsArcaneContainer(labels) {
 		return false
 	}
 

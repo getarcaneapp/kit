@@ -50,21 +50,34 @@ func TestShouldDisableArcaneServerRedeploy(t *testing.T) {
 			want:        true,
 		},
 		{
-			name:               "agent container remains redeployable",
+			name:               "current Arcane agent container",
 			labels:             map[string]string{LabelArcaneAgent: "true"},
 			containerID:        "abcdef1234567890",
 			currentContainerID: "abcdef1234567890",
-			want:               false,
+			want:               true,
 		},
 		{
-			name: "agent label excludes Arcane server label",
+			name: "current agent with Arcane server label",
 			labels: map[string]string{
 				LabelArcane:      "true",
 				LabelArcaneAgent: "true",
 			},
 			containerID:        "abcdef1234567890",
-			currentContainerID: "abcdef1234567890",
+			currentContainerID: "abcdef123456",
+			want:               true,
+		},
+		{
+			name:               "different Arcane agent container",
+			labels:             map[string]string{LabelArcaneAgent: "true"},
+			containerID:        "abcdef1234567890",
+			currentContainerID: "123456abcdef7890",
 			want:               false,
+		},
+		{
+			name:        "agent fails closed when current container cannot be detected",
+			labels:      map[string]string{LabelArcaneAgent: "true"},
+			containerID: "abcdef1234567890",
+			want:        true,
 		},
 		{
 			name:               "non-Arcane container",
