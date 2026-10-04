@@ -1,3 +1,15 @@
+## v0.3.3
+
+### Bug fixes
+
+* update deps([03fe0c8](https://github.com/getarcaneapp/kit/commit/03fe0c8e1d6670abead50f9efd8628e9cb67592c) by @kmendell)
+* include arcane agent containers in self lookup([3e4e23f](https://github.com/getarcaneapp/kit/commit/3e4e23f2e98d6a4bba5adb9593cc0dc6fc052dd8) by @kmendell)
+* cleanup un-needed functions([0219021](https://github.com/getarcaneapp/kit/commit/021902153905003018894bc13b4cfa47491d4ec7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/v0.3.2...v0.3.3
+
 ## v0.3.2
 
 ### Bug fixes
