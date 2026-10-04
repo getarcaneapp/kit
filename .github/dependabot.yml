@@ -5,6 +5,7 @@ updates:
       - "/"
       - "/acfs"
       - "/builds"
+      - "/docker"
       - "/docker/convert"
       - "/streams"
       - "/sys/bytes"

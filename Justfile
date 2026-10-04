@@ -1,6 +1,6 @@
 set working-directory := './'
 
-modules := '. ./acfs ./builds ./docker/compat ./docker/convert ./streams ./sys/bytes ./sys/cgroup ./sys/crypto ./updater'
+modules := '. ./acfs ./builds ./docker ./docker/compat ./docker/convert ./streams ./sys/bytes ./sys/cgroup ./sys/crypto ./updater'
 golangci_config := justfile_directory() / '.golangci.yml'
 
 _default:
@@ -342,6 +342,14 @@ release module *args:
             CHANGELOG_FILE="{{ module }}/CHANGELOG.md"
             CLIFF_PATH_ARGS=(--include-path "{{ module }}/**")
             PATHSPEC=(-- '{{ module }}')
+            # Modules nested below this one (docker/compat under docker) release separately.
+            for module in {{ modules }}; do
+                module="${module#./}"
+                if [[ "$module" == "{{ module }}/"* ]]; then
+                    CLIFF_PATH_ARGS+=(--exclude-path "$module/**")
+                    PATHSPEC+=(":(exclude)$module")
+                fi
+            done
             ;;
     esac
 
