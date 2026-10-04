@@ -18,7 +18,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tonistiigi/fsutil v0.0.0-20260819142231-83cac42c1c52
-	go.getarcane.app/kit v0.1.0
+	go.getarcane.app/kit v0.3.3
 )
 
 require (
