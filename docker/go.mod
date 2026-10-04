@@ -10,7 +10,7 @@ require (
 	github.com/samber/hot v0.13.1
 	github.com/samber/mo v1.17.0
 	github.com/stretchr/testify v1.12.1
-	go.getarcane.app/kit v0.3.2
+	go.getarcane.app/kit v0.4.0
 )
 
 require (
