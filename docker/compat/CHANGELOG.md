@@ -1,3 +1,13 @@
+## docker/compat/v0.1.2
+
+### Bug fixes
+
+* cleanup un-needed functions([0219021](https://github.com/getarcaneapp/kit/commit/021902153905003018894bc13b4cfa47491d4ec7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/compat/v0.1.1...docker/compat/v0.1.2
+
 ## docker/compat/v0.1.1
 
 ### Bug fixes
