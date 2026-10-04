@@ -1,3 +1,13 @@
+## updater/v0.11.2
+
+### Bug fixes
+
+* include arcane agent containers in self lookup([3e4e23f](https://github.com/getarcaneapp/kit/commit/3e4e23f2e98d6a4bba5adb9593cc0dc6fc052dd8) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.1...updater/v0.11.2
+
 ## updater/v0.11.1
 
 ### New features
