@@ -12,8 +12,8 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+	"go.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/internal/digestcheck"
 	"go.getarcane.app/updater/refs"
@@ -41,7 +41,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 
 	target := containerList.Items[0]
 	name := containerSummaryName(target)
-	inspectResult, err := compat.ContainerInspect(ctx, dockerClient, target.ID, client.ContainerInspectOptions{})
+	inspectResult, err := compat.ContainerInspectWithCompatibility(ctx, dockerClient, target.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		item := failedContainerResult(target.ID, name, fmt.Sprintf("inspect failed: %v", err))
 		out.Items = append(out.Items, item)
@@ -302,7 +302,7 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 	}
 	cfg.Labels = refreshRecreatedImageLabelsInternal(cfg.Labels, imageLabels, imageID)
 
-	hostConfig, err := compat.PrepareRecreateHostConfig(ctx, dockerClient, inspect.HostConfig)
+	hostConfig, _, _, err := compat.PrepareRecreateHostConfigForEngine(ctx, dockerClient, inspect.HostConfig)
 	if err != nil {
 		return "", fmt.Errorf("prepare host config: %w", err)
 	}
@@ -322,11 +322,11 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 		}
 	}
 
-	apiVersion := compat.DetectAPIVersion(ctx, dockerClient)
+	apiVersion := compat.DetectDockerAPIVersion(ctx, dockerClient)
 	networkingConfig := buildRecreateNetworkingConfig(networkMode, inspect.NetworkSettings, apiVersion)
 	containerName := strings.TrimPrefix(inspect.Name, "/")
 	createCtx, cancelCreate := s.opCtx(ctx)
-	resp, err := compat.ContainerCreate(createCtx, dockerClient, client.ContainerCreateOptions{
+	resp, err := compat.ContainerCreateWithCompatibilityForAPIVersion(createCtx, dockerClient, client.ContainerCreateOptions{
 		Config:           cfg,
 		HostConfig:       hostConfig,
 		NetworkingConfig: networkingConfig,
@@ -356,7 +356,7 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 }
 
 func containerRunning(ctx context.Context, dockerClient *client.Client, containerID string) (bool, error) {
-	inspectResult, err := compat.ContainerInspect(ctx, dockerClient, containerID, client.ContainerInspectOptions{})
+	inspectResult, err := compat.ContainerInspectWithCompatibility(ctx, dockerClient, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return false, err
 	}
@@ -440,11 +440,7 @@ func normalizedTagsForContainer(ctx context.Context, dockerClient *client.Client
 			seen[normalized] = struct{}{}
 		}
 	}
-	out := make([]string, 0, len(seen))
-	for tag := range seen {
-		out = append(out, tag)
-	}
-	return out
+	return slices.Collect(maps.Keys(seen))
 }
 
 func buildRecreateNetworkingConfig(networkMode container.NetworkMode, settings *container.NetworkSettings, apiVersion string) *network.NetworkingConfig {
@@ -468,7 +464,7 @@ func buildRecreateNetworkingConfig(networkMode container.NetworkMode, settings *
 		}
 	}
 
-	sanitized := compat.SanitizeEndpointSettings(rawEndpointsConfig, apiVersion)
+	sanitized := compat.SanitizeContainerCreateEndpointSettingsForDockerAPI(rawEndpointsConfig, apiVersion)
 	if len(sanitized) == 0 {
 		return nil
 	}

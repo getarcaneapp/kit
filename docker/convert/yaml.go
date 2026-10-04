@@ -3,6 +3,7 @@ package convert
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 
@@ -132,12 +133,7 @@ func serviceNodeInternal(service types.Service) *yaml.Node {
 
 func resourceNodeInternal(resources map[string]map[string]any) *yaml.Node {
 	node := new(yaml.Node{Kind: yaml.MappingNode})
-	names := make([]string, 0, len(resources))
-	for name := range resources {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(resources)) {
 		node.Content = append(node.Content, scalarNodeInternal(name), anyNodeInternal(resources[name]))
 	}
 	return node

@@ -3,6 +3,7 @@ package bus
 
 import (
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -172,25 +173,19 @@ func (b *DockerEventBus) loadStateInternal() *dockerEventBusState {
 }
 
 func (s *dockerEventBusState) withSubscriptionInternal(eventType events.Type, subscription chan events.Message) *dockerEventBusState {
-	subscribers := cloneDockerEventSubscribersInternal(s.subscribers)
+	subscribers := maps.Clone(s.subscribers)
 	subscribers[eventType] = append(append([]chan events.Message(nil), subscribers[eventType]...), subscription)
 	return &dockerEventBusState{subscribers: subscribers}
 }
 
 func (s *dockerEventBusState) withoutSubscriptionInternal(eventType events.Type, subscription chan events.Message) (*dockerEventBusState, bool) {
 	current := s.subscribers[eventType]
-	index := -1
-	for i, candidate := range current {
-		if candidate == subscription {
-			index = i
-			break
-		}
-	}
+	index := slices.Index(current, subscription)
 	if index < 0 {
 		return s, false
 	}
 
-	subscribers := cloneDockerEventSubscribersInternal(s.subscribers)
+	subscribers := maps.Clone(s.subscribers)
 	if len(current) == 1 {
 		delete(subscribers, eventType)
 	} else {
@@ -201,12 +196,6 @@ func (s *dockerEventBusState) withoutSubscriptionInternal(eventType events.Type,
 	}
 
 	return &dockerEventBusState{closed: s.closed, subscribers: subscribers}, true
-}
-
-func cloneDockerEventSubscribersInternal(current map[events.Type][]chan events.Message) map[events.Type][]chan events.Message {
-	next := make(map[events.Type][]chan events.Message, len(current))
-	maps.Copy(next, current)
-	return next
 }
 
 func (b *DockerEventBus) unsubscribeInternal(eventType events.Type, subscription chan events.Message) {

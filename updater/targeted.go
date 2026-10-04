@@ -8,8 +8,8 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"go.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/internal/deps"
 	"go.getarcane.app/updater/pkg/utils/tagpolicy"
@@ -173,10 +173,10 @@ func (s *Service) addTargetDependenciesInternal(ctx context.Context, dockerClien
 		if _, ok := scan.plansByName[name]; ok {
 			continue
 		}
-		if cnt.State != container.StateRunning || containerSummaryName(cnt) == dockerProxyContainerName(dockerHost(dockerClient)) {
+		if cnt.State != container.StateRunning || containerSummaryName(cnt) == dockerProxyContainerName(dockerClient.DaemonHost()) {
 			continue
 		}
-		inspected, err := compat.ContainerInspect(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
+		inspected, err := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
 		if err != nil {
 			continue
 		}
@@ -259,12 +259,12 @@ func (s *Service) collectTargetRecordInternal(
 		if record.ContainerID != "" && record.ContainerID != cnt.ID {
 			continue
 		}
-		if proxy := dockerProxyContainerName(dockerHost(dockerClient)); proxy != "" && containerSummaryName(cnt) == proxy {
+		if proxy := dockerProxyContainerName(dockerClient.DaemonHost()); proxy != "" && containerSummaryName(cnt) == proxy {
 			state.failed = true
 			s.appendTargetResultInternal(ctx, out, skippedContainerResult(cnt.ID, proxy, "Docker proxy excluded from pending updates"))
 			continue
 		}
-		inspected, inspectErr := compat.ContainerInspect(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
+		inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
 		if inspectErr != nil {
 			// An unscoped record cannot safely be cleared after an incomplete scan.
 			state.failed = true

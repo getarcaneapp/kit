@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/client"
 
 	"go.getarcane.app/updater/internal/deps"
 )
@@ -81,13 +80,6 @@ func restartCandidateLabels(candidate deps.ContainerWithDeps, plan *restartPlan)
 		return nil
 	}
 	return labels
-}
-
-func dockerHost(dockerClient *client.Client) string {
-	if dockerClient == nil {
-		return ""
-	}
-	return dockerClient.DaemonHost()
 }
 
 func dockerProxyContainerName(dockerHost string) string {

@@ -2,7 +2,11 @@
 // group containers into projects and services.
 package compose
 
-import "strings"
+import (
+	"strings"
+
+	kit "go.getarcane.app/kit/pkg"
+)
 
 const (
 	// ProjectLabelKey is Docker Compose's project label key.
@@ -36,13 +40,5 @@ func ConfigFilesLabel(labels map[string]string) []string {
 	if raw == "" {
 		return nil
 	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
+	return kit.TrimNonEmpty(strings.Split(raw, ","))
 }

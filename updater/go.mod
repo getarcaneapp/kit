@@ -13,6 +13,7 @@ require (
 	github.com/moby/moby/client v0.6.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/samber/hot v0.13.1
+	go.getarcane.app/docker/compat v0.1.1
 	go.getarcane.app/kit v0.1.0
 )
 
@@ -49,3 +50,5 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
+
+replace go.getarcane.app/docker/compat => ../docker/compat

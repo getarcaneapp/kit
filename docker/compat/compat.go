@@ -149,7 +149,9 @@ func ContainerCreateWithCompatibility(ctx context.Context, dockerClient client.A
 
 // ContainerCreateWithCompatibilityForAPIVersion creates the container for an
 // already resolved API version, attaching withheld networks before returning
-// and removing the container when an attachment fails.
+// and removing the container when an attachment fails. The removal ignores
+// ctx cancellation, since an attachment that failed because ctx expired must
+// still not leave the half-connected container behind.
 func ContainerCreateWithCompatibilityForAPIVersion(ctx context.Context, dockerClient client.APIClient, options client.ContainerCreateOptions, apiVersion string) (client.ContainerCreateResult, error) {
 	adjusted, extra := PrepareContainerCreateOptionsForDockerAPI(options, apiVersion)
 	result, err := dockerClient.ContainerCreate(ctx, adjusted)
@@ -158,7 +160,7 @@ func ContainerCreateWithCompatibilityForAPIVersion(ctx context.Context, dockerCl
 	}
 	err = ConnectContainerExtraNetworksForDockerAPI(ctx, dockerClient, result.ID, extra)
 	if err != nil {
-		_, _ = dockerClient.ContainerRemove(ctx, result.ID, client.ContainerRemoveOptions{Force: true})
+		_, _ = dockerClient.ContainerRemove(context.WithoutCancel(ctx), result.ID, client.ContainerRemoveOptions{Force: true})
 		return client.ContainerCreateResult{}, err
 	}
 	return result, nil

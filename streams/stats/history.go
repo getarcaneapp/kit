@@ -227,7 +227,7 @@ func calculateCPUPercentInternal(stats dockercontainer.StatsResponse) float64 {
 		return 0
 	}
 
-	return math.Min(math.Max((cpuDelta/systemDelta)*100, 0), 100)
+	return min(max((cpuDelta/systemDelta)*100, 0), 100)
 }
 
 func calculateMemoryPercentInternal(stats dockercontainer.StatsResponse) float64 {
@@ -237,7 +237,7 @@ func calculateMemoryPercentInternal(stats dockercontainer.StatsResponse) float64
 	}
 
 	usage := calculateMemoryUsageInternal(stats)
-	return math.Min(math.Max((float64(usage)/float64(limit))*100, 0), 100)
+	return min(max((float64(usage)/float64(limit))*100, 0), 100)
 }
 
 func calculateMemoryUsageInternal(stats dockercontainer.StatsResponse) uint64 {
@@ -253,6 +253,5 @@ func calculateMemoryUsageInternal(stats dockercontainer.StatsResponse) uint64 {
 }
 
 func percentToTenthsInternal(value float64) uint16 {
-	clamped := math.Min(math.Max(value, 0), 100)
-	return uint16(math.Round(clamped * 10))
+	return uint16(math.Round(value * 10))
 }

@@ -10,6 +10,7 @@ import (
 
 	buildkit "github.com/moby/buildkit/client"
 	"github.com/tonistiigi/fsutil"
+	kit "go.getarcane.app/kit/pkg"
 
 	dockerutils "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
@@ -78,36 +79,6 @@ func parseBuildkitCacheEntriesInternal(values []string) ([]buildkit.CacheOptions
 	return entries, nil
 }
 
-func normalizeEntitlementsInternal(entitlements []string, privileged bool) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(entitlements)+1)
-
-	appendEntitlement := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		if _, ok := seen[value]; ok {
-			return
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-
-	for _, entitlement := range entitlements {
-		appendEntitlement(entitlement)
-	}
-	if privileged {
-		appendEntitlement("security.insecure")
-	}
-
-	if len(out) == 0 {
-		return nil
-	}
-
-	return out
-}
-
 func (b *Service) buildSolveOptInternal(ctx context.Context, req types.BuildRequest, providerName string) (buildkit.SolveOpt, <-chan error, func(), error) {
 	fsInput, err := prepareBuildFilesystemInputInternal(req)
 	if err != nil {
@@ -172,6 +143,11 @@ func (b *Service) buildSolveOptInternal(ctx context.Context, req types.BuildRequ
 		return buildkit.SolveOpt{}, nil, nil, fmt.Errorf("failed to prepare Dockerfile mount: %w", err)
 	}
 
+	entitlements := kit.TrimNonEmpty(req.Entitlements)
+	if req.Privileged {
+		entitlements = append(entitlements, "security.insecure")
+	}
+
 	solveOpt := buildkit.SolveOpt{
 		Frontend:      "dockerfile.v0",
 		FrontendAttrs: frontendAttrs,
@@ -181,7 +157,7 @@ func (b *Service) buildSolveOptInternal(ctx context.Context, req types.BuildRequ
 		},
 		CacheImports:        cacheImports,
 		CacheExports:        cacheExports,
-		AllowedEntitlements: normalizeEntitlementsInternal(req.Entitlements, req.Privileged),
+		AllowedEntitlements: kit.Unique(entitlements),
 	}
 
 	var loadErrCh chan error

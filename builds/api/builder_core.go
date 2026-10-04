@@ -33,7 +33,7 @@ type Service struct {
 // NewService constructs a build service.
 func NewService(cfg Config) *Service {
 	providers := map[string]any{
-		"depot": newDepotBuildKitProviderInternal(cfg.SettingsProvider),
+		"depot": &depotBuildKitProvider{settings: cfg.SettingsProvider},
 	}
 
 	logger := cfg.Logger

@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -146,13 +147,7 @@ func (b *Broadcaster) loadSubscribersInternal() *logSubscriberSnapshot {
 func (b *Broadcaster) unsubscribeInternal(subscription chan Entry) {
 	for {
 		current := b.loadSubscribersInternal()
-		index := -1
-		for i, candidate := range current.subscribers {
-			if candidate == subscription {
-				index = i
-				break
-			}
-		}
+		index := slices.Index(current.subscribers, subscription)
 		if index < 0 {
 			return
 		}
@@ -219,9 +214,9 @@ func (h *slogHandler) Handle(ctx context.Context, r slog.Record) error {
 
 func (h *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	next := h.cloneInternal()
-	copiedAttrs := append([]slog.Attr(nil), attrs...)
+	copiedAttrs := slices.Clone(attrs)
 	next.attrs = append(next.attrs, boundAttrs{
-		groups: append([]string(nil), h.group...),
+		groups: slices.Clone(h.group),
 		attrs:  copiedAttrs,
 	})
 	next.base = h.base.WithAttrs(attrs)
@@ -241,14 +236,14 @@ func (h *slogHandler) cloneInternal() *slogHandler {
 	next := &slogHandler{
 		base:  h.base,
 		b:     h.b,
-		group: append([]string(nil), h.group...),
+		group: slices.Clone(h.group),
 	}
 	if len(h.attrs) > 0 {
 		next.attrs = make([]boundAttrs, 0, len(h.attrs))
 		for _, bound := range h.attrs {
 			next.attrs = append(next.attrs, boundAttrs{
-				groups: append([]string(nil), bound.groups...),
-				attrs:  append([]slog.Attr(nil), bound.attrs...),
+				groups: slices.Clone(bound.groups),
+				attrs:  slices.Clone(bound.attrs),
 			})
 		}
 	}

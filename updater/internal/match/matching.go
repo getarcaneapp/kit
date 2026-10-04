@@ -8,9 +8,9 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"go.getarcane.app/docker/compat"
 
 	"go.getarcane.app/updater/digest"
-	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/refs"
 )
@@ -102,7 +102,7 @@ func VerifyComposeServiceUpdatedImage(ctx context.Context, dockerClient *client.
 	for _, c := range listResult.Items {
 		currentImageID := strings.TrimSpace(c.ImageID)
 		if currentImageID == "" {
-			inspectResult, inspectErr := compat.ContainerInspect(ctx, dockerClient, c.ID, client.ContainerInspectOptions{})
+			inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, c.ID, client.ContainerInspectOptions{})
 			if inspectErr != nil {
 				return fmt.Errorf("verify compose service image: inspect container %s: %w", c.ID, inspectErr)
 			}

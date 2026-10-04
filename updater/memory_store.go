@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strconv"
 	"sync"
@@ -30,14 +31,8 @@ func (s *memoryPendingStore) PendingImageUpdates(ctx context.Context) ([]ImageUp
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	keys := make([]string, 0, len(s.records))
-	for key := range s.records {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-
 	out := make([]ImageUpdateRecord, 0, len(s.records))
-	for _, key := range keys {
+	for _, key := range slices.Sorted(maps.Keys(s.records)) {
 		out = append(out, s.records[key])
 	}
 	return out, nil

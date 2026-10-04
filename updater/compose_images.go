@@ -8,8 +8,8 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"go.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/refs"
 	updatetypes "go.getarcane.app/updater/types"
@@ -104,7 +104,7 @@ func verifyComposeTargetInternal(ctx context.Context, dockerClient *client.Clien
 		return fmt.Errorf("compose service %s/%s has no running container after update", projectName, serviceName)
 	}
 	for _, cnt := range containers.Items {
-		inspected, inspectErr := compat.ContainerInspect(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
+		inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
 		if inspectErr != nil {
 			return fmt.Errorf("verify compose target: inspect container %s: %w", cnt.ID, inspectErr)
 		}

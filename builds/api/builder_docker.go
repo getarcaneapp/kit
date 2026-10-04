@@ -163,26 +163,12 @@ func prepareDockerBuildInputInternal(req types.BuildRequest) (dockerBuildInput, 
 		labels = nil
 	}
 
-	cacheFrom := make([]string, 0, len(req.CacheFrom))
-	for _, source := range req.CacheFrom {
-		source = strings.TrimSpace(source)
-		if source == "" {
-			continue
-		}
-		cacheFrom = append(cacheFrom, source)
-	}
+	cacheFrom := kit.TrimNonEmpty(req.CacheFrom)
 	if len(cacheFrom) == 0 {
 		cacheFrom = nil
 	}
 
-	extraHosts := make([]string, 0, len(req.ExtraHosts))
-	for _, host := range req.ExtraHosts {
-		host = strings.TrimSpace(host)
-		if host == "" {
-			continue
-		}
-		extraHosts = append(extraHosts, host)
-	}
+	extraHosts := kit.TrimNonEmpty(req.ExtraHosts)
 	if len(extraHosts) == 0 {
 		extraHosts = nil
 	}
@@ -330,10 +316,6 @@ func prepareBuildContextInternal(input buildFilesystemInput) (string, string, fu
 	return stagingDir, stagedDockerfile, cleanup, nil
 }
 
-func prepareDockerBuildContextInternal(input dockerBuildInput) (string, string, func(), error) {
-	return prepareBuildContextInternal(input.buildFilesystemInput)
-}
-
 func (b *Service) performDockerBuildInternal(
 	ctx context.Context,
 	dockerClient *dockerclient.Client,
@@ -461,7 +443,7 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 		return nil, err
 	}
 
-	buildContextDir, dockerfileForBuild, cleanupBuildContext, err := prepareDockerBuildContextInternal(input)
+	buildContextDir, dockerfileForBuild, cleanupBuildContext, err := prepareBuildContextInternal(input.buildFilesystemInput)
 	if err != nil {
 		return nil, err
 	}

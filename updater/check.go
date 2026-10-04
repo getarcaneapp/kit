@@ -8,9 +8,9 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"go.getarcane.app/docker/compat"
 
 	"go.getarcane.app/updater/digest"
-	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/digestcheck"
 	"go.getarcane.app/updater/pkg/utils/tagpolicy"
 	"go.getarcane.app/updater/refs"
@@ -112,7 +112,7 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 	if err != nil {
 		return types.CheckResult{}, err
 	}
-	inspected, err := compat.ContainerInspect(ctx, dockerClient, containerID, client.ContainerInspectOptions{})
+	inspected, err := compat.ContainerInspectWithCompatibility(ctx, dockerClient, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return types.CheckResult{}, err
 	}

@@ -32,10 +32,6 @@ type depotBuildKitProvider struct {
 	settings types.SettingsProvider
 }
 
-func newDepotBuildKitProviderInternal(settings types.SettingsProvider) *depotBuildKitProvider {
-	return &depotBuildKitProvider{settings: settings}
-}
-
 func (p *depotBuildKitProvider) Name() string {
 	return "depot"
 }

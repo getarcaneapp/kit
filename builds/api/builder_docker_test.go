@@ -272,7 +272,7 @@ func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestPrepareDockerBuildContextInternal_StagesInlineDockerfile(t *testing.T) {
+func TestPrepareBuildContextInternal_StagesInlineDockerfile(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "app.txt"), []byte("hello\n"), 0o644))
 
@@ -285,7 +285,7 @@ func TestPrepareDockerBuildContextInternal_StagesInlineDockerfile(t *testing.T) 
 	require.NoError(t, err)
 	assert.False(t, reportProgress)
 
-	buildContextDir, dockerfileForBuild, cleanup, err := prepareDockerBuildContextInternal(input)
+	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContextInternal(input.buildFilesystemInput)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -298,7 +298,7 @@ func TestPrepareDockerBuildContextInternal_StagesInlineDockerfile(t *testing.T) 
 	assert.Equal(t, "hello\n", string(appContents))
 }
 
-func TestPrepareDockerBuildContextInternal_StagesDockerfileExcludedByDockerignore(t *testing.T) {
+func TestPrepareBuildContextInternal_StagesDockerfileExcludedByDockerignore(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, ".dockerignore"), []byte("**/Dockerfile*\n"), 0o644))
@@ -313,7 +313,7 @@ func TestPrepareDockerBuildContextInternal_StagesDockerfileExcludedByDockerignor
 	require.NoError(t, err)
 	assert.False(t, reportProgress)
 
-	buildContextDir, dockerfileForBuild, cleanup, err := prepareDockerBuildContextInternal(input)
+	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContextInternal(input.buildFilesystemInput)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -340,7 +340,7 @@ func TestDockerfileExcludedByDockerignoreInternal_ReturnsScannerError(t *testing
 	assert.Contains(t, err.Error(), "failed to read .dockerignore")
 }
 
-func TestPrepareDockerBuildContextInternal_StagesDockerfileExcludedByRootedDockerignorePattern(t *testing.T) {
+func TestPrepareBuildContextInternal_StagesDockerfileExcludedByRootedDockerignorePattern(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, ".dockerignore"), []byte("/Dockerfile\n"), 0o644))
@@ -349,7 +349,7 @@ func TestPrepareDockerBuildContextInternal_StagesDockerfileExcludedByRootedDocke
 	require.NoError(t, err)
 	assert.True(t, input.dockerfileOutsideCtx)
 
-	buildContextDir, dockerfileForBuild, cleanup, err := prepareDockerBuildContextInternal(input)
+	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContextInternal(input.buildFilesystemInput)
 	require.NoError(t, err)
 	defer cleanup()
 

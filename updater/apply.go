@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
+	"go.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/digestcheck"
 	"go.getarcane.app/updater/internal/match"
 	"go.getarcane.app/updater/refs"
@@ -313,7 +313,7 @@ func (s *Service) usedImages(ctx context.Context) (map[string]struct{}, error) {
 			out[imageRef] = struct{}{}
 			continue
 		}
-		inspectResult, inspectErr := compat.ContainerInspect(ctx, dockerClient, summary.ID, client.ContainerInspectOptions{})
+		inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, summary.ID, client.ContainerInspectOptions{})
 		if inspectErr != nil {
 			continue
 		}

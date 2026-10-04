@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/updater/internal/compose"
 )
@@ -43,7 +44,7 @@ func (u dockerComposeProjectUpdater) UpdateServices(ctx context.Context, project
 	if err != nil {
 		return err
 	}
-	services = normalizeComposeServices(services)
+	services = kit.Unique(kit.TrimNonEmpty(services))
 	if len(services) == 0 {
 		return errors.New("compose update requires at least one service")
 	}
@@ -98,23 +99,6 @@ func (u dockerComposeProjectUpdater) resolveProjectMetadata(ctx context.Context,
 		}, nil
 	}
 	return dockerComposeProjectMetadata{}, fmt.Errorf("compose project not found: %s", composeName)
-}
-
-func normalizeComposeServices(services []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(services))
-	for _, service := range services {
-		service = strings.TrimSpace(service)
-		if service == "" {
-			continue
-		}
-		if _, ok := seen[service]; ok {
-			continue
-		}
-		seen[service] = struct{}{}
-		out = append(out, service)
-	}
-	return out
 }
 
 func truncateComposeOutput(output string) string {

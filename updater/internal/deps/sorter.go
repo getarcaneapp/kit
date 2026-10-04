@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/updater/labels"
 )
@@ -70,11 +71,8 @@ func ExtractContainerDeps(ctx context.Context, name string, cnt container.Summar
 
 	if inspect.HostConfig != nil {
 		for _, link := range inspect.HostConfig.Links {
-			parts := strings.SplitN(link, ":", 2)
-			if len(parts) > 0 {
-				linkName := strings.TrimPrefix(parts[0], "/")
-				c.Links = append(c.Links, linkName)
-			}
+			linkName, _, _ := strings.Cut(link, ":")
+			c.Links = append(c.Links, strings.TrimPrefix(linkName, "/"))
 		}
 	}
 
@@ -110,9 +108,9 @@ func UpdateImplicitRestart(containers []ContainerWithDeps, markedForRestart map[
 		if markedForRestart[c.Name] {
 			continue
 		}
-		if !hasMarkedDependency(markedForRestart, c.Links) &&
-			!hasMarkedDependency(markedForRestart, c.DependsOn) &&
-			!hasMarkedDependency(markedForRestart, c.NetworkDeps) {
+		if !slices.ContainsFunc(slices.Concat(c.Links, c.DependsOn, c.NetworkDeps), func(dep string) bool {
+			return markedForRestart[dep]
+		}) {
 			continue
 		}
 		markedForRestart[c.Name] = true
@@ -138,7 +136,7 @@ func (s *ContainerSorter) visit(c ContainerWithDeps, path []string) error {
 	defer delete(s.marked, c.Name)
 	path = append(path, c.Name)
 
-	for _, depName := range s.getAllDependencies(c) {
+	for _, depName := range kit.Unique(slices.Concat(c.Links, c.DependsOn, c.NetworkDeps)) {
 		if idx, ok := s.nameToIndex[depName]; ok {
 			if err := s.visit(s.containers[idx], path); err != nil {
 				return err
@@ -149,27 +147,4 @@ func (s *ContainerSorter) visit(c ContainerWithDeps, path []string) error {
 	s.visited[c.Name] = true
 	s.sorted = append(s.sorted, c)
 	return nil
-}
-
-func (s *ContainerSorter) getAllDependencies(c ContainerWithDeps) []string {
-	seen := make(map[string]struct{})
-	var deps []string
-	for _, group := range [][]string{c.Links, c.DependsOn, c.NetworkDeps} {
-		for _, dep := range group {
-			if _, ok := seen[dep]; !ok {
-				seen[dep] = struct{}{}
-				deps = append(deps, dep)
-			}
-		}
-	}
-	return deps
-}
-
-func hasMarkedDependency(markedForRestart map[string]bool, deps []string) bool {
-	for _, dep := range deps {
-		if markedForRestart[dep] {
-			return true
-		}
-	}
-	return false
 }

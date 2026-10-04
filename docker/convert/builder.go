@@ -2,6 +2,7 @@ package convert
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -89,14 +90,14 @@ func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Servic
 				return nil, err
 			}
 		case "logging.driver":
-			logging := ensureMapInternal(service, "logging")
+			logging := ensureNestedMapInternal(service, "logging")
 			logging["driver"] = flag.Value
 		case "logging.options":
 			key, value, ok := strings.Cut(flag.Value, "=")
 			if !ok {
 				return nil, types.NewConversionError("invalid log option %q", flag.Value)
 			}
-			logging := ensureMapInternal(service, "logging")
+			logging := ensureNestedMapInternal(service, "logging")
 			options := ensureNestedMapInternal(logging, "options")
 			options[key] = value
 		case "interactive":
@@ -130,15 +131,6 @@ func appendStringInternal(service types.Service, key, value string) {
 	service[key] = values
 }
 
-func ensureMapInternal(service types.Service, key string) map[string]any {
-	if existing, ok := service[key].(map[string]any); ok {
-		return existing
-	}
-	next := make(map[string]any)
-	service[key] = next
-	return next
-}
-
 func ensureNestedMapInternal(parent map[string]any, key string) map[string]any {
 	if existing, ok := parent[key].(map[string]any); ok {
 		return existing
@@ -149,7 +141,7 @@ func ensureNestedMapInternal(parent map[string]any, key string) map[string]any {
 }
 
 func setResourceLimitInternal(service types.Service, key, value string) {
-	deploy := ensureMapInternal(service, "deploy")
+	deploy := ensureNestedMapInternal(service, "deploy")
 	resources := ensureNestedMapInternal(deploy, "resources")
 	limits := ensureNestedMapInternal(resources, "limits")
 	limits[key] = value
@@ -160,7 +152,7 @@ func setUlimitInternal(service types.Service, value string) error {
 	if err != nil {
 		return types.NewConversionError("invalid ulimit %q: %v", value, err)
 	}
-	ulimits := ensureMapInternal(service, "ulimits")
+	ulimits := ensureNestedMapInternal(service, "ulimits")
 	ulimits[ulimit.Name] = map[string]any{"soft": ulimit.Soft, "hard": ulimit.Hard}
 	return nil
 }
@@ -264,12 +256,7 @@ func mergeExistingComposeInternal(doc *types.Document, yamlData []byte) error {
 	}
 
 	if services, ok := existing["services"].(map[string]any); ok {
-		names := make([]string, 0, len(services))
-		for name := range services {
-			names = append(names, name)
-		}
-		slices.Sort(names)
-		for _, name := range names {
+		for _, name := range slices.Sorted(maps.Keys(services)) {
 			if svc, isMap := services[name].(map[string]any); isMap {
 				doc.Services[name] = svc
 				doc.ServiceOrder = append(doc.ServiceOrder, name)

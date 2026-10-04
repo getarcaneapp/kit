@@ -3,8 +3,9 @@
 package registry
 
 import (
+	"maps"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -43,12 +44,7 @@ func LookupKeys(rawURL string) []string {
 		keys["index.docker.io"] = struct{}{}
 	}
 
-	out := make([]string, 0, len(keys))
-	for key := range keys {
-		out = append(out, key)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(keys))
 }
 
 func stripScheme(rawURL string) string {

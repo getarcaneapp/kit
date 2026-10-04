@@ -2,6 +2,8 @@ package agg
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sync"
 )
 
@@ -88,10 +90,7 @@ func (h *Hub[T]) publish(entry *hubEntry[T], event T) {
 	h.mu.Lock()
 	entry.last = event
 	entry.hasLast = true
-	subscribers := make([]*hubSubscriber[T], 0, len(entry.subscribers))
-	for sub := range entry.subscribers {
-		subscribers = append(subscribers, sub)
-	}
+	subscribers := slices.Collect(maps.Keys(entry.subscribers))
 	h.mu.Unlock()
 
 	for _, sub := range subscribers {

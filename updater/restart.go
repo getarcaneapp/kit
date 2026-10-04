@@ -8,8 +8,8 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"go.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/internal/deps"
 	"go.getarcane.app/updater/internal/digestcheck"
@@ -40,7 +40,7 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNe
 	scan := s.scanRestartCandidates(ctx, dockerClient, restartScanInput{
 		containers:         listResult.Items,
 		excludedContainers: excludedContainers,
-		dockerProxyName:    dockerProxyContainerName(dockerHost(dockerClient)),
+		dockerProxyName:    dockerProxyContainerName(dockerClient.DaemonHost()),
 		oldIDToNewRef:      oldIDToNewRef,
 		updatedNorm:        refs.NormalizeImageUpdateRefMapKeys(oldRefToNewRef),
 	})
@@ -114,7 +114,7 @@ func (s *Service) matchContainerImage(
 	if newRef != "" || !match.ShouldInspectUnmatchedContainerForImageMatch(summary) {
 		return nil, newRef, matchValue
 	}
-	inspectResult, inspectErr := compat.ContainerInspect(ctx, dockerClient, summary.ID, client.ContainerInspectOptions{})
+	inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, summary.ID, client.ContainerInspectOptions{})
 	if inspectErr != nil {
 		return nil, newRef, matchValue
 	}
@@ -143,7 +143,7 @@ func (s *Service) resolveRestartDependencies(ctx context.Context, dockerClient *
 			scan.containers[i] = deps.ExtractContainerDeps(ctx, cwd.Name, cwd.Container, *plan.inspect)
 			continue
 		}
-		inspectResult, inspectErr := compat.ContainerInspect(ctx, dockerClient, cwd.Container.ID, client.ContainerInspectOptions{})
+		inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cwd.Container.ID, client.ContainerInspectOptions{})
 		if inspectErr != nil {
 			continue
 		}
@@ -239,7 +239,7 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 // standalone or self-update phase.
 func (s *Service) dispatchRestartCandidate(ctx context.Context, dockerClient *client.Client, run *restartRun, candidate deps.ContainerWithDeps, plan *restartPlan) {
 	if plan.inspect == nil {
-		inspectResult, inspectErr := compat.ContainerInspect(ctx, dockerClient, plan.cnt.ID, client.ContainerInspectOptions{})
+		inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, plan.cnt.ID, client.ContainerInspectOptions{})
 		if inspectErr != nil {
 			run.results = append(run.results, failedContainerResult(plan.cnt.ID, candidate.Name, fmt.Sprintf("inspect failed: %v", inspectErr)))
 			return
