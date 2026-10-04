@@ -1,3 +1,13 @@
+## docker/convert/v0.3.4
+
+### Bug fixes
+
+* cleanup un-needed functions([0219021](https://github.com/getarcaneapp/kit/commit/021902153905003018894bc13b4cfa47491d4ec7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.3.3...docker/convert/v0.3.4
+
 ## docker/convert/v0.3.3
 
 ### New features
