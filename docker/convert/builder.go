@@ -9,8 +9,9 @@ import (
 	"github.com/compose-spec/compose-go/v2/format"
 	compose "github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/go-units"
-	"go.getarcane.app/docker/convert/types"
 	"go.yaml.in/yaml/v4"
+
+	"go.getarcane.app/docker/convert/types"
 )
 
 var serviceNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
@@ -269,7 +270,7 @@ func mergeExistingComposeInternal(doc *types.Document, yamlData []byte) error {
 		}
 		slices.Sort(names)
 		for _, name := range names {
-			if svc, ok := services[name].(map[string]any); ok {
+			if svc, isMap := services[name].(map[string]any); isMap {
 				doc.Services[name] = svc
 				doc.ServiceOrder = append(doc.ServiceOrder, name)
 			}

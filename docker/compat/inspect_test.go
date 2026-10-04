@@ -18,6 +18,9 @@ import (
 const networkListJSON = `[{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge",
 	"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64","AuxiliaryAddresses":{"router":"fdd0:0:0:c::2/64"}}]}}]`
 
+const containerInspectJSON = `{"Id":"abc123","Name":"/app","Config":{"Image":"test:latest"},"HostConfig":{"NetworkMode":"bridge"},
+	"NetworkSettings":{"Networks":{"bridge":{"IPv6Gateway":"fdd0:0:0:c::1/64"}}}}`
+
 func newTestClient(t *testing.T, handler http.HandlerFunc) *client.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -44,7 +47,8 @@ func repairJSON[T any](t *testing.T, raw string, repair func(map[string]any) boo
 		t.Fatal(err)
 	}
 	var typed T
-	if err := json.Unmarshal(normalized, &typed); err != nil {
+	err = json.Unmarshal(normalized, &typed)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return typed
@@ -56,7 +60,8 @@ func TestRepairContainerInspect(t *testing.T) {
 	inspect := repairJSON[containertypes.InspectResponse](t, `{"Id":"abc123","Name":"/app","Config":{"Image":"test:latest"},"HostConfig":{"NetworkMode":"bridge"},
 		"NetworkSettings":{"Gateway":"172.18.0.1/16","IPAddress":"172.18.0.20/16","IPPrefixLen":0,
 		"Networks":{"bridge":{"IPAMConfig":{"IPv4Address":"172.18.0.50/16","IPv6Address":"fdd0:0:0:c::10/64","LinkLocalIPs":["169.254.10.10/16","fe80::10/64"]},
-		"Gateway":"172.18.0.1/16","IPAddress":"172.18.0.20/16","IPPrefixLen":0,"IPv6Gateway":"fdd0:0:0:c::1/64","GlobalIPv6Address":"fdd0:0:0:c::10/64","GlobalIPv6PrefixLen":0}}}}`, repairContainerInspectInternal)
+		"Gateway":"172.18.0.1/16","IPAddress":"172.18.0.20/16","IPPrefixLen":0,
+		"IPv6Gateway":"fdd0:0:0:c::1/64","GlobalIPv6Address":"fdd0:0:0:c::10/64","GlobalIPv6PrefixLen":0}}}}`, repairContainerInspectInternal)
 
 	endpoint := inspect.NetworkSettings.Networks["bridge"]
 	if endpoint == nil || endpoint.IPAMConfig == nil {
@@ -171,10 +176,15 @@ func TestContainerInspectWithCompatibility_TLSRemote(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"Id":"abc123","Name":"/app","Config":{"Image":"test:latest"},"HostConfig":{"NetworkMode":"bridge"},"NetworkSettings":{"Networks":{"bridge":{"IPv6Gateway":"fdd0:0:0:c::1/64"}}}}`))
+		_, _ = w.Write([]byte(containerInspectJSON))
 	}))
 	defer server.Close()
-	dockerClient, err := client.New(client.WithHTTPClient(server.Client()), client.WithHost("tcp://"+strings.TrimPrefix(server.URL, "https://")), client.WithScheme("https"), client.WithAPIVersion("1.41"))
+	dockerClient, err := client.New(
+		client.WithHTTPClient(server.Client()),
+		client.WithHost("tcp://"+strings.TrimPrefix(server.URL, "https://")),
+		client.WithScheme("https"),
+		client.WithAPIVersion("1.41"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +203,8 @@ func TestNetworkInspectWithCompatibility(t *testing.T) {
 		if r.URL.Path != "/v1.41/networks/test-net" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge","IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64"}]},"Containers":{}}`))
+		_, _ = w.Write([]byte(`{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge",
+			"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64"}]},"Containers":{}}`))
 	})
 
 	result, err := NetworkInspectWithCompatibility(t.Context(), dockerClient, "test-net", client.NetworkInspectOptions{})
@@ -206,7 +217,8 @@ func TestNetworkInspectWithCompatibility_LeavesInvalidValuesFailing(t *testing.T
 	t.Parallel()
 
 	dockerClient := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge","IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"definitely-not-an-ip"}]},"Containers":{}}`))
+		_, _ = w.Write([]byte(`{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge",
+			"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"definitely-not-an-ip"}]},"Containers":{}}`))
 	})
 	_, err := NetworkInspectWithCompatibility(t.Context(), dockerClient, "test-net", client.NetworkInspectOptions{})
 	if err == nil || !strings.Contains(err.Error(), `ParseAddr("definitely-not-an-ip")`) {
@@ -244,7 +256,8 @@ func TestNetworkListWithCompatibility_SuccessSkipsFallback(t *testing.T) {
 	calls := 0
 	dockerClient := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		calls++
-		_, _ = w.Write([]byte(`[{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge","IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1"}]}}]`))
+		_, _ = w.Write([]byte(`[{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge",
+			"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1"}]}}]`))
 	})
 	result, err := NetworkListWithCompatibility(t.Context(), dockerClient, client.NetworkListOptions{})
 	if err != nil || len(result.Items) != 1 || result.Items[0].IPAM.Config[0].Gateway != netip.MustParseAddr("fdd0:0:0:c::1") || calls != 1 {
@@ -258,7 +271,8 @@ func TestNetworkListWithCompatibility_LeavesInvalidValuesFailing(t *testing.T) {
 	calls := 0
 	dockerClient := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		calls++
-		_, _ = w.Write([]byte(`[{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge","IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"definitely-not-an-ip"}]}}]`))
+		_, _ = w.Write([]byte(`[{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge",
+			"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"definitely-not-an-ip"}]}}]`))
 	})
 	_, err := NetworkListWithCompatibility(t.Context(), dockerClient, client.NetworkListOptions{})
 	if err == nil || !strings.Contains(err.Error(), `ParseAddr("definitely-not-an-ip")`) || calls != 2 {
@@ -276,7 +290,7 @@ func TestWrapDockerAPIClientForInspectCompatibility(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/networks"):
 			_, _ = w.Write([]byte(networkListJSON))
 		default:
-			_, _ = w.Write([]byte(`{"Id":"abc123","Name":"/app","Config":{"Image":"test:latest"},"HostConfig":{"NetworkMode":"bridge"},"NetworkSettings":{"Networks":{"bridge":{"IPv6Gateway":"fdd0:0:0:c::1/64"}}}}`))
+			_, _ = w.Write([]byte(containerInspectJSON))
 		}
 	})
 

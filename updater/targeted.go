@@ -8,6 +8,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/internal/deps"
@@ -36,7 +37,8 @@ func (s *Service) applyTargetedRecordsInternal(ctx context.Context, records []Im
 		return err
 	}
 	// All Compose conflicts and adapter capabilities must be checked before pulls.
-	if err := s.validateComposeGroupsInternal(ctx, s.sortRestartCandidates(ctx, scan), scan.plansByName); err != nil {
+	err = s.validateComposeGroupsInternal(ctx, s.sortRestartCandidates(ctx, scan), scan.plansByName)
+	if err != nil {
 		return err
 	}
 	results := s.pullTargetPlansInternal(ctx, dockerClient, scan, opts)
@@ -106,7 +108,8 @@ func (s *Service) targetRecordPlanInternal(ctx context.Context, cnt container.Su
 			return nil, "", errors.New("pending tag is not a newer allowed version")
 		}
 	}
-	if err := s.preflightComposeImageInternal(ctx, cnt, inspect, newRef); err != nil {
+	err = s.preflightComposeImageInternal(ctx, cnt, inspect, newRef)
+	if err != nil {
 		return nil, "", err
 	}
 	return &restartPlan{cnt: cnt, inspect: &inspect, newRef: newRef, match: oldRef, explicit: true}, "", nil
@@ -212,10 +215,19 @@ func (s *Service) validateComposeGroupsInternal(ctx context.Context, sorted []de
 // isComposeTagChangeInternal includes implicit restarts in tag-aware groups but
 // only requires image persistence when the configured image reference changes.
 func isComposeTagChangeInternal(plan *restartPlan) bool {
-	return plan.inspect != nil && plan.inspect.Config != nil && refs.NormalizeImageUpdateRef(plan.inspect.Config.Image) != refs.NormalizeImageUpdateRef(plan.newRef) && (compose.ProjectLabel(plan.inspect.Config.Labels) != "" || compose.ServiceLabel(plan.inspect.Config.Labels) != "")
+	return plan.inspect != nil && plan.inspect.Config != nil &&
+		refs.NormalizeImageUpdateRef(plan.inspect.Config.Image) != refs.NormalizeImageUpdateRef(plan.newRef) &&
+		(compose.ProjectLabel(plan.inspect.Config.Labels) != "" || compose.ServiceLabel(plan.inspect.Config.Labels) != "")
 }
 
-func (s *Service) collectTargetRecordsInternal(ctx context.Context, dockerClient *client.Client, containers []container.Summary, records []ImageUpdateRecord, scan *restartScan, out *Result) ([]targetedRecord, error) {
+func (s *Service) collectTargetRecordsInternal(
+	ctx context.Context,
+	dockerClient *client.Client,
+	containers []container.Summary,
+	records []ImageUpdateRecord,
+	scan *restartScan,
+	out *Result,
+) ([]targetedRecord, error) {
 	states := make([]targetedRecord, 0, len(records))
 	for _, record := range records {
 		if !record.NeedsUpdate() {
@@ -231,7 +243,14 @@ func (s *Service) collectTargetRecordsInternal(ctx context.Context, dockerClient
 	return states, nil
 }
 
-func (s *Service) collectTargetRecordInternal(ctx context.Context, dockerClient *client.Client, containers []container.Summary, record ImageUpdateRecord, scan *restartScan, out *Result) (targetedRecord, error) {
+func (s *Service) collectTargetRecordInternal(
+	ctx context.Context,
+	dockerClient *client.Client,
+	containers []container.Summary,
+	record ImageUpdateRecord,
+	scan *restartScan,
+	out *Result,
+) (targetedRecord, error) {
 	state := targetedRecord{record: record, targets: map[string]bool{}}
 	for _, cnt := range containers {
 		if cnt.State != container.StateRunning {

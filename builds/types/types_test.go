@@ -23,7 +23,8 @@ func TestBuildRequestJSONShape(t *testing.T) {
 	}
 
 	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+	err = json.Unmarshal(raw, &decoded)
+	if err != nil {
 		t.Fatalf("unmarshal BuildRequest JSON: %v", err)
 	}
 

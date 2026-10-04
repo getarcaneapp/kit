@@ -139,25 +139,25 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 	entryEncoder.SetEscapeHTML(false)
 	err = acfs.ListEach(ctx, values.root, values.path, func(entry acfstypes.Entry) error {
 		if !started {
-			if _, err := io.WriteString(bufferedOutput, `{"entries":[`); err != nil {
-				return fmt.Errorf("write list prefix: %w", err)
+			if _, writeErr := io.WriteString(bufferedOutput, `{"entries":[`); writeErr != nil {
+				return fmt.Errorf("write list prefix: %w", writeErr)
 			}
 			started = true
 		}
 		if !firstEntry {
-			if _, err := io.WriteString(bufferedOutput, ","); err != nil {
-				return fmt.Errorf("write list delimiter: %w", err)
+			if _, writeErr := io.WriteString(bufferedOutput, ","); writeErr != nil {
+				return fmt.Errorf("write list delimiter: %w", writeErr)
 			}
 		}
 		firstEntry = false
 
 		encodedEntry.Reset()
-		if err := entryEncoder.Encode(entry); err != nil {
-			return fmt.Errorf("encode list entry: %w", err)
+		if encodeErr := entryEncoder.Encode(entry); encodeErr != nil {
+			return fmt.Errorf("encode list entry: %w", encodeErr)
 		}
 		encoded := bytes.TrimSuffix(encodedEntry.Bytes(), []byte{'\n'})
-		if _, err := bufferedOutput.Write(encoded); err != nil {
-			return fmt.Errorf("write list entry: %w", err)
+		if _, writeErr := bufferedOutput.Write(encoded); writeErr != nil {
+			return fmt.Errorf("write list entry: %w", writeErr)
 		}
 		return nil
 	})
@@ -165,20 +165,25 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	if !started {
-		if _, err := io.WriteString(bufferedOutput, `{"entries":[`); err != nil {
+		_, err = io.WriteString(bufferedOutput, `{"entries":[`)
+		if err != nil {
 			return fmt.Errorf("write list prefix: %w", err)
 		}
 	}
-	if _, err := fmt.Fprintf(bufferedOutput, `],"version":%d}`+"\n", acfstypes.ProtocolVersion); err != nil {
+	_, err = fmt.Fprintf(bufferedOutput, `],"version":%d}`+"\n", acfstypes.ProtocolVersion)
+	if err != nil {
 		return fmt.Errorf("write list suffix: %w", err)
 	}
-	if err := bufferedOutput.Flush(); err != nil {
+	err = bufferedOutput.Flush()
+	if err != nil {
 		return fmt.Errorf("flush list output: %w", err)
 	}
-	if _, err := temporaryOutput.Seek(0, io.SeekStart); err != nil {
+	_, err = temporaryOutput.Seek(0, io.SeekStart)
+	if err != nil {
 		return fmt.Errorf("rewind list output: %w", err)
 	}
-	if _, err := io.Copy(stdout, temporaryOutput); err != nil {
+	_, err = io.Copy(stdout, temporaryOutput)
+	if err != nil {
 		return fmt.Errorf("copy list output: %w", err)
 	}
 	return nil
@@ -272,7 +277,8 @@ func runRead(ctx context.Context, args []string, stdout io.Writer) error {
 
 	// OpenRead obtains size from os.FileInfo and rejects directories, so the
 	// checked value is safe to represent in the protocol's unsigned field.
-	if err := acfs.WriteStreamHeader(stdout, uint64(size)); err != nil {
+	err = acfs.WriteStreamHeader(stdout, uint64(size))
+	if err != nil {
 		return err
 	}
 	written, err := io.Copy(stdout, reader)
@@ -379,7 +385,7 @@ func runApply(ctx context.Context, args []string, stdout io.Writer) error {
 	decodeErr := decoder.Decode(&manifest)
 	if decodeErr == nil {
 		var extra any
-		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if extraErr := decoder.Decode(&extra); !errors.Is(extraErr, io.EOF) {
 			decodeErr = errors.New("apply manifest must contain one JSON value")
 		}
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	compose "github.com/compose-spec/compose-go/v2/types"
+
 	"go.getarcane.app/docker/convert/types"
 )
 

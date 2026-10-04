@@ -8,6 +8,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/refs"
@@ -67,9 +68,10 @@ func (s *Service) updateComposeImageInternal(ctx context.Context, target contain
 	}
 	opCtx, cancel := s.opCtx(ctx)
 	defer cancel()
-	if err := adapter.UpdateServiceImages(opCtx, project.ID, map[string]updatetypes.ServiceImageChange{
+	err = adapter.UpdateServiceImages(opCtx, project.ID, map[string]updatetypes.ServiceImageChange{
 		serviceName: {ExpectedRef: inspect.Config.Image, TargetRef: newRef},
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("update compose service %s/%s image: %w", projectName, serviceName, err)
 	}
 	dockerClient, err := s.dockerClient(ctx)
@@ -102,9 +104,9 @@ func verifyComposeTargetInternal(ctx context.Context, dockerClient *client.Clien
 		return fmt.Errorf("compose service %s/%s has no running container after update", projectName, serviceName)
 	}
 	for _, cnt := range containers.Items {
-		inspected, err := compat.ContainerInspect(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
-		if err != nil {
-			return fmt.Errorf("verify compose target: inspect container %s: %w", cnt.ID, err)
+		inspected, inspectErr := compat.ContainerInspect(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
+		if inspectErr != nil {
+			return fmt.Errorf("verify compose target: inspect container %s: %w", cnt.ID, inspectErr)
 		}
 		current := inspected.Container
 		if current.Config == nil || refs.NormalizeImageUpdateRef(current.Config.Image) != normalizedRef || current.Image != image.ID || current.State == nil || !current.State.Running {

@@ -23,6 +23,7 @@ import (
 	dockerclient "github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"go.getarcane.app/builds/types"
 )
 
@@ -112,7 +113,7 @@ func TestPerformDockerBuildInternal_KeepsSessionActiveForRegistryAuth(t *testing
 
 			sessionManager, err := session.NewManager()
 			require.NoError(t, err)
-			managerCtx, cancelManager := context.WithCancel(context.Background())
+			managerCtx, cancelManager := context.WithCancel(t.Context())
 			defer cancelManager()
 
 			sessionIDCh := make(chan string, 1)
@@ -165,12 +166,12 @@ func TestPerformDockerBuildInternal_KeepsSessionActiveForRegistryAuth(t *testing
 				dockerclient.WithAPIVersion("1.54"),
 			)
 			require.NoError(t, err)
-			defer dockerClient.Close()
+			defer func() { _ = dockerClient.Close() }()
 
 			service := &Service{registryAuthProvider: testCase.registryProvider}
 			var progress bytes.Buffer
 			err = service.performDockerBuildInternal(
-				context.Background(),
+				t.Context(),
 				dockerClient,
 				strings.NewReader("build context"),
 				dockerclient.ImageBuildOptions{Version: dockerbuild.BuilderBuildKit},
@@ -192,7 +193,7 @@ func TestPerformDockerBuildInternal_KeepsSessionActiveForRegistryAuth(t *testing
 
 			cancelManager()
 			require.Eventually(t, func() bool {
-				caller, lookupErr := sessionManager.Get(context.Background(), sessionID, true)
+				caller, lookupErr := sessionManager.Get(t.Context(), sessionID, true)
 				return lookupErr == nil && caller == nil
 			}, time.Second, 10*time.Millisecond)
 		})
@@ -204,7 +205,7 @@ func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
 
 	sessionManager, err := session.NewManager()
 	require.NoError(t, err)
-	managerCtx, cancelManager := context.WithCancel(context.Background())
+	managerCtx, cancelManager := context.WithCancel(t.Context())
 	defer cancelManager()
 
 	sessionIDCh := make(chan string, 1)
@@ -245,11 +246,11 @@ func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
 		dockerclient.WithAPIVersion("1.54"),
 	)
 	require.NoError(t, err)
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	service := &Service{}
 	err = service.performDockerBuildInternal(
-		context.Background(),
+		t.Context(),
 		dockerClient,
 		strings.NewReader("build context"),
 		dockerclient.ImageBuildOptions{Version: dockerbuild.BuilderBuildKit},
@@ -266,7 +267,7 @@ func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
 	}
 	cancelManager()
 	require.Eventually(t, func() bool {
-		caller, lookupErr := sessionManager.Get(context.Background(), sessionID, true)
+		caller, lookupErr := sessionManager.Get(t.Context(), sessionID, true)
 		return lookupErr == nil && caller == nil
 	}, time.Second, 10*time.Millisecond)
 }

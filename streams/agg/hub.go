@@ -76,8 +76,8 @@ func (h *Hub[T]) Subscribe(ctx context.Context, key string, run func(ctx context
 		case <-ctx.Done():
 			return
 		case <-sub.wake:
-			event, ok := sub.take()
-			if ok && !deliver(event) {
+			event, has := sub.take()
+			if has && !deliver(event) {
 				return
 			}
 		}

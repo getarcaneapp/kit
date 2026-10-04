@@ -105,8 +105,8 @@ func resolvePathInternal(root *os.Root, relativePath string, followFinal bool) (
 			switch {
 			case filepath.Clean(root.Name()) == filepath.VolumeName(root.Name())+string(filepath.Separator):
 				// An explicitly filesystem-wide root can resolve host-absolute links.
-				relativeTarget, err := filepath.Rel(root.Name(), target)
-				if err != nil {
+				relativeTarget, relErr := filepath.Rel(root.Name(), target)
+				if relErr != nil {
 					return "", fmt.Errorf("%w: symlink %q targets %q", ErrOutsideRoot, kitfs.LogicalPath(candidate), target)
 				}
 				target = filepath.ToSlash(relativeTarget)

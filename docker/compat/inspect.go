@@ -150,7 +150,8 @@ func fetchInternal(ctx context.Context, apiClient client.APIClient, resource str
 		return nil, err
 	}
 	defer func() { _ = conn.Close() }()
-	if err := req.Write(conn); err != nil {
+	err = req.Write(conn)
+	if err != nil {
 		return nil, err
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
@@ -183,12 +184,12 @@ func repairContainerInspectInternal(payload map[string]any) bool {
 	changed := endpoint(settings)
 	networks, _ := settings["Networks"].(map[string]any)
 	for _, value := range networks {
-		network, ok := value.(map[string]any)
-		if !ok {
+		network, isMap := value.(map[string]any)
+		if !isMap {
 			continue
 		}
 		changed = endpoint(network) || changed
-		if ipam, ok := network["IPAMConfig"].(map[string]any); ok {
+		if ipam, hasIPAM := network["IPAMConfig"].(map[string]any); hasIPAM {
 			changed = rewriteFieldsInternal(ipam, false, "IPv4Address", "IPv6Address", "LinkLocalIPs") || changed
 		}
 	}
@@ -202,7 +203,7 @@ func repairNetworkInternal(payload map[string]any) bool {
 	if ipam, ok := payload["IPAM"].(map[string]any); ok {
 		configs, _ := ipam["Config"].([]any)
 		for _, value := range configs {
-			if config, ok := value.(map[string]any); ok {
+			if config, isMap := value.(map[string]any); isMap {
 				changed = rewriteFieldsInternal(config, false, "Gateway", "AuxiliaryAddresses", "AuxAddress") || changed
 			}
 		}
@@ -230,7 +231,7 @@ func rewriteFieldsInternal(obj map[string]any, keepPrefix bool, keys ...string) 
 		case []any:
 			for i, item := range value {
 				if raw, ok := item.(string); ok {
-					if normalized, ok := normalizeIPInternal(raw, keepPrefix); ok {
+					if normalized, rewritten := normalizeIPInternal(raw, keepPrefix); rewritten {
 						value[i] = normalized
 						changed = true
 					}
@@ -239,7 +240,7 @@ func rewriteFieldsInternal(obj map[string]any, keepPrefix bool, keys ...string) 
 		case map[string]any:
 			for name, item := range value {
 				if raw, ok := item.(string); ok {
-					if normalized, ok := normalizeIPInternal(raw, keepPrefix); ok {
+					if normalized, rewritten := normalizeIPInternal(raw, keepPrefix); rewritten {
 						value[name] = normalized
 						changed = true
 					}
@@ -280,8 +281,8 @@ func fillPrefixLenInternal(obj map[string]any, addrKey, lenKey string) bool {
 	case int:
 		missing = current == 0
 	case string:
-		parsed, err := strconv.Atoi(strings.TrimSpace(current))
-		missing = err != nil || parsed == 0
+		parsed, parseErr := strconv.Atoi(strings.TrimSpace(current))
+		missing = parseErr != nil || parsed == 0
 	}
 	if missing {
 		obj[lenKey] = prefix.Bits()
@@ -298,7 +299,7 @@ func normalizeIPInternal(raw string, keepPrefix bool) (string, bool) {
 		return "", false
 	}
 	normalized := trimmed
-	if _, err := netip.ParseAddr(trimmed); err != nil || keepPrefix {
+	if _, addrErr := netip.ParseAddr(trimmed); addrErr != nil || keepPrefix {
 		prefix, err := netip.ParsePrefix(trimmed)
 		if err != nil {
 			return "", false

@@ -173,7 +173,7 @@ func ReconcilePollersByKey[T any](
 		items, err := listItems(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
-				slog.Default().WarnContext(ctx, "failed to list environments for "+streamLabel, "error", err)
+				slog.Default().WarnContext(ctx, "failed to list environments", "stream", streamLabel, "error", err)
 			}
 			return
 		}

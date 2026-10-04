@@ -33,7 +33,7 @@ func SignalContext(parentCtx context.Context) context.Context {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		slog.Info("Received interrupt signal. Shutting down…")
+		slog.InfoContext(parentCtx, "Received interrupt signal. Shutting down…")
 		cancel()
 
 		shutdownTimer := time.NewTimer(forcedShutdownTimeout)
@@ -41,9 +41,9 @@ func SignalContext(parentCtx context.Context) context.Context {
 
 		select {
 		case <-sigCh:
-			slog.Warn("Received a second interrupt signal. Forcing an immediate shutdown.")
+			slog.WarnContext(parentCtx, "Received a second interrupt signal. Forcing an immediate shutdown.")
 		case <-shutdownTimer.C:
-			slog.Error("Graceful shutdown timed out. Forcing process exit.", "timeout", forcedShutdownTimeout)
+			slog.ErrorContext(parentCtx, "Graceful shutdown timed out. Forcing process exit.", "timeout", forcedShutdownTimeout)
 		}
 		// Go cannot safely terminate a hung goroutine. Exit the process instead of
 		// allowing Bootstrap to close dependencies that goroutine may still use.

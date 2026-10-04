@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/digestcheck"
 	"go.getarcane.app/updater/internal/match"

@@ -51,7 +51,8 @@ func Rename(ctx context.Context, rootPath, sourceLogical, targetLogical string) 
 		return fmt.Errorf("%w: target %q is inside source %q", ErrInvalidPath, targetLogical, sourceLogical)
 	}
 
-	if err := root.Rename(sourcePath, targetPath); err != nil {
+	err = root.Rename(sourcePath, targetPath)
+	if err != nil {
 		if isDirectoryNotEmptyInternal(err) {
 			return fmt.Errorf("%w: %q", ErrNotEmpty, targetLogical)
 		}
@@ -72,7 +73,8 @@ func resolveRenameEndpointInternal(root *os.Root, logicalPath string) (string, e
 	if err != nil {
 		return "", err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return "", err
 	}
 	if relativePath == "." {

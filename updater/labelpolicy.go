@@ -26,7 +26,11 @@ type LabelPolicy struct {
 func DefaultLabelPolicy() LabelPolicy {
 	return LabelPolicy{
 		TagPolicyFunc: func(l map[string]string) types.Policy {
-			return types.Policy{Strategy: strings.TrimSpace(l[labels.LabelUpdateStrategy]), Constraint: strings.TrimSpace(l[labels.LabelUpdateConstraint]), TagPattern: strings.TrimSpace(l[labels.LabelUpdateTagPattern])}
+			return types.Policy{
+				Strategy:   strings.TrimSpace(l[labels.LabelUpdateStrategy]),
+				Constraint: strings.TrimSpace(l[labels.LabelUpdateConstraint]),
+				TagPattern: strings.TrimSpace(l[labels.LabelUpdateTagPattern]),
+			}
 		},
 		IsUpdateDisabledFunc:   labels.IsUpdateDisabled,
 		IsSelfUpdateTargetFunc: labels.IsArcaneContainer,

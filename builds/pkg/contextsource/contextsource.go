@@ -4,8 +4,9 @@ import (
 	"path"
 	"strings"
 
-	"go.getarcane.app/builds/types"
 	"go.getarcane.app/kit/pkg/git"
+
+	"go.getarcane.app/builds/types"
 )
 
 type GitBuildContextSource struct {

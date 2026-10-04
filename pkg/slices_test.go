@@ -39,7 +39,7 @@ func TestUnique(t *testing.T) {
 		if want := []string{"beta", "alpha", "Alpha"}; !slices.Equal(got, want) {
 			t.Errorf("Unique(TrimNonEmpty) = %q, want %q", got, want)
 		}
-		if got := Unique(TrimNonEmpty([]string{"", " \t "})); got != nil {
+		if got = Unique(TrimNonEmpty([]string{"", " \t "})); got != nil {
 			t.Errorf("Unique(TrimNonEmpty(blank)) = %q, want nil", got)
 		}
 	})

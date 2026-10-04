@@ -40,7 +40,8 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -124,7 +125,8 @@ func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSee
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -170,7 +172,8 @@ func ReadFile(ctx context.Context, rootPath, logicalPath string) ([]byte, error)
 	defer func() { _ = reader.Close() }()
 
 	buffer := bytes.NewBuffer(make([]byte, 0, size))
-	if _, err := io.Copy(buffer, reader); err != nil {
+	_, err = io.Copy(buffer, reader)
+	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", logicalPath, err)
 	}
 	return buffer.Bytes(), nil

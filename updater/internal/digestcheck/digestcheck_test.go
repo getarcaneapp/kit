@@ -57,7 +57,7 @@ func TestCheckerCheckImageNeedsUpdateSkipsDigestPinnedReference(t *testing.T) {
 	pinnedDigest := ocidigest.FromString("pinned-newt").String()
 	imageRef := "ghcr.io/fosrl/newt@" + pinnedDigest
 
-	got := NewChecker(nil, nil).CheckImageNeedsUpdate(context.Background(), imageRef)
+	got := NewChecker(nil, nil).CheckImageNeedsUpdate(t.Context(), imageRef)
 
 	if got.Error != nil {
 		t.Fatalf("CheckImageNeedsUpdate() error = %v, want nil", got.Error)
@@ -81,7 +81,7 @@ func TestCheckerCheckImageNeedsUpdateMatchesManifestListRepoDigest(t *testing.T)
 	resolver := fakeRemoteResolver{digest: listDigest}
 	dockerClient := newDockerClientForImageInspect(t, "docker.io/library/app:1", []string{"docker.io/library/app@" + listDigest}, "sha256:platform-image")
 
-	got := NewChecker(dockerClient, resolver).CheckImageNeedsUpdate(context.Background(), "docker.io/library/app:1")
+	got := NewChecker(dockerClient, resolver).CheckImageNeedsUpdate(t.Context(), "docker.io/library/app:1")
 
 	if got.Error != nil {
 		t.Fatalf("CheckImageNeedsUpdate() error = %v", got.Error)
@@ -100,7 +100,7 @@ func TestCheckerCheckImageNeedsUpdateTreatsPlatformDigestMismatchAsUpdate(t *tes
 	resolver := fakeRemoteResolver{digest: listDigest}
 	dockerClient := newDockerClientForImageInspect(t, "docker.io/library/app:1", []string{"docker.io/library/app@" + platformDigest}, "sha256:platform-image")
 
-	got := NewChecker(dockerClient, resolver).CheckImageNeedsUpdate(context.Background(), "docker.io/library/app:1")
+	got := NewChecker(dockerClient, resolver).CheckImageNeedsUpdate(t.Context(), "docker.io/library/app:1")
 
 	if got.Error != nil {
 		t.Fatalf("CheckImageNeedsUpdate() error = %v", got.Error)

@@ -13,6 +13,7 @@ import (
 	moby "github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"go.getarcane.app/builds/types"
 )
 
@@ -29,7 +30,7 @@ func TestBuildSolveOptInternal_StagesInlineDockerfile(t *testing.T) {
 		},
 	}
 
-	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(context.Background(), req, "local")
+	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(t.Context(), req, "local")
 	require.NoError(t, err)
 	defer cleanup()
 	assert.Nil(t, loadErrCh)
@@ -59,7 +60,7 @@ func TestBuildSolveOptInternal_LocalLoadUsesMobyExporter(t *testing.T) {
 	contextDir := createBuildkitTestContext(t)
 	b := &Service{}
 
-	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(context.Background(), types.BuildRequest{
+	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(t.Context(), types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{"arcane.local/app:test"},
@@ -80,7 +81,7 @@ func TestBuildSolveOptInternal_LocalPushAndLoadUsesSingleMobyExporter(t *testing
 	contextDir := createBuildkitTestContext(t)
 	b := &Service{}
 
-	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(context.Background(), types.BuildRequest{
+	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(t.Context(), types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{"registry.example.com/app:test"},
@@ -118,7 +119,7 @@ func TestBuildSolveOptInternal_NonLocalLoadKeepsDockerExporter(t *testing.T) {
 	require.NoError(t, err)
 
 	b := &Service{dockerClientProvider: testDockerClientProvider{client: client}}
-	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(context.Background(), types.BuildRequest{
+	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(t.Context(), types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{"arcane.local/app:test"},

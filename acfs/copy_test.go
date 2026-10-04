@@ -50,7 +50,8 @@ func TestCopyDirSkipsSymlinksAndRecordsUncopyableEntries(t *testing.T) {
 	if string(contents) != "services: {}" {
 		t.Fatalf("copied contents = %q", contents)
 	}
-	if _, err := os.Lstat(filepath.Join(destination, "link.yaml")); err == nil {
+	_, err = os.Lstat(filepath.Join(destination, "link.yaml"))
+	if err == nil {
 		t.Fatal("CopyDir recreated a symbolic link in the destination")
 	}
 }
@@ -82,7 +83,8 @@ func TestCopyDirRecordsUnreadableFileOnlyWhenTolerant(t *testing.T) {
 		t.Fatalf("tolerant CopyDir skipped = %v", tolerant.Skipped)
 	}
 
-	if _, err := CopyDir(ctx, source, t.TempDir(), acfstypes.CopyOptions{}); !errors.Is(err, os.ErrPermission) {
+	_, err = CopyDir(ctx, source, t.TempDir(), acfstypes.CopyOptions{})
+	if !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("strict CopyDir error = %v, want a permission error", err)
 	}
 }
@@ -182,16 +184,19 @@ func TestMirrorDirPreservesListedEntriesAndDestinationInodes(t *testing.T) {
 	// Files the backup could not read (#3509) must survive the restore, along
 	// with the directory that still holds one.
 	options := acfstypes.MirrorOptions{Preserve: []string{"unreadable.txt", filepath.Join("data", "secret.db")}}
-	if err := MirrorDir(ctx, source, destination, options); err != nil {
+	err = MirrorDir(ctx, source, destination, options)
+	if err != nil {
 		t.Fatalf("MirrorDir: %v", err)
 	}
 
 	for _, kept := range []string{"unreadable.txt", filepath.Join("data", "secret.db")} {
-		if _, err := os.Stat(filepath.Join(destination, kept)); err != nil {
+		_, err = os.Stat(filepath.Join(destination, kept))
+		if err != nil {
 			t.Fatalf("preserved entry %q was pruned: %v", kept, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(destination, "stale.txt")); err == nil {
+	_, err = os.Stat(filepath.Join(destination, "stale.txt"))
+	if err == nil {
 		t.Fatal("MirrorDir kept an entry absent from the source")
 	}
 

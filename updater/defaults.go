@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/refs"
 	"go.getarcane.app/updater/registry"
 )
@@ -78,7 +79,8 @@ func (p *DockerClient) DockerClient(ctx context.Context) (*client.Client, error)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := dockerClient.Ping(ctx, client.PingOptions{}); err != nil {
+	_, err = dockerClient.Ping(ctx, client.PingOptions{})
+	if err != nil {
 		if closeErr := dockerClient.Close(); closeErr != nil {
 			return nil, fmt.Errorf("ping docker daemon: %w", errors.Join(err, closeErr))
 		}
@@ -132,13 +134,13 @@ func (p defaultImagePuller) PullImage(ctx context.Context, imageRef string, prog
 		if progress == nil {
 			continue
 		}
-		if err := json.MarshalWrite(progress, msg); err != nil {
+		if writeErr := json.MarshalWrite(progress, msg); writeErr != nil {
 			_ = resp.Close()
-			return fmt.Errorf("write pull progress: %w", err)
+			return fmt.Errorf("write pull progress: %w", writeErr)
 		}
-		if _, err := io.WriteString(progress, "\n"); err != nil {
+		if _, writeErr := io.WriteString(progress, "\n"); writeErr != nil {
 			_ = resp.Close()
-			return fmt.Errorf("terminate pull progress: %w", err)
+			return fmt.Errorf("terminate pull progress: %w", writeErr)
 		}
 	}
 	return nil

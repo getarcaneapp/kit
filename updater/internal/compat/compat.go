@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 
@@ -80,7 +79,8 @@ func ContainerCreate(ctx context.Context, dockerClient client.APIClient, options
 	if len(extraEndpoints) == 0 {
 		return result, nil
 	}
-	if err := connectExtraNetworks(ctx, dockerClient, result.ID, extraEndpoints); err != nil {
+	err = connectExtraNetworks(ctx, dockerClient, result.ID, extraEndpoints)
+	if err != nil {
 		return result, err
 	}
 	return result, nil
@@ -120,14 +120,14 @@ func prepareCreateOptions(options client.ContainerCreateOptions, apiVersion stri
 	}
 	adjusted.NetworkingConfig = &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
-			primaryNetwork: copyEndpointSettings(options.NetworkingConfig.EndpointsConfig[primaryNetwork]),
+			primaryNetwork: options.NetworkingConfig.EndpointsConfig[primaryNetwork].Copy(),
 		},
 	}
 
 	extraEndpoints := make(map[string]*network.EndpointSettings, len(options.NetworkingConfig.EndpointsConfig)-1)
 	for networkName, endpoint := range options.NetworkingConfig.EndpointsConfig {
 		if networkName != primaryNetwork {
-			extraEndpoints[networkName] = copyEndpointSettings(endpoint)
+			extraEndpoints[networkName] = endpoint.Copy()
 		}
 	}
 	if len(extraEndpoints) == 0 {
@@ -151,7 +151,7 @@ func connectExtraNetworks(ctx context.Context, dockerClient client.APIClient, co
 	for _, networkName := range networkNames {
 		_, err := dockerClient.NetworkConnect(ctx, networkName, client.NetworkConnectOptions{
 			Container:      containerID,
-			EndpointConfig: copyEndpointSettings(endpoints[networkName]),
+			EndpointConfig: endpoints[networkName].Copy(),
 		})
 		if err != nil {
 			return fmt.Errorf("connect network %s: %w", networkName, err)
@@ -183,27 +183,4 @@ func resolvePrimaryNetwork(hostConfig *container.HostConfig, endpoints map[strin
 		return ""
 	}
 	return names[0]
-}
-
-func copyEndpointSettings(endpoint *network.EndpointSettings) *network.EndpointSettings {
-	if endpoint == nil {
-		return nil
-	}
-	copied := *endpoint
-	if endpoint.IPAMConfig != nil {
-		copied.IPAMConfig = endpoint.IPAMConfig.Copy()
-	}
-	copied.Links = slices.Clone(endpoint.Links)
-	copied.Aliases = slices.Clone(endpoint.Aliases)
-	copied.DriverOpts = cloneStringMap(endpoint.DriverOpts)
-	return &copied
-}
-
-func cloneStringMap(values map[string]string) map[string]string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(values))
-	maps.Copy(out, values)
-	return out
 }

@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	acfstypes "go.getarcane.app/acfs/types"
 	kitfs "go.getarcane.app/kit/pkg/fs"
+
+	acfstypes "go.getarcane.app/acfs/types"
 )
 
 func entryFromInfoInternal(root *os.Root, relativePath string, info os.FileInfo) (acfstypes.Entry, error) {

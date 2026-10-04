@@ -8,6 +8,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/internal/deps"
@@ -103,7 +104,12 @@ func (s *Service) scanRestartCandidates(ctx context.Context, dockerClient *clien
 
 // matchContainerImage resolves the updated image ref for a container,
 // falling back to an inspect-based match when the summary alone is inconclusive.
-func (s *Service) matchContainerImage(ctx context.Context, dockerClient *client.Client, summary container.Summary, oldIDToNewRef, updatedNorm map[string]string) (*container.InspectResponse, string, string) {
+func (s *Service) matchContainerImage(
+	ctx context.Context,
+	dockerClient *client.Client,
+	summary container.Summary,
+	oldIDToNewRef, updatedNorm map[string]string,
+) (*container.InspectResponse, string, string) {
 	newRef, matchValue := match.ResolveContainerImageMatch(summary, nil, oldIDToNewRef, updatedNorm)
 	if newRef != "" || !match.ShouldInspectUnmatchedContainerForImageMatch(summary) {
 		return nil, newRef, matchValue
@@ -445,7 +451,7 @@ func (s *Service) applyComposeServiceUpdate(
 	}
 
 	if projectErr != nil {
-		s.logger.WarnContext(ctx, "service updated despite project-level compose error", "projectID", projectID, "projectName", projectName, "serviceName", serviceName, "error", projectErr)
+		s.logger.WarnContext(ctx, "service updated despite project-level compose error", "projectId", projectID, "projectName", projectName, "serviceName", serviceName, "error", projectErr)
 	}
 	res.Status = StatusUpdated
 	if plan.implicit {

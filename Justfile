@@ -5,15 +5,26 @@ modules := '. ./acfs ./builds ./docker/compat ./docker/convert ./streams ./sys/b
 _default:
     @just --list
 
+# Runs golangci-lint fmt per module; extra flags (e.g. --diff) are passed through.
+# fmt recurses into directories and would cross into nested modules (formatting them
+# with the wrong gci localmodule), so each module passes only its own package files.
+[group('quality')]
+_golangci-fmt *flags:
+    #!/usr/bin/env bash
+    shopt -s nullglob
+    failed=0
+    for module in {{ modules }}; do
+        (
+            cd "$module" || exit 1
+            go list -e -f '{{{{.Dir}}' ./... | while read -r dir; do printf '%s\n' "$dir"/*.go; done |
+                xargs golangci-lint fmt {{ flags }}
+        ) || failed=1
+    done
+    exit "${failed}"
+
 [group('quality')]
 _format-go:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for module in {{ modules }}; do
-        # A non-matching project name keeps all non-stdlib imports in one group.
-        (cd "$module" && goimports-reviser -project-name . ./...)
-        gofumpt -w -extra "$module"
-    done
+    @just _golangci-fmt
 
 [group('quality')]
 _format-just:
@@ -21,15 +32,7 @@ _format-just:
 
 [group('quality')]
 _format-check-go:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    unformatted=$(gofumpt -l -extra {{ modules }})
-    if [ -n "$unformatted" ]; then
-        echo "Unformatted Go files:"
-        echo "$unformatted"
-        exit 1
-    fi
+    @just _golangci-fmt --diff
 
 [group('quality')]
 _format-check-just:
@@ -64,16 +67,12 @@ vet:
     done
 
 [group('quality')]
-_build-golangci-lint:
-    golangci-lint custom
-
-[group('quality')]
-lint: _build-golangci-lint
+lint:
     #!/usr/bin/env bash
     set -euo pipefail
     root="$(pwd)"
     for module in {{ modules }}; do
-        (cd "$module" && "$root/.bin/golangci-lint-custom" run -c "$root/.github/.golangci.yml" ./...)
+        (cd "$module" && "golangci-lint" run ./...)
     done
 
 [group('quality')]

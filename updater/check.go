@@ -8,6 +8,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/digest"
 	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/digestcheck"

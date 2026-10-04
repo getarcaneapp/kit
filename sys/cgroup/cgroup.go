@@ -10,6 +10,7 @@ package cgroup
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,9 @@ import (
 )
 
 const unrestricted = 9223372036854771712
+
+// cgroupV1MemoryRoot is the mount point of the cgroup v1 memory controller.
+const cgroupV1MemoryRoot = "/sys/fs/cgroup/memory"
 
 // Limits holds the detected cgroup resource limits. Fields are -1 when the
 // corresponding limit is absent or unrestricted.
@@ -95,19 +99,19 @@ func IsDockerContainer() bool {
 func CurrentContainerID() (string, error) {
 	// Try cgroup first (works on cgroup v1 and cgroupns=host mode)
 	if id, err := getContainerIDFromCgroup(); err == nil {
-		slog.Debug("CurrentContainerID: found via cgroup", "containerId", id)
+		slog.DebugContext(context.Background(), "CurrentContainerID: found via cgroup", "containerId", id)
 		return id, nil
 	}
 
 	// Try mountinfo (works when cgroup namespace is private)
 	if id, err := getContainerIDFromMountinfo(); err == nil {
-		slog.Debug("CurrentContainerID: found via mountinfo", "containerId", id)
+		slog.DebugContext(context.Background(), "CurrentContainerID: found via mountinfo", "containerId", id)
 		return id, nil
 	}
 
 	// Try hostname (Docker often sets hostname to container ID)
 	if id, err := getContainerIDFromHostname(); err == nil {
-		slog.Debug("CurrentContainerID: found via hostname", "containerId", id)
+		slog.DebugContext(context.Background(), "CurrentContainerID: found via hostname", "containerId", id)
 		return id, nil
 	}
 
@@ -169,13 +173,13 @@ func hasExplicitCgroupLimit() bool {
 		return false
 	}
 
-	memLimitPath := filepath.Join("/sys/fs/cgroup/memory", cgroupPath, "memory.limit_in_bytes")
-	if limit, err := readCgroupV1Int64(memLimitPath); err == nil && isFiniteLimit(limit) {
+	memLimitPath := filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.limit_in_bytes")
+	if limit, limitErr := readCgroupV1Int64(memLimitPath); limitErr == nil && isFiniteLimit(limit) {
 		return true
 	}
 
-	if quota, err := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_quota_us"); err == nil && quota > 0 {
-		if period, err := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_period_us"); err == nil && period > 0 {
+	if quota, quotaErr := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_quota_us"); quotaErr == nil && quota > 0 {
+		if period, periodErr := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_period_us"); periodErr == nil && period > 0 {
 			return true
 		}
 	}
@@ -193,7 +197,7 @@ func detectCgroupV2Limits(limits *Limits) (*Limits, error) {
 	if memUsage, err := readCgroupV2Int64("/sys/fs/cgroup/memory.current"); err == nil {
 		// memory.current includes reclaimable page cache; subtract inactive_file
 		// to match what `docker stats` reports as usage.
-		if inactiveFile, err := readMemoryStatValueInternal("/sys/fs/cgroup/memory.stat", "inactive_file"); err == nil {
+		if inactiveFile, statErr := readMemoryStatValueInternal("/sys/fs/cgroup/memory.stat", "inactive_file"); statErr == nil {
 			memUsage = max(memUsage-inactiveFile, 0)
 		}
 		limits.MemoryUsage = memUsage
@@ -203,11 +207,11 @@ func detectCgroupV2Limits(limits *Limits) (*Limits, error) {
 		parts := strings.Fields(string(cpuMax))
 		if len(parts) >= 2 {
 			if parts[0] != "max" {
-				if quota, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+				if quota, quotaErr := strconv.ParseInt(parts[0], 10, 64); quotaErr == nil {
 					limits.CPUQuota = quota
 				}
 			}
-			if period, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+			if period, periodErr := strconv.ParseInt(parts[1], 10, 64); periodErr == nil {
 				limits.CPUPeriod = period
 			}
 		}
@@ -226,29 +230,29 @@ func detectCgroupV1Limits(limits *Limits) (*Limits, error) {
 		return limits, err
 	}
 
-	memoryLimitPath := filepath.Join("/sys/fs/cgroup/memory", cgroupPath, "memory.limit_in_bytes")
-	if memLimit, err := readCgroupV1Int64(memoryLimitPath); err == nil {
+	memoryLimitPath := filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.limit_in_bytes")
+	if memLimit, limitErr := readCgroupV1Int64(memoryLimitPath); limitErr == nil {
 		if memLimit < unrestricted {
 			limits.MemoryLimit = memLimit
 		}
 	}
 
-	memoryUsagePath := filepath.Join("/sys/fs/cgroup/memory", cgroupPath, "memory.usage_in_bytes")
-	if memUsage, err := readCgroupV1Int64(memoryUsagePath); err == nil {
+	memoryUsagePath := filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.usage_in_bytes")
+	if memUsage, usageErr := readCgroupV1Int64(memoryUsagePath); usageErr == nil {
 		// memory.usage_in_bytes includes reclaimable page cache; subtract
 		// total_inactive_file (from memory.stat) to match `docker stats`.
-		memoryStatPath := filepath.Join("/sys/fs/cgroup/memory", cgroupPath, "memory.stat")
-		if inactiveFile, err := readMemoryStatValueInternal(memoryStatPath, "total_inactive_file"); err == nil {
+		memoryStatPath := filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.stat")
+		if inactiveFile, statErr := readMemoryStatValueInternal(memoryStatPath, "total_inactive_file"); statErr == nil {
 			memUsage = max(memUsage-inactiveFile, 0)
 		}
 		limits.MemoryUsage = memUsage
 	}
 
-	if cpuQuota, err := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_quota_us"); err == nil {
+	if cpuQuota, quotaErr := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_quota_us"); quotaErr == nil {
 		limits.CPUQuota = cpuQuota
 	}
 
-	if cpuPeriod, err := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_period_us"); err == nil {
+	if cpuPeriod, periodErr := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_period_us"); periodErr == nil {
 		limits.CPUPeriod = cpuPeriod
 	}
 
@@ -277,7 +281,8 @@ func getCgroupV1Path() (string, error) {
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	err = scanner.Err()
+	if err != nil {
 		return "", fmt.Errorf("error scanning cgroup file: %w", err)
 	}
 
@@ -318,7 +323,8 @@ func readMemoryStatValueInternal(path, key string) (int64, error) {
 		}
 		return strconv.ParseInt(fields[1], 10, 64)
 	}
-	if err := scanner.Err(); err != nil {
+	err = scanner.Err()
+	if err != nil {
 		return 0, err
 	}
 
@@ -357,7 +363,7 @@ func readCgroupV2CPU() (int64, int64) {
 
 	var quota int64
 	if parts[0] != "max" {
-		if q, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+		if q, parseErr := strconv.ParseInt(parts[0], 10, 64); parseErr == nil {
 			quota = q
 		}
 	}
@@ -495,7 +501,7 @@ func parseARCStats(r io.Reader) uint64 {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		slog.Error("failed to parse ARC stats", "error", err)
+		slog.ErrorContext(context.Background(), "failed to parse ARC stats", "error", err)
 	}
 	if size <= cMin {
 		return 0

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
+
 	"go.getarcane.app/updater/labels"
 )
 

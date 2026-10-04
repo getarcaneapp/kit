@@ -59,26 +59,31 @@ func WriteFile(name string, data []byte, perm os.FileMode) error {
 	tmpName := tmp.Name()
 	cleanup := func() { _ = os.Remove(tmpName) }
 
-	if _, err := tmp.Write(data); err != nil {
+	_, err = tmp.Write(data)
+	if err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return fmt.Errorf("failed to write temp file %s: %w", tmpName, err)
 	}
-	if err := tmp.Sync(); err != nil {
+	err = tmp.Sync()
+	if err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return fmt.Errorf("failed to sync temp file %s: %w", tmpName, err)
 	}
-	if err := tmp.Chmod(perm); err != nil {
+	err = tmp.Chmod(perm)
+	if err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return fmt.Errorf("failed to chmod temp file %s: %w", tmpName, err)
 	}
-	if err := tmp.Close(); err != nil {
+	err = tmp.Close()
+	if err != nil {
 		cleanup()
 		return fmt.Errorf("failed to close temp file %s: %w", tmpName, err)
 	}
-	if err := os.Rename(tmpName, name); err != nil {
+	err = os.Rename(tmpName, name)
+	if err != nil {
 		cleanup()
 		return fmt.Errorf("failed to rename %s to %s: %w", tmpName, name, err)
 	}

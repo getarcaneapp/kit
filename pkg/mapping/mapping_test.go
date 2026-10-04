@@ -45,7 +45,7 @@ func TestMapOneConvertsNetipAndStrings(t *testing.T) {
 		t.Errorf("back = %+v, want parsed netip values with empty gateway", back)
 	}
 
-	if _, err := MapOne[stringConfig, netipConfig](stringConfig{Subnet: "not-a-prefix"}); err == nil {
+	if _, err = MapOne[stringConfig, netipConfig](stringConfig{Subnet: "not-a-prefix"}); err == nil {
 		t.Error("MapOne accepted an invalid prefix")
 	}
 }
@@ -61,7 +61,7 @@ func TestMapSlice(t *testing.T) {
 		t.Errorf("MapSlice = %+v", got)
 	}
 
-	if _, err := MapSlice[stringConfig, netipConfig]([]stringConfig{{}, {Gateway: "bad"}}); err == nil {
+	if _, err = MapSlice[stringConfig, netipConfig]([]stringConfig{{}, {Gateway: "bad"}}); err == nil {
 		t.Error("MapSlice accepted an invalid address")
 	}
 }

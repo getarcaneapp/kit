@@ -1,7 +1,6 @@
 package compat
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -37,15 +36,15 @@ func TestContainerCreate(t *testing.T) {
 		t.Fatalf("new docker client: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := dockerClient.Close(); err != nil {
-			t.Errorf("close docker client: %v", err)
+		if closeErr := dockerClient.Close(); closeErr != nil {
+			t.Errorf("close docker client: %v", closeErr)
 		}
 	})
 
-	got, err := ContainerCreate(context.Background(), dockerClient, client.ContainerCreateOptions{
+	got, err := ContainerCreate(t.Context(), dockerClient, client.ContainerCreateOptions{
 		Config: &container.Config{Image: "nginx:1.27"},
 		Name:   "web",
-	}, DetectAPIVersion(context.Background(), dockerClient))
+	}, DetectAPIVersion(t.Context(), dockerClient))
 	if err != nil {
 		t.Fatalf("ContainerCreate() error = %v", err)
 	}

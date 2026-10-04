@@ -17,7 +17,7 @@ func TestFromReferenceSuffix(t *testing.T) {
 		t.Fatalf("digest = %q, want %q", got, want)
 	}
 
-	if _, ok := FromReferenceSuffix("docker.io/library/nginx@sha256:bad"); ok {
+	if _, ok = FromReferenceSuffix("docker.io/library/nginx@sha256:bad"); ok {
 		t.Fatal("FromReferenceSuffix() ok = true for invalid digest")
 	}
 }

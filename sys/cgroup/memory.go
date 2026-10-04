@@ -60,11 +60,13 @@ func DockerHostRoot(containerID string) (string, error) {
 	if !mounted {
 		return "", errors.New("cgroup v2 namespace root is not mounted")
 	}
-	if _, err := os.Stat(filepath.Join(root, processPath, "cgroup.procs")); err != nil {
+	_, err = os.Stat(filepath.Join(root, processPath, "cgroup.procs"))
+	if err != nil {
 		return "", fmt.Errorf("resolve process beneath cgroup root: %w", err)
 	}
 	// The physical hierarchy root has no memory.current. A guest root does.
-	if _, err := MemoryUsage(root); err != nil {
+	_, err = MemoryUsage(root)
+	if err != nil {
 		return "", err
 	}
 	return root, nil

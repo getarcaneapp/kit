@@ -108,7 +108,7 @@ func TestFingerprint(t *testing.T) {
 	if Fingerprint([]string{}) == Fingerprint([]string{""}) {
 		t.Error("slice length must be part of the fingerprint")
 	}
-	if Fingerprint(int64(1), true) != Fingerprint(int64(1), true) {
+	if first := Fingerprint(int64(1), true); first != Fingerprint(int64(1), true) {
 		t.Error("fingerprint must be deterministic")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/internal/digestcheck"
@@ -105,7 +106,10 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		return out, nil
 	}
 	if opts.DryRun {
-		item := ResourceResult{ResourceID: target.ID, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusSkipped, UpdateAvailable: selection.UpdateAvailable, OldImage: imageRef, NewImage: normalizedRef}
+		item := ResourceResult{
+			ResourceID: target.ID, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusSkipped,
+			UpdateAvailable: selection.UpdateAvailable, OldImage: imageRef, NewImage: normalizedRef,
+		}
 		out.Items = append(out.Items, item)
 		out.Checked = 1
 		out.Skipped++
@@ -118,8 +122,8 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		out.Failed++
 		return out, nil
 	}
-	if err := s.config.ImagePuller.PullImage(ctx, normalizedRef, io.Discard); err != nil {
-		item := failedContainerResult(target.ID, name, fmt.Sprintf("pull failed: %v", err))
+	if pullErr := s.config.ImagePuller.PullImage(ctx, normalizedRef, io.Discard); pullErr != nil {
+		item := failedContainerResult(target.ID, name, fmt.Sprintf("pull failed: %v", pullErr))
 		out.Items = append(out.Items, item)
 		out.Failed++
 		return out, nil
@@ -142,8 +146,8 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	}
 
 	if s.isSelfUpdateCandidate(target.ID, labels) {
-		if err := s.triggerSelfUpdate(ctx, target.ID, name, normalizedRef, labels); err != nil {
-			item := failedContainerResult(target.ID, name, err.Error())
+		if selfUpdateErr := s.triggerSelfUpdate(ctx, target.ID, name, normalizedRef, labels); selfUpdateErr != nil {
+			item := failedContainerResult(target.ID, name, selfUpdateErr.Error())
 			out.Items = append(out.Items, item)
 			out.Failed++
 			return out, nil
@@ -156,8 +160,8 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		return out, nil
 	}
 
-	if err := s.updateComposeOrStandalone(ctx, target, inspect, normalizedRef); err != nil {
-		item := failedContainerResult(target.ID, name, err.Error())
+	if updateErr := s.updateComposeOrStandalone(ctx, target, inspect, normalizedRef); updateErr != nil {
+		item := failedContainerResult(target.ID, name, updateErr.Error())
 		out.Items = append(out.Items, item)
 		out.Failed++
 	} else {
@@ -203,7 +207,8 @@ func (s *Service) clearPendingRecordInternal(ctx context.Context, containerID, i
 		if refs.NormalizeImageUpdateRef(record.NewImageRef()) != normalized {
 			continue
 		}
-		if err := s.config.PendingStore.ClearImageUpdateRecord(ctx, record); err != nil {
+		err = s.config.PendingStore.ClearImageUpdateRecord(ctx, record)
+		if err != nil {
 			s.logger.WarnContext(ctx, "failed to clear applied update record", "imageRef", imageRef, "error", err)
 		}
 	}
@@ -221,7 +226,8 @@ func (s *Service) updateStandaloneContainer(ctx context.Context, cnt container.S
 		return fmt.Errorf("docker connect: %w", err)
 	}
 
-	if err := s.stopAndRemoveStandaloneContainer(ctx, dockerClient, cnt, inspect); err != nil {
+	err = s.stopAndRemoveStandaloneContainer(ctx, dockerClient, cnt, inspect)
+	if err != nil {
 		return err
 	}
 	return s.createStartOrRollback(ctx, dockerClient, cnt, inspect, newRef)
@@ -343,7 +349,7 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 		if !running {
 			return resp.ID, fmt.Errorf("start: %w", err)
 		}
-		s.logger.WarnContext(ctx, "container start returned error but inspect reports running", "containerID", resp.ID, "containerName", name, "error", err)
+		s.logger.WarnContext(ctx, "container start returned error but inspect reports running", "containerId", resp.ID, "containerName", name, "error", err)
 	}
 	_ = s.recordEvent(ctx, "container_start", resp.ID, name, map[string]any{"action": "updater_start"})
 	return resp.ID, s.recordEvent(ctx, "container_update", resp.ID, name, map[string]any{"oldContainerID": cnt.ID, "newContainerID": resp.ID, "newImage": newRef})
@@ -367,7 +373,7 @@ func (s *Service) removeFailedCreatedContainer(ctx context.Context, dockerClient
 	_, err := dockerClient.ContainerRemove(removeCtx, containerID, client.ContainerRemoveOptions{Force: true})
 	cancelRemove()
 	if err != nil {
-		s.logger.WarnContext(ctx, "failed to remove container after unsuccessful recreate", "containerID", containerID, "containerName", containerName, "error", err)
+		s.logger.WarnContext(ctx, "failed to remove container after unsuccessful recreate", "containerId", containerID, "containerName", containerName, "error", err)
 		return
 	}
 	_ = s.recordEvent(ctx, "container_cleanup", containerID, containerName, map[string]any{"action": "updater_cleanup_failed_create"})
@@ -393,7 +399,9 @@ func (s *Service) rollbackStandaloneContainer(ctx context.Context, dockerClient 
 
 func (s *Service) updateComposeOrStandalone(ctx context.Context, target container.Summary, inspect container.InspectResponse, normalizedRef string) error {
 	labels := labelsFromInspect(inspect)
-	if inspect.Config != nil && refs.NormalizeImageUpdateRef(inspect.Config.Image) != refs.NormalizeImageUpdateRef(normalizedRef) && (compose.ProjectLabel(labels) != "" || compose.ServiceLabel(labels) != "") {
+	if inspect.Config != nil &&
+		refs.NormalizeImageUpdateRef(inspect.Config.Image) != refs.NormalizeImageUpdateRef(normalizedRef) &&
+		(compose.ProjectLabel(labels) != "" || compose.ServiceLabel(labels) != "") {
 		return s.updateComposeImageInternal(ctx, target, inspect, normalizedRef)
 	}
 	projectName := compose.ProjectLabel(labels)

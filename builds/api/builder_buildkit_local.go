@@ -10,6 +10,7 @@ import (
 
 	buildkitclient "github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
+
 	docker "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
 )
@@ -31,7 +32,8 @@ func (b *Service) newLocalBuildkitSessionInternal(ctx context.Context) (*buildSe
 
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := bk.Wait(waitCtx); err != nil {
+	err = bk.Wait(waitCtx)
+	if err != nil {
 		_ = bk.Close()
 		return nil, fmt.Errorf("failed to wait for Docker BuildKit: %w", err)
 	}

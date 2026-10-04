@@ -1,7 +1,6 @@
 package acfs
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -33,7 +32,7 @@ func TestApplyPerformsOrderedMutations(t *testing.T) {
 			{Operation: acfstypes.ApplyMove, Path: "/config/renamed", TargetPath: "/archive/renamed"},
 		},
 	}
-	applied, err := Apply(context.Background(), root, staging, manifest)
+	applied, err := Apply(t.Context(), root, staging, manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +63,7 @@ func TestApplyRejectsSymlinksAndNonRecursiveDirectoryRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Apply(context.Background(), root, staging, acfstypes.ApplyManifest{
+	_, err := Apply(t.Context(), root, staging, acfstypes.ApplyManifest{
 		Version: acfstypes.ProtocolVersion,
 		Changes: []acfstypes.ApplyChange{{Operation: acfstypes.ApplyDelete, Path: "/link/nested", Recursive: true}},
 	})
@@ -72,7 +71,7 @@ func TestApplyRejectsSymlinksAndNonRecursiveDirectoryRemoval(t *testing.T) {
 		t.Fatalf("symlink mutation error = %v, want ErrSymlink", err)
 	}
 
-	_, err = Apply(context.Background(), root, staging, acfstypes.ApplyManifest{
+	_, err = Apply(t.Context(), root, staging, acfstypes.ApplyManifest{
 		Version: acfstypes.ProtocolVersion,
 		Changes: []acfstypes.ApplyChange{{Operation: acfstypes.ApplyDelete, Path: "/real", Recursive: false}},
 	})
@@ -80,7 +79,7 @@ func TestApplyRejectsSymlinksAndNonRecursiveDirectoryRemoval(t *testing.T) {
 		t.Fatalf("non-recursive delete error = %v, want ErrNotEmpty", err)
 	}
 
-	applied, err := Apply(context.Background(), root, staging, acfstypes.ApplyManifest{
+	applied, err := Apply(t.Context(), root, staging, acfstypes.ApplyManifest{
 		Version: acfstypes.ProtocolVersion,
 		Changes: []acfstypes.ApplyChange{{Operation: acfstypes.ApplyDelete, Path: "/real", Recursive: true}},
 	})
@@ -94,7 +93,7 @@ func TestApplyReportsFailedChangeIndex(t *testing.T) {
 
 	root := t.TempDir()
 	staging := t.TempDir()
-	_, err := Apply(context.Background(), root, staging, acfstypes.ApplyManifest{
+	_, err := Apply(t.Context(), root, staging, acfstypes.ApplyManifest{
 		Version: acfstypes.ProtocolVersion,
 		Changes: []acfstypes.ApplyChange{
 			{Operation: acfstypes.ApplyCreateFolder, Path: "/created"},
@@ -119,7 +118,7 @@ func TestApplyPreservesUpdateModeAndRejectsOverlappingRoots(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(staging, "update"), []byte("new"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Apply(context.Background(), root, staging, acfstypes.ApplyManifest{
+	_, err := Apply(t.Context(), root, staging, acfstypes.ApplyManifest{
 		Version: acfstypes.ProtocolVersion,
 		Changes: []acfstypes.ApplyChange{{
 			Operation:  acfstypes.ApplyUpdateFile,
@@ -140,10 +139,11 @@ func TestApplyPreservesUpdateModeAndRejectsOverlappingRoots(t *testing.T) {
 	}
 
 	overlapping := filepath.Join(root, "staging")
-	if err := os.Mkdir(overlapping, 0o700); err != nil {
+	err = os.Mkdir(overlapping, 0o700)
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Apply(context.Background(), root, overlapping, acfstypes.ApplyManifest{Version: acfstypes.ProtocolVersion})
+	_, err = Apply(t.Context(), root, overlapping, acfstypes.ApplyManifest{Version: acfstypes.ProtocolVersion})
 	if !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("overlapping roots error = %v, want ErrInvalidPath", err)
 	}

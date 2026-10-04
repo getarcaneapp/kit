@@ -1,7 +1,6 @@
 package updater
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -37,7 +36,7 @@ func TestDefaultImagePullerIgnoresRepositoryEnvAuth(t *testing.T) {
 	})
 
 	puller := defaultImagePuller{dockerClientProvider: &fakeDockerClientProvider{client: dockerClient}}
-	err := puller.PullImage(context.Background(), "registry.example.com/team/app:1.2.3", io.Discard)
+	err := puller.PullImage(t.Context(), "registry.example.com/team/app:1.2.3", io.Discard)
 	if err != nil {
 		t.Fatalf("PullImage() error = %v", err)
 	}
@@ -66,7 +65,7 @@ func TestDefaultImagePullerUsesDockerConfigRegistryAuth(t *testing.T) {
 	})
 
 	puller := defaultImagePuller{dockerClientProvider: &fakeDockerClientProvider{client: dockerClient}}
-	err := puller.PullImage(context.Background(), "registry.example.com/team/app:1.2.3", io.Discard)
+	err := puller.PullImage(t.Context(), "registry.example.com/team/app:1.2.3", io.Discard)
 	if err != nil {
 		t.Fatalf("PullImage() error = %v", err)
 	}
@@ -98,7 +97,7 @@ func TestDefaultImagePullerRetriesAnonymouslyAfterAuthRejected(t *testing.T) {
 	})
 
 	puller := defaultImagePuller{dockerClientProvider: &fakeDockerClientProvider{client: dockerClient}}
-	err := puller.PullImage(context.Background(), "registry.example.com/team/app:1.2.3", io.Discard)
+	err := puller.PullImage(t.Context(), "registry.example.com/team/app:1.2.3", io.Discard)
 	if err != nil {
 		t.Fatalf("PullImage() error = %v", err)
 	}
@@ -154,7 +153,7 @@ func TestDefaultRegistryDigestResolverUsesDockerConfigAuthAfterUnauthorized(t *t
 	writeDockerConfigAuth(t, dockerConfigDir, serverURL.Host, "config-user", "config-token")
 
 	resolver := defaultRegistryDigestResolver{httpClient: server.Client()}
-	got, err := resolver.ImageDigest(context.Background(), serverURL.Host+"/team/app:1.2.3")
+	got, err := resolver.ImageDigest(t.Context(), serverURL.Host+"/team/app:1.2.3")
 	if err != nil {
 		t.Fatalf("ImageDigest() error = %v", err)
 	}
@@ -194,7 +193,7 @@ func writeDockerConfigAuth(t *testing.T, dir, serverAddress, username, token str
 	if err != nil {
 		t.Fatalf("marshal Docker config: %v", err)
 	}
-	if err := os.WriteFile(dir+"/config.json", payload, 0o600); err != nil {
+	if err = os.WriteFile(dir+"/config.json", payload, 0o600); err != nil {
 		t.Fatalf("write Docker config: %v", err)
 	}
 }

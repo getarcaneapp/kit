@@ -10,6 +10,8 @@ import (
 	dockerregistry "github.com/moby/moby/api/types/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.getarcane.app/builds/types"
 )
 
 type fakeRegistryAuthProvider struct {
@@ -35,7 +37,7 @@ func TestBuildkitAuthConfigProvider_UsesRegistryAuthProviderForHost(t *testing.T
 		fakeRegistryAuthProvider{authConfigs: map[string]dockerregistry.AuthConfig{"ghcr.io": registryCfg}},
 	)
 
-	cfg, err := provider(context.Background(), "ghcr.io", nil, nil)
+	cfg, err := provider(t.Context(), "ghcr.io", nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "db-user", cfg.Username)
 	assert.Equal(t, "db-token", cfg.Password)
@@ -56,7 +58,7 @@ func TestBuildkitAuthConfigProvider_FallsBackToDefaultProvider(t *testing.T) {
 			fakeRegistryAuthProvider{err: errors.New("db unavailable")},
 		)
 
-		cfg, err := provider(context.Background(), "docker.io", nil, nil)
+		cfg, err := provider(t.Context(), "docker.io", nil, nil)
 		require.NoError(t, err)
 		assert.True(t, defaultCalled)
 		assert.Equal(t, defaultCfg, cfg)
@@ -72,7 +74,7 @@ func TestBuildkitAuthConfigProvider_FallsBackToDefaultProvider(t *testing.T) {
 			fakeRegistryAuthProvider{authConfigs: map[string]dockerregistry.AuthConfig{"ghcr.io": {Username: "db-user"}}},
 		)
 
-		cfg, err := provider(context.Background(), "docker.io", nil, nil)
+		cfg, err := provider(t.Context(), "docker.io", nil, nil)
 		require.NoError(t, err)
 		assert.True(t, defaultCalled)
 		assert.Equal(t, defaultCfg, cfg)
@@ -104,4 +106,16 @@ func TestWrapBuildkitSolveErrorInternal_WrapsDockerAndImageExporterErrors(t *tes
 		require.ErrorIs(t, wrapped, rawErr)
 		assert.Contains(t, wrapped.Error(), "depot and remote BuildKit providers require the image exporter")
 	})
+}
+
+type testSettingsProviderInternal struct{}
+
+func (testSettingsProviderInternal) BuildSettings() types.BuildSettings {
+	return types.BuildSettings{}
+}
+
+func TestNewServiceReturnsBuildEngine(t *testing.T) {
+	service := NewService(Config{SettingsProvider: testSettingsProviderInternal{}})
+
+	var _ types.Builder = service
 }

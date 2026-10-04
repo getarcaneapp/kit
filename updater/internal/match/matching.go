@@ -8,6 +8,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/digest"
 	"go.getarcane.app/updater/internal/compat"
 	"go.getarcane.app/updater/internal/compose"
@@ -38,16 +39,16 @@ func ResolveContainerImageMatch(c container.Summary, inspect *container.InspectR
 			return nr, inspect.Image
 		}
 	}
-	if newRef, match := resolveImageRefMatch(c.Image, updatedNorm); newRef != "" {
+	if newRef, match = resolveImageRefMatch(c.Image, updatedNorm); newRef != "" {
 		return newRef, match
 	}
 	if inspect != nil && inspect.Config != nil {
-		if newRef, match := resolveImageRefMatch(inspect.Config.Image, updatedNorm); newRef != "" {
+		if newRef, match = resolveImageRefMatch(inspect.Config.Image, updatedNorm); newRef != "" {
 			return newRef, match
 		}
 	}
 	if inspect != nil {
-		if newRef, match := resolveImageRefMatch(inspect.Image, updatedNorm); newRef != "" {
+		if newRef, match = resolveImageRefMatch(inspect.Image, updatedNorm); newRef != "" {
 			return newRef, match
 		}
 	}

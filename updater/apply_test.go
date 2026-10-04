@@ -3,6 +3,8 @@ package updater
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"testing"
@@ -15,7 +17,7 @@ import (
 func TestApplyPendingDefaultStoreNoOperations(t *testing.T) {
 	service := newServiceForTest(t, Config{})
 
-	got, err := service.ApplyPending(context.Background(), Options{})
+	got, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
@@ -44,7 +46,7 @@ func TestApplyPendingDryRunRecordsSkippedImage(t *testing.T) {
 		}),
 	})
 
-	got, err := service.ApplyPending(context.Background(), Options{DryRun: true})
+	got, err := service.ApplyPending(t.Context(), Options{DryRun: true})
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
@@ -88,7 +90,7 @@ func TestApplyPendingSkipsUnchangedPulledImage(t *testing.T) {
 		}),
 	})
 
-	got, err := service.ApplyPending(context.Background(), Options{})
+	got, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
@@ -137,7 +139,7 @@ func TestApplyPendingForceBypassesUnchangedPulledImageSkip(t *testing.T) {
 		}),
 	})
 
-	got, err := service.ApplyPending(context.Background(), Options{Force: true})
+	got, err := service.ApplyPending(t.Context(), Options{Force: true})
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
@@ -201,7 +203,7 @@ func TestApplyPendingUsesRecordDigestBeforeResolver(t *testing.T) {
 		}),
 	})
 
-	got, err := service.ApplyPending(context.Background(), Options{})
+	got, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
@@ -258,7 +260,7 @@ func TestApplyPendingReportsUpToDateWhenKnownDigestMatchesAnyLocalRepoDigest(t *
 		}),
 	})
 
-	got, err := service.ApplyPending(context.Background(), Options{})
+	got, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
@@ -322,7 +324,7 @@ func TestApplyPendingRestartsStaleContainersWhenImageAlreadyPulled(t *testing.T)
 		}),
 	})
 
-	got, err := service.ApplyPending(context.Background(), Options{})
+	got, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
@@ -372,7 +374,7 @@ func TestApplyPendingReusesDockerClientWhileBuildingPlans(t *testing.T) {
 		}),
 	})
 
-	_, _ = service.ApplyPending(context.Background(), Options{})
+	_, _ = service.ApplyPending(t.Context(), Options{})
 
 	if provider.calls != 2 {
 		t.Fatalf("DockerClient calls = %d, want 2 total calls independent of record count", provider.calls)
@@ -429,7 +431,7 @@ func TestApplyPendingKeepsPulledRecordWhenRestartFails(t *testing.T) {
 		}),
 	})
 
-	got, err := service.ApplyPending(context.Background(), Options{})
+	got, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
@@ -444,5 +446,37 @@ func TestApplyPendingKeepsPulledRecordWhenRestartFails(t *testing.T) {
 	}
 	if !foundFailedContainer {
 		t.Fatalf("ApplyPending() items = %#v, want failed container result", got.Items)
+	}
+}
+
+// ApplyPending works through the updates a PendingStore reports, then restarts
+// the containers still running the images it replaced.
+func ExampleService_ApplyPending() {
+	store := NewMemoryPendingStore(ImageUpdateRecord{
+		ID:         "sha256:old-image-id",
+		Repository: "nginx",
+		Tag:        "1.27",
+		HasUpdate:  true,
+		UpdateType: UpdateTypeDigest,
+	})
+
+	service, err := New(Config{PendingStore: store})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if closeErr := service.Close(); closeErr != nil {
+			log.Print(closeErr)
+		}
+	}()
+
+	// DryRun reports what would change without pulling or recreating anything.
+	result, err := service.ApplyPending(context.Background(), Options{DryRun: true})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	for _, item := range result.Items {
+		fmt.Printf("%s %s: %s -> %s\n", item.ResourceType, item.Status, item.OldImage, item.NewImage)
 	}
 }

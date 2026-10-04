@@ -28,7 +28,7 @@ func TestHubSharesRunnerAcrossSubscribersAndReplaysLast(t *testing.T) {
 		}
 	}
 
-	ctx1, cancel1 := context.WithCancel(context.Background())
+	ctx1, cancel1 := context.WithCancel(t.Context())
 	events1 := make(chan int, 4)
 	done1 := make(chan struct{})
 	go func() {
@@ -44,7 +44,7 @@ func TestHubSharesRunnerAcrossSubscribersAndReplaysLast(t *testing.T) {
 
 	// A second subscriber reuses the running poller and immediately gets the
 	// last published event.
-	ctx2, cancel2 := context.WithCancel(context.Background())
+	ctx2, cancel2 := context.WithCancel(t.Context())
 	events2 := make(chan int, 4)
 	done2 := make(chan struct{})
 	go func() {

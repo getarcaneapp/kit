@@ -80,7 +80,7 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 
 	// HEAD reads the rate-limit headers without counting as a pull.
 	manifestURL := url.URL{Scheme: repo.Scheme(), Host: repo.RegistryStr(), Path: "/v2/" + repo.RepositoryStr() + "/manifests/" + ref.TagStr()}
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodHead, manifestURL.String(), nil)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodHead, manifestURL.String(), http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,8 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if err := transport.CheckError(resp, http.StatusOK); err != nil {
+	err = transport.CheckError(resp, http.StatusOK)
+	if err != nil {
 		return nil, err
 	}
 	return extractRateLimitFromHeaders(resp.Header)
@@ -218,8 +219,8 @@ func parseRateLimitHeader(value string) (*int, *int) {
 		if !ok || strings.ToLower(key) != "w" {
 			continue
 		}
-		parsed, err := strconv.Atoi(strings.TrimSpace(rawValue))
-		if err == nil {
+		parsed, parseErr := strconv.Atoi(strings.TrimSpace(rawValue))
+		if parseErr == nil {
 			window = &parsed
 		}
 	}

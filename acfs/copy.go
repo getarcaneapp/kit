@@ -187,10 +187,12 @@ func (w *copyWalkerInternal) copyRegularFileInternal(relativePath string, entry 
 		}
 	}
 
-	if err := w.destinationRoot.MkdirAll(filepath.Dir(relativePath), copyDirectoryMode); err != nil {
+	err = w.destinationRoot.MkdirAll(filepath.Dir(relativePath), copyDirectoryMode)
+	if err != nil {
 		return err
 	}
-	if err := w.destinationRoot.WriteFile(relativePath, content, info.Mode()&chmodModeMask); err != nil {
+	err = w.destinationRoot.WriteFile(relativePath, content, info.Mode()&chmodModeMask)
+	if err != nil {
 		if w.mirror && errors.Is(err, os.ErrPermission) {
 			w.record(relativePath)
 			return nil
@@ -280,7 +282,8 @@ func (w *pruneWalkerInternal) visitInternal(currentPath string, entry os.DirEntr
 		return nil
 	}
 
-	if err := w.destinationRoot.RemoveAll(relativePath); err != nil {
+	err = w.destinationRoot.RemoveAll(relativePath)
+	if err != nil {
 		return err
 	}
 	if entry.IsDir() {

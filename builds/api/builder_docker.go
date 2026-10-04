@@ -23,9 +23,10 @@ import (
 	"github.com/moby/patternmatcher"
 	"github.com/moby/patternmatcher/ignorefile"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	kit "go.getarcane.app/kit/pkg"
+
 	dockerutils "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
-	kit "go.getarcane.app/kit/pkg"
 )
 
 type dockerBuildInput struct {
@@ -215,15 +216,15 @@ func copyFileWithModeInternal(src, dst string, mode os.FileMode) (copyErr error)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if err := out.Close(); copyErr == nil && err != nil {
-			copyErr = err
+		if closeErr := out.Close(); copyErr == nil && closeErr != nil {
+			copyErr = closeErr
 		}
 	}()
 
@@ -260,14 +261,15 @@ func copyContextTreeInternal(srcRoot, dstRoot string) error {
 		}
 
 		if d.Type()&os.ModeSymlink != 0 {
-			linkTarget, err := os.Readlink(path)
-			if err != nil {
-				return err
+			linkTarget, readlinkErr := os.Readlink(path)
+			if readlinkErr != nil {
+				return readlinkErr
 			}
 			return os.Symlink(linkTarget, targetPath) //nolint:gosec // build context staging intentionally preserves symlinks from the user-selected source tree.
 		}
 
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		err = os.MkdirAll(filepath.Dir(targetPath), 0o755)
+		if err != nil {
 			return err
 		}
 
@@ -289,18 +291,21 @@ func prepareBuildContextInternal(input buildFilesystemInput) (string, string, fu
 		_ = os.RemoveAll(stagingDir)
 	}
 
-	if err := copyContextTreeInternal(input.contextDir, stagingDir); err != nil {
+	err = copyContextTreeInternal(input.contextDir, stagingDir)
+	if err != nil {
 		cleanup()
 		return "", "", nil, fmt.Errorf("failed to stage build context: %w", err)
 	}
 
 	if input.dockerfileInline != "" {
 		stagedDockerfilePath := filepath.Join(stagingDir, filepath.FromSlash(input.relDockerfile))
-		if err := os.MkdirAll(filepath.Dir(stagedDockerfilePath), 0o755); err != nil {
+		err = os.MkdirAll(filepath.Dir(stagedDockerfilePath), 0o755)
+		if err != nil {
 			cleanup()
 			return "", "", nil, fmt.Errorf("failed to create inline Dockerfile path: %w", err)
 		}
-		if err := os.WriteFile(stagedDockerfilePath, []byte(input.dockerfileInline), 0o600); err != nil {
+		err = os.WriteFile(stagedDockerfilePath, []byte(input.dockerfileInline), 0o600)
+		if err != nil {
 			cleanup()
 			return "", "", nil, fmt.Errorf("failed to stage inline Dockerfile: %w", err)
 		}
@@ -316,7 +321,8 @@ func prepareBuildContextInternal(input buildFilesystemInput) (string, string, fu
 		return "", "", nil, fmt.Errorf("failed to stat Dockerfile: %w", err)
 	}
 
-	if err := copyFileWithModeInternal(input.fullDockerfilePath, stagedDockerfilePath, dockerfileInfo.Mode()); err != nil {
+	err = copyFileWithModeInternal(input.fullDockerfilePath, stagedDockerfilePath, dockerfileInfo.Mode())
+	if err != nil {
 		cleanup()
 		return "", "", nil, fmt.Errorf("failed to stage Dockerfile: %w", err)
 	}
@@ -465,7 +471,7 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 	if err != nil {
 		return nil, fmt.Errorf("failed to create build context: %w", err)
 	}
-	defer buildContext.Close()
+	defer func() { _ = buildContext.Close() }()
 
 	var authConfigs map[string]dockerregistry.AuthConfig
 	if b.registryAuthProvider != nil {
@@ -484,12 +490,14 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 		return nil, buildOptsErr
 	}
 
-	if err := b.performDockerBuildInternal(ctx, dockerClient, buildContext, buildOpts, progressWriter); err != nil {
+	err = b.performDockerBuildInternal(ctx, dockerClient, buildContext, buildOpts, progressWriter)
+	if err != nil {
 		return nil, err
 	}
 
 	if req.Push {
-		if err := b.pushDockerImagesInternal(ctx, dockerClient, req.Tags, progressWriter); err != nil {
+		err = b.pushDockerImagesInternal(ctx, dockerClient, req.Tags, progressWriter)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -508,7 +516,7 @@ func readDockerignoreInternal(contextDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read .dockerignore: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	patterns, err := ignorefile.ReadAll(file)
 	if err != nil {

@@ -56,7 +56,8 @@ func TestCheckImageTagCandidateWithoutDockerOrMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.UpdateAvailable || result.UpdateType != string(UpdateTypeTag) || result.TargetRef != "docker.io/example/app:3.1.10" || result.CurrentVersion != "3.1.9" || result.TargetVersion != "3.1.10" {
+	if !result.UpdateAvailable || result.UpdateType != string(UpdateTypeTag) || result.TargetRef != "docker.io/example/app:3.1.10" ||
+		result.CurrentVersion != "3.1.9" || result.TargetVersion != "3.1.10" {
 		t.Fatalf("unexpected candidate: %+v", result)
 	}
 	if provider.calls != 0 || resolver.calls != 0 || len(puller.pulled) != 0 || len(store.cleared) != 0 || len(store.records) != 0 {

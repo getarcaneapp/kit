@@ -73,16 +73,16 @@ func NormalizeImageUpdateRefMapKeys(refToValue map[string]string) map[string]str
 	return out
 }
 
-// IsImageIDLikeReference reports whether ref is a Docker image ID rather than a pullable tag.
-func IsImageIDLikeReference(ref string) bool {
-	ref = strings.ToLower(strings.TrimSpace(ref))
-	if strings.HasPrefix(ref, "sha256:") {
+// IsImageIDLikeReference reports whether imageRef is a Docker image ID rather than a pullable tag.
+func IsImageIDLikeReference(imageRef string) bool {
+	imageRef = strings.ToLower(strings.TrimSpace(imageRef))
+	if strings.HasPrefix(imageRef, "sha256:") {
 		return true
 	}
-	if len(ref) != 64 {
+	if len(imageRef) != 64 {
 		return false
 	}
-	for _, c := range ref {
+	for _, c := range imageRef {
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
@@ -90,9 +90,9 @@ func IsImageIDLikeReference(ref string) bool {
 	return true
 }
 
-// IsDigestPinnedReference reports whether ref names an immutable repository digest.
-func IsDigestPinnedReference(ref string) bool {
-	_, digestValue, ok := strings.Cut(strings.TrimSpace(ref), "@")
+// IsDigestPinnedReference reports whether imageRef names an immutable repository digest.
+func IsDigestPinnedReference(imageRef string) bool {
+	_, digestValue, ok := strings.Cut(strings.TrimSpace(imageRef), "@")
 	if !ok {
 		return false
 	}

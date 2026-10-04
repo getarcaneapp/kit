@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/internal/compose"
 )
 

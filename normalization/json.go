@@ -19,7 +19,8 @@ func NormalizeJSON(data []byte, typ reflect.Type) ([]byte, error) {
 		return data, nil
 	}
 	var raw jsontext.Value
-	if err := json.Unmarshal(data, &raw); err != nil {
+	err = json.Unmarshal(data, &raw)
+	if err != nil {
 		return nil, err
 	}
 	return normalizeJSONInternal(data, p)

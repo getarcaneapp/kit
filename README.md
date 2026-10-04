@@ -10,8 +10,7 @@ Shared Go packages and nested modules for Arcane.
 </div>
 
 > [!IMPORTANT]
-> All modules are under development. The API is not stable and may change at anytime
-> before v1.0.0.
+> All modules are under development. The API may change at anytime before v1.0.0.
 
 Nested modules may import kit, never the other way around, and shared code is
 only added to the root when it has a concrete contract that more than one

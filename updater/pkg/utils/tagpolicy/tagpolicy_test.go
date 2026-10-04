@@ -29,7 +29,10 @@ func TestSelect(t *testing.T) {
 		{name: "equivalent candidates", current: "3.1.9", tags: []string{"v3.1.10", "3.1.10"}, want: "3.1.10"},
 		{name: "equivalent candidates reversed", current: "3.1.9", tags: []string{"3.1.10", "v3.1.10"}, want: "3.1.10"},
 		{name: "equal version ignored", current: "3.1.9", tags: []string{"v3.1.9", "3.1.8"}, want: "3.1.9"},
-		{name: "variant capture", current: "3.1.2-alpine", tags: []string{"3.1.10-alpine", "3.2.0-bookworm", "4.0.0-alpine"}, policy: types.Policy{Constraint: "3.x", TagPattern: `(?P<version>\d+\.\d+\.\d+)-alpine`}, want: "3.1.10-alpine"},
+		{
+			name: "variant capture", current: "3.1.2-alpine", tags: []string{"3.1.10-alpine", "3.2.0-bookworm", "4.0.0-alpine"},
+			policy: types.Policy{Constraint: "3.x", TagPattern: `(?P<version>\d+\.\d+\.\d+)-alpine`}, want: "3.1.10-alpine",
+		},
 		{name: "pattern full match", current: "3.1.2", tags: []string{"prefix3.2.0", "3.2.0suffix", "3.1.3"}, policy: types.Policy{TagPattern: `\d+\.\d+\.\d+`}, want: "3.1.3"},
 		{name: "variant requires policy", current: "3.1.2-alpine", wantError: true},
 		{name: "invalid current", current: "latest", wantError: true},
@@ -69,7 +72,7 @@ func TestVersion(t *testing.T) {
 	if got != "3.1.2" {
 		t.Fatalf("got %q", got)
 	}
-	if _, err := tagpolicy.Version("1.2", types.Policy{}); err == nil {
+	if _, err = tagpolicy.Version("1.2", types.Policy{}); err == nil {
 		t.Fatal("expected incomplete version error")
 	}
 }

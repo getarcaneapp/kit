@@ -19,7 +19,7 @@ func TestAuthAddress(t *testing.T) {
 		t.Fatalf("AuthAddress() custom = %q, want ghcr.io", got)
 	}
 
-	if _, err := AuthAddress("not a reference"); err == nil {
+	if _, err = AuthAddress("not a reference"); err == nil {
 		t.Fatal("AuthAddress() error = nil, want parse failure")
 	}
 }

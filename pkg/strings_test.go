@@ -143,7 +143,7 @@ func TestTrimNonEmpty(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("TrimNonEmpty = %q, want %q", got, want)
 	}
-	if got := TrimNonEmpty(nil); len(got) != 0 {
+	if got = TrimNonEmpty(nil); len(got) != 0 {
 		t.Errorf("TrimNonEmpty(nil) = %q, want empty", got)
 	}
 }

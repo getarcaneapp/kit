@@ -15,8 +15,9 @@ import (
 	buildkit "github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth/authprovider"
-	"go.getarcane.app/builds/types"
 	"go.getarcane.app/kit/pkg/utils"
+
+	"go.getarcane.app/builds/types"
 )
 
 const defaultBuildTimeout = 30 * time.Minute
@@ -30,20 +31,20 @@ type Service struct {
 }
 
 // NewService constructs a build service.
-func NewService(config Config) *Service {
+func NewService(cfg Config) *Service {
 	providers := map[string]any{
-		"depot": newDepotBuildKitProviderInternal(config.SettingsProvider),
+		"depot": newDepotBuildKitProviderInternal(cfg.SettingsProvider),
 	}
 
-	logger := config.Logger
+	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	return &Service{
-		settings:             config.SettingsProvider,
-		dockerClientProvider: config.DockerClientProvider,
-		registryAuthProvider: config.RegistryAuthProvider,
+		settings:             cfg.SettingsProvider,
+		dockerClientProvider: cfg.DockerClientProvider,
+		registryAuthProvider: cfg.RegistryAuthProvider,
 		logger:               logger,
 		providers:            providers,
 	}
@@ -79,21 +80,22 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 	req = normalizeBuildRequestInternal(req, providerName)
 	req.Tags = utils.NormalizeSet(req.Tags)
 
-	if err := validateBuildRequestInternal(req, providerName); err != nil {
+	err = validateBuildRequestInternal(req, providerName)
+	if err != nil {
 		return nil, err
 	}
 
 	if providerName == "local" {
-		requiresDirectBuildkitSession, err := requiresDirectLocalBuildkitSessionInternal(req)
-		if err != nil {
-			return nil, err
+		requiresDirectBuildkitSession, requiresErr := requiresDirectLocalBuildkitSessionInternal(req)
+		if requiresErr != nil {
+			return nil, requiresErr
 		}
 		if requiresDirectBuildkitSession {
-			session, err := b.newLocalBuildkitSessionInternal(buildCtx)
-			if err != nil {
-				return nil, err
+			localSession, sessionErr := b.newLocalBuildkitSessionInternal(buildCtx)
+			if sessionErr != nil {
+				return nil, sessionErr
 			}
-			return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, providerName, session)
+			return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, providerName, localSession)
 		}
 		return b.buildWithDockerInternal(buildCtx, req, progressWriter)
 	}
@@ -102,12 +104,12 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 		return nil, &types.BuildProviderUnavailableError{}
 	}
 
-	session, err := provider.NewSession(buildCtx, req)
+	providerSession, err := provider.NewSession(buildCtx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, providerName, session)
+	return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, providerName, providerSession)
 }
 
 func (b *Service) buildWithBuildkitSessionInternal(
@@ -115,15 +117,15 @@ func (b *Service) buildWithBuildkitSessionInternal(
 	req types.BuildRequest,
 	progressWriter io.Writer,
 	providerName string,
-	session *buildSession,
+	bkSession *buildSession,
 ) (*types.BuildResult, error) {
-	if session == nil || session.Client == nil {
+	if bkSession == nil || bkSession.Client == nil {
 		return nil, &types.BuildSessionUnavailableError{}
 	}
 
 	var buildErr error
 	defer func() {
-		if cerr := session.Close(buildErr); cerr != nil {
+		if cerr := bkSession.Close(buildErr); cerr != nil {
 			slog.WarnContext(ctx, "build session close error", "provider", providerName, "error", cerr)
 		}
 	}()
@@ -143,7 +145,7 @@ func (b *Service) buildWithBuildkitSessionInternal(
 		streamErrCh <- streamSolveStatusInternal(ctx, statusCh, progressWriter)
 	}()
 
-	resp, err := session.Client.Solve(ctx, nil, solveOpt, statusCh)
+	resp, err := bkSession.Client.Solve(ctx, nil, solveOpt, statusCh)
 	if err != nil {
 		err = wrapBuildkitSolveErrorInternal(err, providerName)
 		buildErr = err

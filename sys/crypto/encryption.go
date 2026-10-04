@@ -104,9 +104,9 @@ func New(primary []byte, old ...[]byte) (*Encryptor, error) {
 	}
 	keys = append(keys, primaryKey)
 	for i, key := range old {
-		normalized, err := copyAESKeyInternal(key)
-		if err != nil {
-			return nil, &InvalidKeyError{Reason: fmt.Sprintf("old key %d: %v", i, err)}
+		normalized, keyErr := copyAESKeyInternal(key)
+		if keyErr != nil {
+			return nil, &InvalidKeyError{Reason: fmt.Sprintf("old key %d: %v", i, keyErr)}
 		}
 		keys = append(keys, normalized)
 	}
@@ -207,11 +207,11 @@ func (e *Encryptor) Decrypt(ciphertext string) (string, error) {
 	}
 	var lastErr error
 	for _, key := range e.keys {
-		plaintext, err := decryptWithKeyInternal(key, data)
-		if err == nil {
+		plaintext, decryptErr := decryptWithKeyInternal(key, data)
+		if decryptErr == nil {
 			return plaintext, nil
 		}
-		lastErr = err
+		lastErr = decryptErr
 	}
 	return "", &DecryptError{Err: lastErr}
 }

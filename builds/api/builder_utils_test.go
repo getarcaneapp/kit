@@ -1,13 +1,13 @@
 package api
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"go.getarcane.app/builds/types"
 )
 
@@ -106,7 +106,7 @@ func TestValidateBuildRequestInternal_ReturnsCommonTypedErrors(t *testing.T) {
 	require.Error(t, err)
 
 	var typedErr *types.BuildContextDirRequiredError
-	assert.True(t, errors.As(err, &typedErr))
+	assert.ErrorAs(t, err, &typedErr)
 }
 
 func TestPrepareDockerBuildInputInternal_ReturnsCommonTypedErrors(t *testing.T) {
@@ -122,5 +122,5 @@ func TestPrepareDockerBuildInputInternal_ReturnsCommonTypedErrors(t *testing.T) 
 	assert.True(t, reportProgress)
 
 	var typedErr *types.DockerBuildMultiPlatformUnsupportedError
-	assert.True(t, errors.As(err, &typedErr))
+	assert.ErrorAs(t, err, &typedErr)
 }

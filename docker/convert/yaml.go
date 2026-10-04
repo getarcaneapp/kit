@@ -6,8 +6,9 @@ import (
 	"slices"
 	"strconv"
 
-	"go.getarcane.app/docker/convert/types"
 	"go.yaml.in/yaml/v4"
+
+	"go.getarcane.app/docker/convert/types"
 )
 
 var serviceKeyOrder = []string{

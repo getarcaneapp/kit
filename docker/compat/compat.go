@@ -156,7 +156,8 @@ func ContainerCreateWithCompatibilityForAPIVersion(ctx context.Context, dockerCl
 	if err != nil {
 		return client.ContainerCreateResult{}, err
 	}
-	if err := ConnectContainerExtraNetworksForDockerAPI(ctx, dockerClient, result.ID, extra); err != nil {
+	err = ConnectContainerExtraNetworksForDockerAPI(ctx, dockerClient, result.ID, extra)
+	if err != nil {
 		_, _ = dockerClient.ContainerRemove(ctx, result.ID, client.ContainerRemoveOptions{Force: true})
 		return client.ContainerCreateResult{}, err
 	}

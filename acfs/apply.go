@@ -12,8 +12,9 @@ import (
 	"strings"
 	"syscall"
 
-	acfstypes "go.getarcane.app/acfs/types"
 	kitfs "go.getarcane.app/kit/pkg/fs"
+
+	acfstypes "go.getarcane.app/acfs/types"
 )
 
 const (
@@ -52,7 +53,8 @@ func Apply(ctx context.Context, rootPath, stagingPath string, manifest acfstypes
 	defer func() { _ = stagingRoot.Close() }()
 
 	for index, change := range manifest.Changes {
-		if err := ctx.Err(); err != nil {
+		err = ctx.Err()
+		if err != nil {
 			return index, err
 		}
 		var applyErr error
@@ -83,7 +85,8 @@ func normalizeMutationPathInternal(logicalPath string) (string, error) {
 	if relativePath == "." {
 		return "", fmt.Errorf("%w: workspace root is not a mutation target", ErrInvalidPath)
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return "", err
 	}
 	return relativePath, nil
@@ -122,7 +125,8 @@ func ensureMutationParentInternal(root *os.Root, relativePath string, create boo
 		current = path.Join(current, component)
 		info, err := root.Lstat(current)
 		if errors.Is(err, fs.ErrNotExist) && create {
-			if err := root.Mkdir(current, applyDirectoryMode); err != nil && !errors.Is(err, fs.ErrExist) {
+			err = root.Mkdir(current, applyDirectoryMode)
+			if err != nil && !errors.Is(err, fs.ErrExist) {
 				return "", fmt.Errorf("create parent %q: %w", kitfs.LogicalPath(current), err)
 			}
 			info, err = root.Lstat(current)
@@ -181,25 +185,62 @@ func copyCreateFileInternal(ctx context.Context, root *os.Root, targetPath strin
 	if err != nil {
 		return fmt.Errorf("%w: expected %d bytes, received %d: %w", ErrSizeMismatch, size, written, err)
 	}
-	if err := target.Chmod(applyFileMode); err != nil {
+	err = target.Chmod(applyFileMode)
+	if err != nil {
 		return err
 	}
-	if err := target.Sync(); err != nil {
+	err = target.Sync()
+	if err != nil {
 		return err
 	}
-	if err := target.Close(); err != nil {
+	err = target.Close()
+	if err != nil {
 		return err
 	}
-	if err := root.Link(temporaryPath, targetPath); err != nil {
+	err = root.Link(temporaryPath, targetPath)
+	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return ErrAlreadyExists
 		}
 		return err
 	}
-	if err := root.Remove(temporaryPath); err != nil {
+	err = root.Remove(temporaryPath)
+	if err != nil {
 		return err
 	}
 	return nil
+}
+
+// rejectExistingTargetInternal reports ErrAlreadyExists, or ErrSymlink for a
+// symbolic link, when name already exists in root.
+func rejectExistingTargetInternal(root *os.Root, name string) error {
+	info, err := root.Lstat(name)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return ErrSymlink
+		}
+		return ErrAlreadyExists
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// existingRegularFileModeInternal returns the permission bits of an existing
+// regular file in root, refusing symbolic links and other file types.
+func existingRegularFileModeInternal(root *os.Root, name string) (os.FileMode, error) {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return 0, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return 0, ErrSymlink
+	}
+	if !info.Mode().IsRegular() {
+		return 0, ErrNotFile
+	}
+	return info.Mode() & chmodModeMask, nil
 }
 
 func applyFileInternal(ctx context.Context, root, stagingRoot *os.Root, change acfstypes.ApplyChange, create bool) error {
@@ -220,26 +261,12 @@ func applyFileInternal(ctx context.Context, root, stagingRoot *os.Root, change a
 
 	var mode os.FileMode = applyFileMode
 	if create {
-		if info, err := parentRoot.Lstat(base); err == nil {
-			if info.Mode()&os.ModeSymlink != 0 {
-				return ErrSymlink
-			}
-			return ErrAlreadyExists
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
+		err = rejectExistingTargetInternal(parentRoot, base)
 	} else {
-		info, err := parentRoot.Lstat(base)
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return ErrSymlink
-		}
-		if !info.Mode().IsRegular() {
-			return ErrNotFile
-		}
-		mode = info.Mode() & chmodModeMask
+		mode, err = existingRegularFileModeInternal(parentRoot, base)
+	}
+	if err != nil {
+		return err
 	}
 
 	staged, err := openStagedFileInternal(stagingRoot, change)
@@ -270,15 +297,12 @@ func applyCreateFolderInternal(root *os.Root, logicalPath string) error {
 	}
 	defer func() { _ = parentRoot.Close() }()
 	base := path.Base(relativePath)
-	if info, err := parentRoot.Lstat(base); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return ErrSymlink
-		}
-		return ErrAlreadyExists
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	err = rejectExistingTargetInternal(parentRoot, base)
+	if err != nil {
 		return err
 	}
-	if err := parentRoot.Mkdir(base, applyDirectoryMode); err != nil {
+	err = parentRoot.Mkdir(base, applyDirectoryMode)
+	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return ErrAlreadyExists
 		}
@@ -299,18 +323,16 @@ func applyRenameInternal(root *os.Root, sourcePath, targetPath string) error {
 	if source == target || strings.HasPrefix(target, source+"/") {
 		return fmt.Errorf("%w: invalid destination", ErrInvalidPath)
 	}
-	if _, err := inspectMutationPathInternal(root, source); err != nil {
+	_, err = inspectMutationPathInternal(root, source)
+	if err != nil {
 		return err
 	}
-	if _, err := ensureMutationParentInternal(root, target, false); err != nil {
+	_, err = ensureMutationParentInternal(root, target, false)
+	if err != nil {
 		return err
 	}
-	if info, err := root.Lstat(target); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return ErrSymlink
-		}
-		return ErrAlreadyExists
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	err = rejectExistingTargetInternal(root, target)
+	if err != nil {
 		return err
 	}
 	return root.Rename(source, target)
@@ -344,7 +366,8 @@ func applyDeleteInternal(root *os.Root, logicalPath string, recursive bool) erro
 	if info.IsDir() && recursive {
 		return parentRoot.RemoveAll(base)
 	}
-	if err := parentRoot.Remove(base); err != nil {
+	err = parentRoot.Remove(base)
+	if err != nil {
 		if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
 			return ErrNotEmpty
 		}

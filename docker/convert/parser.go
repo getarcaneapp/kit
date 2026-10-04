@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mattn/go-shellwords"
+
 	"go.getarcane.app/docker/convert/types"
 )
 
@@ -81,15 +82,15 @@ func Parse(input string, opts types.ParseOptions) ([]types.RunCommand, error) {
 	}
 
 	commands := make([]types.RunCommand, 0, len(statements))
-	for _, tokens := range statements {
-		tokens, ok := trimCommandPrefixInternal(tokens)
+	for _, statement := range statements {
+		tokens, ok := trimCommandPrefixInternal(statement)
 		if !ok {
 			return nil, types.NewParseError("expected docker or podman run/create command")
 		}
 
-		cmd, err := parseRunTokensInternal(tokens)
-		if err != nil {
-			return nil, err
+		cmd, parseErr := parseRunTokensInternal(tokens)
+		if parseErr != nil {
+			return nil, parseErr
 		}
 		commands = append(commands, cmd)
 	}

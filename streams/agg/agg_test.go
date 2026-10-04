@@ -15,14 +15,14 @@ func (failingWriter) Write([]byte) (int, error) {
 }
 
 func TestRunRejectsInvalidConfig(t *testing.T) {
-	err := Run(context.Background(), Config[string]{})
+	err := Run(t.Context(), Config[string]{})
 	if err == nil {
 		t.Fatal("Run returned nil error for invalid config")
 	}
 }
 
 func TestRunReturnsEncodeError(t *testing.T) {
-	err := Run(context.Background(), Config[string]{
+	err := Run(t.Context(), Config[string]{
 		Writer: failingWriter{},
 		Flush:  func() {},
 		Producers: []Producer[string]{
@@ -37,7 +37,7 @@ func TestRunReturnsEncodeError(t *testing.T) {
 }
 
 func TestRunAllowsNoHeartbeat(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	var out bytes.Buffer
@@ -59,7 +59,7 @@ func TestRunAllowsNoHeartbeat(t *testing.T) {
 }
 
 func TestReconcilePollersWaitsForReplacementToExit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	started := make(chan string, 2)

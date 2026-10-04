@@ -52,7 +52,7 @@ func TestPublishReportsEachDroppedSubscriber(t *testing.T) {
 	for i := range channels {
 		ch, unsubscribe := b.Subscribe(events.ImageEventType, WithSubscriberBuffer(1))
 		channels[i] = ch
-		defer unsubscribe()
+		t.Cleanup(unsubscribe)
 	}
 
 	b.Publish(events.Message{Type: events.ImageEventType, Action: "one"})

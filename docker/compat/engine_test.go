@@ -74,8 +74,18 @@ func TestDetectEngineCompatibility(t *testing.T) {
 		want    EngineCompatibilityInfo
 	}{
 		{name: "prefers platform name for podman detection", version: platform, info: systemtypes.Info{CgroupVersion: "2"}, want: EngineCompatibilityInfo{Name: "podman", CgroupVersion: "2"}},
-		{name: "detects podman from component names", version: client.ServerVersionResult{Components: []systemtypes.ComponentVersion{{Name: "Podman Engine"}}}, info: systemtypes.Info{CgroupVersion: "2"}, want: EngineCompatibilityInfo{Name: "podman", CgroupVersion: "2"}},
-		{name: "detects from component details", version: client.ServerVersionResult{Components: []systemtypes.ComponentVersion{{Name: "Engine", Details: map[string]string{"Vendor": "Docker Inc."}}}}, info: systemtypes.Info{CgroupVersion: " 1 "}, want: EngineCompatibilityInfo{Name: "docker", CgroupVersion: "1"}},
+		{
+			name:    "detects podman from component names",
+			version: client.ServerVersionResult{Components: []systemtypes.ComponentVersion{{Name: "Podman Engine"}}},
+			info:    systemtypes.Info{CgroupVersion: "2"},
+			want:    EngineCompatibilityInfo{Name: "podman", CgroupVersion: "2"},
+		},
+		{
+			name:    "detects from component details",
+			version: client.ServerVersionResult{Components: []systemtypes.ComponentVersion{{Name: "Engine", Details: map[string]string{"Vendor": "Docker Inc."}}}},
+			info:    systemtypes.Info{CgroupVersion: " 1 "},
+			want:    EngineCompatibilityInfo{Name: "docker", CgroupVersion: "1"},
+		},
 		{name: "falls back to docker markers", info: systemtypes.Info{CgroupVersion: "2", ServerVersion: "Docker Engine - Community"}, want: EngineCompatibilityInfo{Name: "docker", CgroupVersion: "2"}},
 		{name: "unknown engine", info: systemtypes.Info{CgroupVersion: "2"}, want: EngineCompatibilityInfo{CgroupVersion: "2"}},
 	}

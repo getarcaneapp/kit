@@ -11,8 +11,9 @@ import (
 	"slices"
 	"strings"
 
-	acfstypes "go.getarcane.app/acfs/types"
 	kitfs "go.getarcane.app/kit/pkg/fs"
+
+	acfstypes "go.getarcane.app/acfs/types"
 )
 
 const directoryReadBatchSize = 256
@@ -31,7 +32,8 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 	if err != nil {
 		return err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return err
 	}
 
@@ -55,7 +57,8 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 		if strings.HasPrefix(name, temporaryWritePrefix) {
 			continue
 		}
-		if err := ctx.Err(); err != nil {
+		err = ctx.Err()
+		if err != nil {
 			return err
 		}
 
@@ -63,24 +66,35 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 		if resolvedPath != "." {
 			entryPath = resolvedPath + "/" + name
 		}
-		info, err := root.Lstat(entryPath)
+		err = visitListEntryInternal(root, entryPath, visit)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return fmt.Errorf("stat %q: %w", kitfs.LogicalPath(entryPath), err)
-		}
-
-		entry, err := entryFromInfoInternal(root, entryPath, info)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
 			return err
 		}
-		if err := visit(entry); err != nil {
-			return fmt.Errorf("visit %q: %w", entry.Path, err)
+	}
+	return nil
+}
+
+// visitListEntryInternal passes one directory child to visit, skipping a child
+// that disappeared after its parent directory was read.
+func visitListEntryInternal(root *os.Root, entryPath string, visit func(acfstypes.Entry) error) error {
+	info, err := root.Lstat(entryPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
 		}
+		return fmt.Errorf("stat %q: %w", kitfs.LogicalPath(entryPath), err)
+	}
+
+	entry, err := entryFromInfoInternal(root, entryPath, info)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	err = visit(entry)
+	if err != nil {
+		return fmt.Errorf("visit %q: %w", entry.Path, err)
 	}
 	return nil
 }
@@ -111,7 +125,8 @@ func Stat(ctx context.Context, rootPath, logicalPath string, followFinal bool) (
 	if err != nil {
 		return acfstypes.Entry{}, err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return acfstypes.Entry{}, err
 	}
 
@@ -207,7 +222,8 @@ func MkdirAll(ctx context.Context, rootPath, logicalPath string, mode os.FileMod
 	if err != nil {
 		return err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return err
 	}
 
@@ -221,7 +237,8 @@ func MkdirAll(ctx context.Context, rootPath, logicalPath string, mode os.FileMod
 	if err != nil {
 		return err
 	}
-	if err := root.MkdirAll(resolvedPath, mode); err != nil {
+	err = root.MkdirAll(resolvedPath, mode)
+	if err != nil {
 		return fmt.Errorf("create directory %q: %w", logicalPath, err)
 	}
 	return nil
@@ -242,7 +259,8 @@ func Mkdir(ctx context.Context, rootPath, logicalPath string, mode os.FileMode) 
 	if err != nil {
 		return err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return err
 	}
 	if relativePath == "." {
@@ -259,7 +277,8 @@ func Mkdir(ctx context.Context, rootPath, logicalPath string, mode os.FileMode) 
 	if err != nil {
 		return err
 	}
-	if err := root.Mkdir(path.Join(resolvedParent, base), mode); err != nil {
+	err = root.Mkdir(path.Join(resolvedParent, base), mode)
+	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("%w: %q: %w", ErrAlreadyExists, logicalPath, fs.ErrExist)
 		}
@@ -283,7 +302,8 @@ func Remove(ctx context.Context, rootPath, logicalPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return err
 	}
 	if relativePath == "." {
@@ -300,7 +320,8 @@ func Remove(ctx context.Context, rootPath, logicalPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := root.Remove(path.Join(resolvedParent, base)); err != nil {
+	err = root.Remove(path.Join(resolvedParent, base))
+	if err != nil {
 		if isDirectoryNotEmptyInternal(err) {
 			return fmt.Errorf("%w: %q", ErrNotEmpty, logicalPath)
 		}
@@ -320,7 +341,8 @@ func RemoveAll(ctx context.Context, rootPath, logicalPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return err
 	}
 	if relativePath == "." {
@@ -341,7 +363,8 @@ func RemoveAll(ctx context.Context, rootPath, logicalPath string) error {
 		return err
 	}
 	targetPath := path.Join(resolvedParent, base)
-	if err := root.RemoveAll(targetPath); err != nil {
+	err = root.RemoveAll(targetPath)
+	if err != nil {
 		return fmt.Errorf("remove %q: %w", logicalPath, err)
 	}
 	return nil
@@ -356,7 +379,8 @@ func listNamesInternal(ctx context.Context, root *os.Root, resolvedPath, logical
 
 	names := make([]string, 0, directoryReadBatchSize)
 	for {
-		if err := ctx.Err(); err != nil {
+		err = ctx.Err()
+		if err != nil {
 			return nil, err
 		}
 		entries, readErr := directory.ReadDir(directoryReadBatchSize)

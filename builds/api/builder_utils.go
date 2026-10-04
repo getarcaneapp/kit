@@ -7,8 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"go.getarcane.app/builds/types"
 	"go.getarcane.app/kit/pkg/utils"
+
+	"go.getarcane.app/builds/types"
 )
 
 func normalizeBuildRequestInternal(req types.BuildRequest, providerName string) types.BuildRequest {

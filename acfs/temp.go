@@ -42,7 +42,8 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 	if err != nil {
 		return "", err
 	}
-	if err := rejectReservedPathInternal(relativeDir); err != nil {
+	err = rejectReservedPathInternal(relativeDir)
+	if err != nil {
 		return "", err
 	}
 
@@ -59,11 +60,12 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 
 	var randomBytes [8]byte
 	for range temporaryDirectoryAttempts {
-		if _, err := rand.Read(randomBytes[:]); err != nil {
+		_, err = rand.Read(randomBytes[:])
+		if err != nil {
 			return "", fmt.Errorf("generate temporary directory name: %w", err)
 		}
 		candidate := relativePathInternal([]string{resolvedDir, prefix + hex.EncodeToString(randomBytes[:]) + suffix})
-		err := root.Mkdir(candidate, temporaryDirectoryMode)
+		err = root.Mkdir(candidate, temporaryDirectoryMode)
 		if err == nil {
 			return kitfs.LogicalPath(candidate), nil
 		}

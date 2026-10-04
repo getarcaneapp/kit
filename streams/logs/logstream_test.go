@@ -1,11 +1,9 @@
 package logs
 
 import (
-	"context"
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"reflect"
 	"sync"
@@ -15,18 +13,18 @@ import (
 
 func TestSlogHandlerNormalizesGroupedAttrsInternal(t *testing.T) {
 	b := New(10)
-	h := NewSlogHandler(slog.NewTextHandler(io.Discard, nil), b)
+	h := NewSlogHandler(slog.DiscardHandler, b)
 	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelInfo, "Incoming request", 0)
 	record.AddAttrs(
 		slog.Group("request",
-			slog.String("method", "GET"),
-			slog.String("path", "/api/diagnostics/logs"),
-			slog.Group("headers", slog.String("accept", "application/json")),
+			"method", "GET",
+			"path", "/api/diagnostics/logs",
+			slog.Group("headers", "accept", "application/json"),
 		),
 		slog.Any("ids", []string{"one", "two"}),
 	)
 
-	if err := h.Handle(context.Background(), record); err != nil {
+	if err := h.Handle(t.Context(), record); err != nil {
 		t.Fatalf("Handle failed: %v", err)
 	}
 
@@ -52,11 +50,11 @@ func TestSlogHandlerNormalizesGroupedAttrsInternal(t *testing.T) {
 
 func TestSlogHandlerNormalizesErrorsInternal(t *testing.T) {
 	b := New(10)
-	h := NewSlogHandler(slog.NewTextHandler(io.Discard, nil), b)
+	h := NewSlogHandler(slog.DiscardHandler, b)
 	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelError, "request failed", 0)
 	record.AddAttrs(slog.Any("error", fmt.Errorf("request: %w", errors.New("connection refused"))))
 
-	if err := h.Handle(context.Background(), record); err != nil {
+	if err := h.Handle(t.Context(), record); err != nil {
 		t.Fatalf("Handle failed: %v", err)
 	}
 
@@ -74,7 +72,7 @@ func TestSlogHandlerNormalizesErrorsInternal(t *testing.T) {
 
 func TestSlogHandlerPreservesBoundAttrsAndGroups(t *testing.T) {
 	b := New(10)
-	h := NewSlogHandler(slog.NewTextHandler(io.Discard, nil), b).
+	h := NewSlogHandler(slog.DiscardHandler, b).
 		WithAttrs([]slog.Attr{slog.String("component", "diagnostics")}).
 		WithGroup("request").
 		WithAttrs([]slog.Attr{slog.String("method", "GET")})
@@ -82,7 +80,7 @@ func TestSlogHandlerPreservesBoundAttrsAndGroups(t *testing.T) {
 	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelInfo, "served", 0)
 	record.AddAttrs(slog.String("path", "/logs"))
 
-	if err := h.Handle(context.Background(), record); err != nil {
+	if err := h.Handle(t.Context(), record); err != nil {
 		t.Fatalf("Handle failed: %v", err)
 	}
 

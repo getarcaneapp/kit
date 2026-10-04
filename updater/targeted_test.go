@@ -15,6 +15,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
+
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/labels"
 	updatetypes "go.getarcane.app/updater/types"
@@ -28,7 +29,10 @@ type targetedDockerInternal struct {
 }
 
 func newTargetedContainerInternal(id, constraint string) container.InspectResponse {
-	return container.InspectResponse{ID: id, Name: "/" + id, Image: "sha256:shared", State: &container.State{Running: true}, Config: &container.Config{Image: "app:1.0.0", Labels: map[string]string{labels.LabelUpdateStrategy: "tag", labels.LabelUpdateConstraint: constraint}}}
+	return container.InspectResponse{
+		ID: id, Name: "/" + id, Image: "sha256:shared", State: &container.State{Running: true},
+		Config: &container.Config{Image: "app:1.0.0", Labels: map[string]string{labels.LabelUpdateStrategy: "tag", labels.LabelUpdateConstraint: constraint}},
+	}
 }
 
 func targetedPendingInternal(id, target string) ImageUpdateRecord {
@@ -99,19 +103,22 @@ func TestApplyPendingTargetedSharedImageInternal(t *testing.T) {
 		{name: "dry run", secondTarget: "2.1.0", secondConstraint: "2.x", dryRun: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			fixture := &targetedDockerInternal{containers: []container.InspectResponse{newTargetedContainerInternal("one", "1.x"), newTargetedContainerInternal("two", tt.secondConstraint)}, created: map[string]string{}}
+			fixture := &targetedDockerInternal{
+				containers: []container.InspectResponse{newTargetedContainerInternal("one", "1.x"), newTargetedContainerInternal("two", tt.secondConstraint)},
+				created:    map[string]string{},
+			}
 			dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
 			store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", tt.secondTarget))
 			puller := &fakePuller{}
 			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
-			result, err := service.ApplyPending(context.Background(), Options{DryRun: tt.dryRun})
+			result, err := service.ApplyPending(t.Context(), Options{DryRun: tt.dryRun})
 			if err != nil || result.Failed != 0 {
 				t.Fatalf("ApplyPending = %#v, %v", result, err)
 			}
 			if len(puller.pulled) != tt.wantPulls {
 				t.Fatalf("pulls = %#v", puller.pulled)
 			}
-			pending, err := store.PendingImageUpdates(context.Background())
+			pending, err := store.PendingImageUpdates(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -163,11 +170,11 @@ func TestApplyPendingTargetedRetainsRejectedInternal(t *testing.T) {
 				puller.err = errors.New("registry unavailable")
 			}
 			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
-			result, err := service.ApplyPending(context.Background(), Options{Force: true})
+			result, err := service.ApplyPending(t.Context(), Options{Force: true})
 			if err != nil {
 				t.Fatal(err)
 			}
-			pending, err := store.PendingImageUpdates(context.Background())
+			pending, err := store.PendingImageUpdates(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -230,8 +237,8 @@ func TestApplyPendingTargetedComposeGroupsInternal(t *testing.T) {
 			store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", "1.3.0"))
 			puller := &fakePuller{}
 			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, ProjectUpdater: adapter})
-			result, err := service.ApplyPending(context.Background(), Options{})
-			pending, storeErr := store.PendingImageUpdates(context.Background())
+			result, err := service.ApplyPending(t.Context(), Options{})
+			pending, storeErr := store.PendingImageUpdates(t.Context())
 			if storeErr != nil {
 				t.Fatal(storeErr)
 			}
@@ -269,11 +276,11 @@ func TestApplyPendingTargetedScopedClearingInternal(t *testing.T) {
 	store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", "1.2.0"), targetedPendingInternal("missing", "1.2.0"))
 	puller := &fakePuller{}
 	service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
-	result, err := service.ApplyPending(context.Background(), Options{})
+	result, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, err := store.PendingImageUpdates(context.Background())
+	pending, err := store.PendingImageUpdates(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,12 +318,17 @@ func TestApplyPendingTargetedFailedComposeDependencyRetainedInternal(t *testing.
 	dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
 	adapter := &targetedComposeAdapterInternal{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}, fixture: fixture}
 	store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", "1.3.0"))
-	service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: selectiveTargetPullerInternal{failedRef: "docker.io/library/app:1.3.0"}, ProjectUpdater: adapter})
-	result, err := service.ApplyPending(context.Background(), Options{})
+	service := newService(Config{
+		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
+		PendingStore:         store,
+		ImagePuller:          selectiveTargetPullerInternal{failedRef: "docker.io/library/app:1.3.0"},
+		ProjectUpdater:       adapter,
+	})
+	result, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, err := store.PendingImageUpdates(context.Background())
+	pending, err := store.PendingImageUpdates(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,18 +375,18 @@ func TestApplyPendingTargetedExcludedContainersInternal(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() {
-				if err := dockerClient.Close(); err != nil {
-					t.Error(err)
+				if closeErr := dockerClient.Close(); closeErr != nil {
+					t.Error(closeErr)
 				}
 			}()
 			store := NewMemoryPendingStore(targetedPendingInternal(name, "1.2.0"))
 			puller := &fakePuller{}
 			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, Settings: settings})
-			result, err := service.ApplyPending(context.Background(), Options{Force: true, IgnoreSettingsExclusions: true})
+			result, err := service.ApplyPending(t.Context(), Options{Force: true, IgnoreSettingsExclusions: true})
 			if err != nil {
 				t.Fatal(err)
 			}
-			pending, err := store.PendingImageUpdates(context.Background())
+			pending, err := store.PendingImageUpdates(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}

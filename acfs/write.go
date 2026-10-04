@@ -48,7 +48,8 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 	if err != nil {
 		return 0, err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return 0, err
 	}
 	if relativePath == "." {
@@ -85,7 +86,8 @@ func Write(ctx context.Context, rootPath, logicalPath string, data []byte, optio
 	if err != nil {
 		return err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return err
 	}
 	if relativePath == "." {
@@ -101,7 +103,8 @@ func Write(ctx context.Context, rootPath, logicalPath string, data []byte, optio
 		return err
 	}
 	targetPath := path.Join(parent, base)
-	if err := rejectReservedPathInternal(targetPath); err != nil {
+	err = rejectReservedPathInternal(targetPath)
+	if err != nil {
 		return err
 	}
 	if options.InPlace {
@@ -127,7 +130,8 @@ func WriteAt(ctx context.Context, rootPath, logicalPath string, offset int64, da
 	if err != nil {
 		return err
 	}
-	if err := rejectReservedPathInternal(relativePath); err != nil {
+	err = rejectReservedPathInternal(relativePath)
+	if err != nil {
 		return err
 	}
 	if relativePath == "." {
@@ -159,7 +163,8 @@ func WriteAt(ctx context.Context, rootPath, logicalPath string, offset int64, da
 		return ErrNotFile
 	}
 
-	if _, err := file.WriteAt(data, offset); err != nil {
+	_, err = file.WriteAt(data, offset)
+	if err != nil {
 		return fmt.Errorf("write %q at offset %d: %w", logicalPath, offset, err)
 	}
 	return nil
@@ -221,9 +226,9 @@ func writeFileInPlaceInternal(ctx context.Context, root *os.Root, targetPath str
 	case !info.Mode().IsRegular():
 		return ErrNotFile
 	default:
-		existing, err := root.ReadFile(targetPath)
-		if err != nil {
-			return fmt.Errorf("read %q: %w", kitfs.LogicalPath(targetPath), err)
+		existing, readErr := root.ReadFile(targetPath)
+		if readErr != nil {
+			return fmt.Errorf("read %q: %w", kitfs.LogicalPath(targetPath), readErr)
 		}
 		identical = bytes.Equal(existing, data)
 		if identical && info.Mode()&chmodModeMask == mode {
@@ -250,19 +255,23 @@ func writeFileInPlaceInternal(ctx context.Context, root *os.Root, targetPath str
 	if !opened.Mode().IsRegular() || !live.Mode().IsRegular() || !os.SameFile(opened, live) || (info != nil && !os.SameFile(info, opened)) {
 		return fmt.Errorf("%w: destination changed before writing", ErrNotFile)
 	}
-	if err := ctx.Err(); err != nil {
+	err = ctx.Err()
+	if err != nil {
 		return err
 	}
 	if !identical {
-		if err := file.Truncate(0); err != nil {
+		err = file.Truncate(0)
+		if err != nil {
 			return fmt.Errorf("truncate %q: %w", kitfs.LogicalPath(targetPath), err)
 		}
-		if _, err := file.Write(data); err != nil {
+		_, err = file.Write(data)
+		if err != nil {
 			return fmt.Errorf("write %q: %w", kitfs.LogicalPath(targetPath), err)
 		}
 	}
 	if !identical || opened.Mode()&chmodModeMask != mode {
-		if err := file.Chmod(mode); err != nil {
+		err = file.Chmod(mode)
+		if err != nil {
 			return fmt.Errorf("chmod %q: %w", kitfs.LogicalPath(targetPath), err)
 		}
 	}
@@ -299,16 +308,20 @@ func writeFromRootInternal(ctx context.Context, root *os.Root, logicalPath, targ
 		return written, fmt.Errorf("check input size: %w", extraErr)
 	}
 
-	if err := temporaryFile.Chmod(mode); err != nil {
+	err = temporaryFile.Chmod(mode)
+	if err != nil {
 		return written, fmt.Errorf("chmod temporary file: %w", err)
 	}
-	if err := temporaryFile.Sync(); err != nil {
+	err = temporaryFile.Sync()
+	if err != nil {
 		return written, fmt.Errorf("sync temporary file: %w", err)
 	}
-	if err := temporaryFile.Close(); err != nil {
+	err = temporaryFile.Close()
+	if err != nil {
 		return written, fmt.Errorf("close temporary file: %w", err)
 	}
-	if err := root.Rename(temporaryPath, targetPath); err != nil {
+	err = root.Rename(temporaryPath, targetPath)
+	if err != nil {
 		return written, fmt.Errorf("replace %q: %w", logicalPath, err)
 	}
 

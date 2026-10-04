@@ -1,7 +1,6 @@
 package updater
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
+
 	"go.getarcane.app/updater/labels"
 )
 
@@ -73,7 +73,7 @@ func TestRestartContainersUsingOldImagesRestartsDependenciesInWatchtowerOrder(t 
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 	})
 
-	results, err := service.RestartContainersUsingOldImages(context.Background(), map[string]string{"sha256:old-db": "db:2"}, nil)
+	results, err := service.RestartContainersUsingOldImages(t.Context(), map[string]string{"sha256:old-db": "db:2"}, nil)
 	if err != nil {
 		t.Fatalf("RestartContainersUsingOldImages() error = %v", err)
 	}
@@ -130,7 +130,7 @@ func TestRestartContainersUsingOldImagesLogsCycleFallback(t *testing.T) {
 		Logger:               slog.New(logs),
 	})
 
-	results, err := service.RestartContainersUsingOldImages(context.Background(), map[string]string{
+	results, err := service.RestartContainersUsingOldImages(t.Context(), map[string]string{
 		"sha256:old-a": "a:2",
 		"sha256:old-b": "b:2",
 	}, nil)
@@ -208,7 +208,7 @@ func TestRestartContainersUsingOldImagesRoutesLegacyArcaneServerThroughSelfUpdat
 		LabelPolicy:          DefaultLabelPolicy(),
 	})
 
-	results, err := service.RestartContainersUsingOldImages(context.Background(), map[string]string{"sha256:old-arcane": "ghcr.io/getarcaneapp/arcane:2"}, nil)
+	results, err := service.RestartContainersUsingOldImages(t.Context(), map[string]string{"sha256:old-arcane": "ghcr.io/getarcaneapp/arcane:2"}, nil)
 	if err != nil {
 		t.Fatalf("RestartContainersUsingOldImages() error = %v", err)
 	}
@@ -288,7 +288,7 @@ func TestRestartContainersUsingOldImagesSelfContainerIDFiresAfterStandalone(t *t
 		LabelPolicy:          DefaultLabelPolicy(),
 	})
 
-	results, err := service.RestartContainersUsingOldImages(context.Background(), map[string]string{
+	results, err := service.RestartContainersUsingOldImages(t.Context(), map[string]string{
 		"sha256:old-app":    "app:2",
 		"sha256:old-arcane": "ghcr.io/getarcaneapp/arcane:2",
 	}, nil)
@@ -367,7 +367,7 @@ func TestRestartContainersUsingOldImagesVerifiesComposeServiceAfterProjectError(
 		ProjectUpdater:       projectUpdater,
 	})
 
-	results, err := service.RestartContainersUsingOldImages(context.Background(), map[string]string{"sha256:old-app": "app:1"}, nil)
+	results, err := service.RestartContainersUsingOldImages(t.Context(), map[string]string{"sha256:old-app": "app:1"}, nil)
 	if err != nil {
 		t.Fatalf("RestartContainersUsingOldImages() error = %v", err)
 	}
@@ -406,7 +406,7 @@ func TestRestartContainersUsingOldImagesOperationTimeoutCancelsSlowStop(t *testi
 		OperationTimeout:     10 * time.Millisecond,
 	})
 
-	results, err := service.RestartContainersUsingOldImages(context.Background(), map[string]string{"sha256:old-app": "app:2"}, nil)
+	results, err := service.RestartContainersUsingOldImages(t.Context(), map[string]string{"sha256:old-app": "app:2"}, nil)
 	if err != nil {
 		t.Fatalf("RestartContainersUsingOldImages() error = %v", err)
 	}

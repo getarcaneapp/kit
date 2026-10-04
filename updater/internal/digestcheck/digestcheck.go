@@ -13,6 +13,7 @@ import (
 
 	"github.com/moby/moby/client"
 	"github.com/samber/hot"
+
 	"go.getarcane.app/updater/digest"
 	"go.getarcane.app/updater/refs"
 )

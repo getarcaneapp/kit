@@ -1,7 +1,6 @@
 package updater
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,7 +29,7 @@ func TestDefaultRegistryDigestResolverFetchesDigest(t *testing.T) {
 	}
 	resolver := newRegistryDigestResolver(server.Client())
 
-	got, err := resolver.ImageDigest(context.Background(), serverURL.Host+"/owner/app:1.0")
+	got, err := resolver.ImageDigest(t.Context(), serverURL.Host+"/owner/app:1.0")
 	if err != nil {
 		t.Fatalf("ImageDigest() error = %v", err)
 	}
@@ -57,11 +56,11 @@ func TestDefaultDockerClientProviderCachesAndRecreatesAfterPingFailure(t *testin
 	defer server.Close()
 
 	provider := NewDockerClientProvider(client.WithHost(server.URL), client.WithAPIVersion("1.41"))
-	first, err := provider.DockerClient(context.Background())
+	first, err := provider.DockerClient(t.Context())
 	if err != nil {
 		t.Fatalf("first DockerClient() error = %v", err)
 	}
-	second, err := provider.DockerClient(context.Background())
+	second, err := provider.DockerClient(t.Context())
 	if err != nil {
 		t.Fatalf("second DockerClient() error = %v", err)
 	}
@@ -70,18 +69,18 @@ func TestDefaultDockerClientProviderCachesAndRecreatesAfterPingFailure(t *testin
 	}
 
 	failPing = true
-	if _, err := provider.DockerClient(context.Background()); err == nil {
+	if _, err = provider.DockerClient(t.Context()); err == nil {
 		t.Fatal("DockerClient() after ping failure returned nil error")
 	}
 	failPing = false
-	third, err := provider.DockerClient(context.Background())
+	third, err := provider.DockerClient(t.Context())
 	if err != nil {
 		t.Fatalf("third DockerClient() error = %v", err)
 	}
 	if third == first {
 		t.Fatal("DockerClient() reused client evicted after ping failure")
 	}
-	if err := provider.Close(); err != nil {
+	if err = provider.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 	if pingCalls < 4 {
@@ -89,9 +88,9 @@ func TestDefaultDockerClientProviderCachesAndRecreatesAfterPingFailure(t *testin
 	}
 }
 
-func writeManifestHeadersForTest(w http.ResponseWriter, digest string) {
+func writeManifestHeadersForTest(w http.ResponseWriter, manifestDigest string) {
 	w.Header().Set("Content-Type", "application/vnd.oci.image.index.v1+json")
 	w.Header().Set("Content-Length", "2")
-	w.Header().Set("Docker-Content-Digest", digest)
+	w.Header().Set("Docker-Content-Digest", manifestDigest)
 	w.WriteHeader(http.StatusOK)
 }

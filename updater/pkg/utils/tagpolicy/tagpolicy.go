@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+
 	"go.getarcane.app/updater/refs"
 	"go.getarcane.app/updater/types"
 )
@@ -46,7 +47,8 @@ func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
 		}
 	}
 	policy.Strategy = "tag"
-	if _, err := Select(parsed.Tag, nil, policy); err != nil {
+	_, err = Select(parsed.Tag, nil, policy)
+	if err != nil {
 		return policy, err
 	}
 	return policy, nil
@@ -69,8 +71,8 @@ func Select(current string, tags []string, policy types.Policy) (string, error) 
 	selected := current
 	best := currentVersion
 	for _, tag := range tags {
-		version, err := parseInternal(tag, pattern)
-		if err != nil || !version.GreaterThan(currentVersion) {
+		version, parseErr := parseInternal(tag, pattern)
+		if parseErr != nil || !version.GreaterThan(currentVersion) {
 			continue
 		}
 		if constraint != nil {

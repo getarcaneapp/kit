@@ -10,6 +10,7 @@ import (
 
 	buildkit "github.com/moby/buildkit/client"
 	"github.com/tonistiigi/fsutil"
+
 	dockerutils "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
 )
@@ -202,10 +203,10 @@ func (b *Service) buildSolveOptInternal(ctx context.Context, req types.BuildRequ
 			Attrs: map[string]string{"name": strings.Join(req.Tags, ",")},
 		})
 	} else if req.Load {
-		exportEntry, errCh, err := b.buildLoadExportInternal(ctx, req.Tags)
-		if err != nil {
+		exportEntry, errCh, loadExportErr := b.buildLoadExportInternal(ctx, req.Tags)
+		if loadExportErr != nil {
 			cleanup()
-			return buildkit.SolveOpt{}, nil, nil, err
+			return buildkit.SolveOpt{}, nil, nil, loadExportErr
 		}
 		loadErrCh = errCh
 		exports = append(exports, exportEntry)
@@ -231,7 +232,7 @@ func (b *Service) buildLoadExportInternal(ctx context.Context, tags []string) (b
 	pr, pw := io.Pipe()
 	loadErrCh := make(chan error, 1)
 	go func() {
-		defer pr.Close()
+		defer func() { _ = pr.Close() }()
 		loadResp, loadErr := dockerClient.ImageLoad(ctx, pr)
 		if loadErr != nil {
 			loadErrCh <- loadErr

@@ -117,13 +117,14 @@ func TestHasRules(t *testing.T) {
 }
 
 func TestNormalizeJSON(t *testing.T) {
-	data := []byte(`{"name":" e\u0301 ","unicode":" e\u0301 ","trim":" e\u0301 ","optional":null,"secret":" e\u0301 ","map":{" e\u0301 ":" e\u0301 "},"children":[{"name":" child "}],"large":900719925474099312345,"decimal":1.2300e+99}`)
+	data := []byte(`{"name":" e\u0301 ","unicode":" e\u0301 ","trim":" e\u0301 ","optional":null,"secret":" e\u0301 ",` +
+		`"map":{" e\u0301 ":" e\u0301 "},"children":[{"name":" child "}],"large":900719925474099312345,"decimal":1.2300e+99}`)
 	result, err := NormalizeJSON(data, reflect.TypeFor[sample]())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var value sample
-	if err := json.Unmarshal(result, &value); err != nil {
+	if err = json.Unmarshal(result, &value); err != nil {
 		t.Fatal(err)
 	}
 	if value.Name != "é" || value.Unicode != " é " || value.Trim != "e\u0301" || value.Optional != nil || value.Children[0].Name != "child" {
@@ -133,12 +134,15 @@ func TestNormalizeJSON(t *testing.T) {
 		t.Fatal("untagged values changed")
 	}
 	var fields map[string]jsontext.Value
-	if err := json.Unmarshal(result, &fields); err != nil {
+	if err = json.Unmarshal(result, &fields); err != nil {
 		t.Fatal(err)
 	}
 	if string(fields["large"]) != "900719925474099312345" || string(fields["decimal"]) != "1.2300e+99" {
 		t.Fatal("numbers changed")
 	}
+}
+
+func TestNormalizeJSONUnchanged(t *testing.T) {
 	for _, test := range []struct{ name, input string }{
 		{"omitted", `{}`}, {"empty", `{"optional":""}`}, {"wrong type", `{"name":42}`}, {"null", `null`},
 	} {
@@ -161,6 +165,9 @@ func TestNormalizeJSON(t *testing.T) {
 			t.Fatalf("array %s became %s", input, got)
 		}
 	}
+}
+
+func TestNormalizeJSONMalformed(t *testing.T) {
 	for _, input := range []string{`{"name":`, `{"name":"a","name":"b"}`, `{} {}`, `{"unknown":{"duplicate":1,"duplicate":2}}`} {
 		if _, err := NormalizeJSON([]byte(input), reflect.TypeFor[sample]()); err == nil {
 			t.Fatalf("accepted malformed JSON %s", input)
@@ -168,7 +175,7 @@ func TestNormalizeJSON(t *testing.T) {
 	}
 }
 
-func TestNormalizeNestedAndConcurrent(t *testing.T) {
+func TestNormalizeNested(t *testing.T) {
 	type embedded struct {
 		Value string `json:"value" trim:"true"`
 	}
@@ -190,6 +197,9 @@ func TestNormalizeNestedAndConcurrent(t *testing.T) {
 	if strings.Contains(string(got), " a ") || strings.Contains(string(got), " b ") {
 		t.Fatalf("not normalized: %s", got)
 	}
+}
+
+func TestNormalizeConcurrent(t *testing.T) {
 	var workers sync.WaitGroup
 	for range 20 {
 		workers.Go(func() {
@@ -302,7 +312,7 @@ func TestNormalizeLengthConstraints(t *testing.T) {
 			Name string `trim:"true" minLength:"2" maxLength:"1"`
 		}](),
 	} {
-		if _, err := HasRules(typ); err == nil {
+		if _, err = HasRules(typ); err == nil {
 			t.Fatal("accepted invalid length metadata")
 		}
 	}

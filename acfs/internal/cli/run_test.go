@@ -17,14 +17,14 @@ import (
 
 var (
 	modTimePattern         = regexp.MustCompile(`"modTime":"[^"]+"`)
-	modTimeUnixNanoPattern = regexp.MustCompile(`"modTimeUnixNano":[0-9]+`)
+	modTimeUnixNanoPattern = regexp.MustCompile(`"modTimeUnixNano":\d+`)
 )
 
 func runCommand(t *testing.T, args []string, stdin string) (int, []byte, string) {
 	t.Helper()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := Run(context.Background(), args, strings.NewReader(stdin), &stdout, &stderr)
+	exitCode := Run(t.Context(), args, strings.NewReader(stdin), &stdout, &stderr)
 	return exitCode, stdout.Bytes(), stderr.String()
 }
 
@@ -248,7 +248,8 @@ func TestBoundedWalkAndApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(staging, "manifest.json"), encodedManifest, 0o600); err != nil {
+	err = os.WriteFile(filepath.Join(staging, "manifest.json"), encodedManifest, 0o600)
+	if err != nil {
 		t.Fatal(err)
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{
@@ -258,7 +259,8 @@ func TestBoundedWalkAndApply(t *testing.T) {
 		t.Fatalf("apply = (exit %d, stdout %q, stderr %q)", exitCode, stdout, stderr)
 	}
 	var response acfstypes.ApplyResponse
-	if err := json.Unmarshal(stdout, &response); err != nil {
+	err = json.Unmarshal(stdout, &response)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if response.Version != acfstypes.ProtocolVersion || response.Applied != 1 {
@@ -274,7 +276,7 @@ func TestListFailureKeepsStdoutCleanAndRemovesSpool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
