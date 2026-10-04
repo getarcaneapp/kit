@@ -1,3 +1,13 @@
+## streams/v0.4.5
+
+### Bug fixes
+
+* cleanup un-needed functions([0219021](https://github.com/getarcaneapp/kit/commit/021902153905003018894bc13b4cfa47491d4ec7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/streams/v0.4.4...streams/v0.4.5
+
 ## streams/v0.4.4
 
 ### Bug fixes
