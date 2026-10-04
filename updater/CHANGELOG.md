@@ -1,3 +1,13 @@
+## updater/v0.11.3
+
+### Bug fixes
+
+* cleanup un-needed functions([0219021](https://github.com/getarcaneapp/kit/commit/021902153905003018894bc13b4cfa47491d4ec7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.2...updater/v0.11.3
+
 ## updater/v0.11.2
 
 ### Bug fixes
