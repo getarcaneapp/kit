@@ -1,3 +1,13 @@
+## updater/v0.11.4
+
+### Bug fixes
+
+* extend self updated type with PullImageRef([e448adc](https://github.com/getarcaneapp/kit/commit/e448adc15d80402f79e7d4b2f83e52f08773ce27) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.3...updater/v0.11.4
+
 ## updater/v0.11.3
 
 ### Bug fixes

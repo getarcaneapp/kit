@@ -14,7 +14,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/samber/hot v0.13.1
 	go.getarcane.app/docker/compat v0.1.2
-	go.getarcane.app/kit v0.3.3
+	go.getarcane.app/kit v0.4.0
 )
 
 require (
