@@ -149,6 +149,10 @@ type SelfUpdateTarget struct {
 	// NewImageRef is the resolved image reference the self-updater should
 	// upgrade the container to. Empty when the updater could not resolve one.
 	NewImageRef string
+	// PullImageRef is an immutable reference the host froze the update to.
+	// The container must still be recreated as NewImageRef. Empty when the
+	// host pulls NewImageRef directly.
+	PullImageRef string
 }
 
 // Notification describes a successful container update notification.
