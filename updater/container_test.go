@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/moby/moby/api/types/network"
 
 	"go.getarcane.app/updater/labels"
+	"go.getarcane.app/updater/refs"
 )
 
 func TestClearPendingRecord(t *testing.T) {
@@ -492,7 +494,9 @@ type tagSelectionScenarioInternal struct {
 	name                string
 	dry, force, self    bool
 	current, constraint string
-	disabled, compose   bool
+	// repository is the configured spelling of the current app:1.0.0 image.
+	repository        string
+	disabled, compose bool
 	// excluded is a settings exclusion matching the container by name or ID;
 	// override sets Options.IgnoreSettingsExclusions.
 	excluded        string
@@ -508,6 +512,8 @@ func TestUpdateContainerTagSelectionInternal(t *testing.T) {
 		{name: "same digest still changes standalone reference"},
 		{name: "dry run selects target", dry: true},
 		{name: "self receives new tag", self: true},
+		{name: "explicit docker hub spelling kept", repository: "docker.io/library/app"},
+		{name: "custom registry spelling kept", repository: "ghcr.io/acme/app"},
 		{name: "force respects constraint", force: true, constraint: "1.0.x"},
 		{name: "force rejects invalid constraint", force: true, constraint: "bad", wantFailure: true},
 		{name: "disabled force", force: true, disabled: true, wantSkipped: true},
@@ -545,7 +551,7 @@ type tagSelectionDockerInternal struct {
 func newTagSelectionDockerInternal(scenario tagSelectionScenarioInternal) *tagSelectionDockerInternal {
 	current := scenario.current
 	if current == "" {
-		current = "app:1.0.0"
+		current = cmp.Or(scenario.repository, "app") + ":1.0.0"
 	}
 	values := map[string]string{labels.LabelUpdateStrategy: "tag"}
 	if scenario.unchangedDigest {
@@ -647,10 +653,11 @@ func runTagSelectionScenarioInternal(t *testing.T, scenario tagSelectionScenario
 
 func assertTagSelectionUpdatedInternal(t *testing.T, scenario tagSelectionScenarioInternal, result *Result, docker *tagSelectionDockerInternal, puller *fakePuller, self *fakeSelfUpdater) {
 	t.Helper()
-	want := "docker.io/library/app:1.1.0"
+	wantCreated := cmp.Or(scenario.repository, "app") + ":1.1.0"
 	if scenario.constraint != "" {
-		want = "docker.io/library/app:1.0.0"
+		wantCreated = cmp.Or(scenario.repository, "app") + ":1.0.0"
 	}
+	want := refs.NormalizeImageUpdateRef(wantCreated)
 	if scenario.dry {
 		if len(result.Items) != 1 || result.Items[0].NewImage != want || !result.Items[0].UpdateAvailable || docker.mutations != 0 || len(puller.pulled) != 0 {
 			t.Fatalf("bad preview: %+v", result)
@@ -664,7 +671,7 @@ func assertTagSelectionUpdatedInternal(t *testing.T, scenario tagSelectionScenar
 		if len(self.targets) != 1 || self.targets[0].NewImageRef != want || docker.mutations != 0 {
 			t.Fatalf("bad self targets %+v", self.targets)
 		}
-	} else if len(docker.created) != 1 || docker.created[0] != want {
+	} else if len(docker.created) != 1 || docker.created[0] != wantCreated {
 		t.Fatalf("created %v", docker.created)
 	}
 }

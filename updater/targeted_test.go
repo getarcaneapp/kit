@@ -107,6 +107,7 @@ func TestApplyPendingTargetedSharedImageInternal(t *testing.T) {
 				containers: []container.InspectResponse{newTargetedContainerInternal("one", "1.x"), newTargetedContainerInternal("two", tt.secondConstraint)},
 				created:    map[string]string{},
 			}
+			fixture.containers[1].Config.Image = "docker.io/library/app:1.0.0"
 			dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
 			store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", tt.secondTarget))
 			puller := &fakePuller{}
@@ -130,7 +131,7 @@ func TestApplyPendingTargetedSharedImageInternal(t *testing.T) {
 				}
 				return
 			}
-			if len(pending) != 0 || len(fixture.created) != 2 || fixture.created["one"] != "docker.io/library/app:1.2.0" || fixture.created["two"] != "docker.io/library/app:"+tt.secondTarget {
+			if len(pending) != 0 || len(fixture.created) != 2 || fixture.created["one"] != "app:1.2.0" || fixture.created["two"] != "docker.io/library/app:"+tt.secondTarget {
 				t.Fatalf("pending=%d created=%#v result=%#v", len(pending), fixture.created, result)
 			}
 		})
@@ -453,7 +454,7 @@ func TestApplyPendingAutomaticTagPolicyInternal(t *testing.T) {
 				}
 				return
 			}
-			if result.Failed != 0 || len(puller.pulled) != 1 || len(pending) != 0 || fixture.created["one"] != "docker.io/library/app:1.2.0" {
+			if result.Failed != 0 || len(puller.pulled) != 1 || len(pending) != 0 || fixture.created["one"] != "app:1.2.0" {
 				t.Fatalf("automatic update failed: result %+v, created %v, pending %v", result, fixture.created, pending)
 			}
 		})

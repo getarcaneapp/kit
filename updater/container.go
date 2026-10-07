@@ -233,7 +233,12 @@ func (s *Service) updateStandaloneContainer(ctx context.Context, cnt container.S
 	return s.createStartOrRollback(ctx, dockerClient, cnt, inspect, newRef)
 }
 
+// createStartOrRollback recreates the container as newRef, spelled like its
+// configured image so a short Compose or run reference is not qualified.
 func (s *Service) createStartOrRollback(ctx context.Context, dockerClient *client.Client, cnt container.Summary, inspect container.InspectResponse, newRef string) error {
+	if inspect.Config != nil {
+		newRef = refs.PreserveConfiguredRef(inspect.Config.Image, newRef)
+	}
 	createdID, err := s.createAndStartStandaloneContainer(ctx, dockerClient, cnt, inspect, newRef)
 	if err == nil {
 		return nil

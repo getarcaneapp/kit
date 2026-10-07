@@ -73,6 +73,35 @@ func NormalizeImageUpdateRefMapKeys(refToValue map[string]string) map[string]str
 	return out
 }
 
+// PreserveConfiguredRef returns targetRef spelled like configuredRef. An
+// equivalent target returns configuredRef itself; a target in the same
+// repository keeps the configured repository and takes the target's tag.
+// Image IDs, digest-pinned targets, and other repositories return targetRef
+// unchanged.
+func PreserveConfiguredRef(configuredRef, targetRef string) string {
+	configuredRef = strings.TrimSpace(configuredRef)
+	targetRef = strings.TrimSpace(targetRef)
+	if configuredRef == "" || IsImageIDLikeReference(targetRef) || IsDigestPinnedReference(targetRef) {
+		return targetRef
+	}
+	configured, err := NormalizeReference(configuredRef)
+	if err != nil {
+		return targetRef
+	}
+	target, err := NormalizeReference(targetRef)
+	if err != nil || configured.RegistryHost != target.RegistryHost || configured.Repository != target.Repository {
+		return targetRef
+	}
+	if configured.Tag == target.Tag && !IsDigestPinnedReference(configuredRef) {
+		return configuredRef
+	}
+	name, _, _ := strings.Cut(configuredRef, "@")
+	if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
+		name = name[:i]
+	}
+	return name + ":" + target.Tag
+}
+
 // IsImageIDLikeReference reports whether imageRef is a Docker image ID rather than a pullable tag.
 func IsImageIDLikeReference(imageRef string) bool {
 	imageRef = strings.ToLower(strings.TrimSpace(imageRef))
