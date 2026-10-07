@@ -1,3 +1,13 @@
+## updater/v0.11.5
+
+### Bug fixes
+
+* preserve configured image reference when recreating containers([afa3d1b](https://github.com/getarcaneapp/kit/commit/afa3d1b7ac2927cc6b816f7afee0405b1fa7359a) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.4...updater/v0.11.5
+
 ## updater/v0.11.4
 
 ### Bug fixes
