@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"slices"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -20,7 +20,7 @@ import (
 // CheckImageUpdate discovers an image update without pulling or changing state.
 // CurrentDigest should describe the image in use, not a separately cached tag.
 func (s *Service) CheckImageUpdate(ctx context.Context, request types.CheckRequest) (types.CheckResult, error) {
-	result, err := s.selectImageTagInternal(ctx, request.ImageRef, request.Policy)
+	result, err := s.selectImageTag(ctx, request.ImageRef, request.Policy)
 	if err != nil || result.Reason != "" || result.UpdateAvailable {
 		return result, err
 	}
@@ -57,7 +57,7 @@ func (s *Service) CheckImageUpdate(ctx context.Context, request types.CheckReque
 	return result, nil
 }
 
-func (s *Service) selectImageTagInternal(ctx context.Context, imageRef string, policy types.Policy) (types.CheckResult, error) {
+func (s *Service) selectImageTag(ctx context.Context, imageRef string, policy types.Policy) (types.CheckResult, error) {
 	result := types.CheckResult{CurrentRef: imageRef, TargetRef: imageRef}
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -121,7 +121,7 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 	if result.ContainerID == "" {
 		result.ContainerID = containerID
 	}
-	reason, err := s.containerEligibilityInternal(ctx, inspect, enforceSettingsExclusions)
+	reason, err := s.containerEligibility(ctx, inspect, enforceSettingsExclusions)
 	if err != nil {
 		return result, err
 	}
@@ -129,14 +129,12 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 		result.Reason = reason
 		return result, nil
 	}
-	imageRef := inspect.Config.Image
-	result, err = s.selectImageTagInternal(ctx, imageRef, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
+	result, err = s.selectImageTag(ctx, inspect.Config.Image, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
 	result.ContainerID = inspect.ID
 	if err != nil || result.Reason != "" || result.UpdateAvailable {
 		return result, err
 	}
-	// Compare the running image, even if the configured tag is already cached at
-	// a newer digest in the daemon.
+	// Compare the running image, even if the configured tag is cached at a newer digest.
 	image, err := dockerClient.ImageInspect(ctx, inspect.Image)
 	if err != nil {
 		return result, err
@@ -152,25 +150,22 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 	if err != nil {
 		return result, err
 	}
-	result.CurrentDigest = image.ID
+	localDigests := digestcheck.RepoDigests(image.RepoDigests, result.CurrentRef)
 	result.UpdateType = string(UpdateTypeDigest)
-	result.UpdateAvailable = true
-	for _, repoDigest := range image.RepoDigests {
-		if local, ok := digest.FromReferenceSuffix(repoDigest); ok {
-			result.CurrentDigest = local
-			if local == result.TargetDigest {
-				result.UpdateAvailable = false
-				break
-			}
-		}
+	result.UpdateAvailable = !slices.Contains(localDigests, result.TargetDigest)
+	result.CurrentDigest = image.ID
+	switch {
+	case !result.UpdateAvailable:
+		result.CurrentDigest = result.TargetDigest
+	case len(localDigests) > 0:
+		result.CurrentDigest = localDigests[0]
 	}
 	return result, nil
 }
 
-// containerEligibilityInternal reports why a container cannot be updated, or
-// "" when it can. The label, Swarm, and configuration checks always apply;
-// policy decides whether the settings exclusion list is consulted too.
-func (s *Service) containerEligibilityInternal(ctx context.Context, inspect container.InspectResponse, policy exclusionPolicy) (string, error) {
+// containerEligibility reports why a container cannot be updated, or "" when it can; policy decides
+// whether the settings exclusions apply on top of the label, Swarm, and config checks.
+func (s *Service) containerEligibility(ctx context.Context, inspect container.InspectResponse, policy exclusionPolicy) (string, error) {
 	if inspect.Config == nil {
 		return "container config unavailable", nil
 	}
@@ -188,7 +183,7 @@ func (s *Service) containerEligibilityInternal(ctx context.Context, inspect cont
 	if err != nil {
 		return "", err
 	}
-	if excluded[inspect.ID] || excluded[strings.TrimPrefix(inspect.Name, "/")] {
+	if isExcluded(excluded, inspect.ID, inspect.Name) {
 		return "container excluded by settings", nil
 	}
 	return "", nil

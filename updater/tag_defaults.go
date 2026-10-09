@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+
 	"go.getarcane.app/updater/refs"
 	"go.getarcane.app/updater/registry"
 	"go.getarcane.app/updater/types"
@@ -20,9 +22,13 @@ func (l defaultRegistryTagLister) ListTags(ctx context.Context, imageRef string)
 	if err != nil {
 		return nil, err
 	}
-	credential, err := defaultDigestCredentials(ctx, imageRef)
+	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
 	if err != nil {
 		return nil, fmt.Errorf("registry auth: %w", err)
+	}
+	var credential *authn.AuthConfig
+	if ok {
+		credential = &authn.AuthConfig{Username: authConfig.Username, Password: authConfig.Password, IdentityToken: authConfig.IdentityToken, RegistryToken: authConfig.RegistryToken}
 	}
 	return registry.FetchTags(ctx, parsed.RegistryHost, parsed.Repository, credential, l.httpClient)
 }

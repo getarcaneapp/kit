@@ -7,13 +7,11 @@ import (
 	"go.getarcane.app/updater/types"
 )
 
-// Config configures a Service. Every field is optional: New fills in a
-// Docker-backed default for each port that has one, and leaves the rest nil —
-// a nil optional port simply disables the behavior it provides.
+// Config configures a Service. Every field is optional: New fills in a Docker-backed default for
+// each port that has one, and a nil optional port disables the behavior it provides.
 type Config struct {
-	// DockerClientProvider supplies the Docker client every operation uses.
-	// Defaults to NewDockerClientProvider(), which reads the standard Docker
-	// environment variables.
+	// DockerClientProvider supplies the Docker client every operation uses. Defaults to
+	// NewDockerClientProvider(), which reads the standard Docker environment variables.
 	DockerClientProvider DockerClientProvider
 	// ImagePuller pulls images. Defaults to NewImagePuller(DockerClientProvider).
 	ImagePuller ImagePuller
@@ -26,8 +24,7 @@ type Config struct {
 	// RegistryTagLister discovers version tags. Defaults to Docker-config credentials.
 	RegistryTagLister types.RegistryTagLister
 	// ProjectUpdater updates Docker Compose services. Defaults to
-	// NewDockerComposeProjectUpdater(DockerClientProvider), which shells out to
-	// the docker compose CLI.
+	// NewDockerComposeProjectUpdater(DockerClientProvider), which runs the docker compose CLI.
 	ProjectUpdater ProjectUpdater
 	// LabelPolicy decides which containers the updater may touch. Each nil func
 	// is filled in from DefaultLabelPolicy.
@@ -48,10 +45,8 @@ type Config struct {
 	// images by listing running containers.
 	UsedImageCollector UsedImageCollector
 
-	// SelfContainerID is the ID (or ID prefix) of the container the host
-	// application itself runs in. When set, that container is always routed
-	// through the SelfUpdater even if its labels do not mark it as a
-	// self-update target. Optional.
+	// SelfContainerID is the ID (or ID prefix) of the container the host application runs in.
+	// When set, that container always goes through the SelfUpdater, whatever its labels.
 	SelfContainerID string
 	// OperationTimeout optionally bounds individual Docker mutation operations
 	// and compose project updates. Zero leaves caller context deadlines unchanged.

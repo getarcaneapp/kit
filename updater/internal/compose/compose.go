@@ -2,21 +2,23 @@
 // group containers into projects and services.
 package compose
 
-import (
-	"strings"
-
-	kit "go.getarcane.app/kit/pkg"
-)
+import "strings"
 
 const (
 	// ProjectLabelKey is Docker Compose's project label key.
 	ProjectLabelKey = "com.docker.compose.project"
 	// ServiceLabelKey is Docker Compose's service label key.
 	ServiceLabelKey = "com.docker.compose.service"
-	// WorkingDirLabelKey is Docker Compose's project working directory label key.
+	// WorkingDirLabelKey is Docker Compose's project directory label key.
 	WorkingDirLabelKey = "com.docker.compose.project.working_dir"
-	// ConfigFilesLabelKey is Docker Compose's project config files label key.
+	// ConfigFilesLabelKey is Docker Compose's comma-separated config files label key.
 	ConfigFilesLabelKey = "com.docker.compose.project.config_files"
+	// EnvironmentFileLabelKey is Docker Compose's comma-separated --env-file label key.
+	EnvironmentFileLabelKey = "com.docker.compose.project.environment_file"
+	// ImageLabelKey is the image content digest Compose compares on up.
+	ImageLabelKey = "com.docker.compose.image"
+	// ServiceContainerFilter excludes `docker compose run` one-off containers, as Compose does.
+	ServiceContainerFilter = "com.docker.compose.oneoff=False"
 )
 
 // ProjectLabel returns the trimmed Docker Compose project label.
@@ -27,18 +29,4 @@ func ProjectLabel(labels map[string]string) string {
 // ServiceLabel returns the trimmed Docker Compose service label.
 func ServiceLabel(labels map[string]string) string {
 	return strings.TrimSpace(labels[ServiceLabelKey])
-}
-
-// WorkingDirLabel returns the trimmed Docker Compose project working directory label.
-func WorkingDirLabel(labels map[string]string) string {
-	return strings.TrimSpace(labels[WorkingDirLabelKey])
-}
-
-// ConfigFilesLabel returns Docker Compose project config file labels.
-func ConfigFilesLabel(labels map[string]string) []string {
-	raw := strings.TrimSpace(labels[ConfigFilesLabelKey])
-	if raw == "" {
-		return nil
-	}
-	return kit.TrimNonEmpty(strings.Split(raw, ","))
 }

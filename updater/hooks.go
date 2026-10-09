@@ -4,16 +4,15 @@ import (
 	"context"
 	"maps"
 	"strings"
+
+	kit "go.getarcane.app/kit/pkg"
 )
 
 func (s *Service) triggerSelfUpdate(ctx context.Context, containerID, containerName, newImageRef string, labels map[string]string) error {
 	if s.config.SelfUpdater == nil {
 		return ErrSelfUpdaterRequired
 	}
-	instanceType := "server"
-	if s.config.LabelPolicy.IsAgent(labels) {
-		instanceType = "agent"
-	}
+	instanceType := kit.Ternary(s.config.LabelPolicy.IsAgent(labels), "agent", "server")
 	_ = s.recordEvent(ctx, "self_update_trigger", containerID, containerName, map[string]any{
 		"instanceType": instanceType,
 		"newImage":     newImageRef,
@@ -27,22 +26,14 @@ func (s *Service) triggerSelfUpdate(ctx context.Context, containerID, containerN
 	})
 }
 
-// isSelfUpdateCandidate reports whether a container must be handled by
-// the host SelfUpdater, either by label policy or because it is the container
-// the host application itself runs in.
+// isSelfUpdateCandidate reports whether the host SelfUpdater must handle a container, by label policy
+// or because the host application runs in it.
 func (s *Service) isSelfUpdateCandidate(containerID string, labels map[string]string) bool {
 	if s.config.LabelPolicy.IsSelfUpdateTarget(labels) {
 		return true
 	}
 	selfID := strings.TrimSpace(s.config.SelfContainerID)
-	return selfID != "" && (strings.HasPrefix(containerID, selfID) || strings.HasPrefix(selfID, containerID))
-}
-
-func (s *Service) recordResult(ctx context.Context, result ResourceResult) error {
-	if s.config.RunRecorder == nil {
-		return nil
-	}
-	return s.config.RunRecorder.RecordUpdateRun(ctx, result)
+	return selfID != "" && containerID != "" && (strings.HasPrefix(containerID, selfID) || strings.HasPrefix(selfID, containerID))
 }
 
 func (s *Service) notify(ctx context.Context, containerID, containerName, imageRef, oldImage, newImage string) error {
@@ -58,8 +49,7 @@ func (s *Service) notify(ctx context.Context, containerID, containerName, imageR
 	})
 }
 
-// recordEvent records a container-scoped update event; every event the
-// updater emits today concerns a container, so the resource type is fixed.
+// recordEvent records a container-scoped update event; every event the updater emits concerns a container.
 func (s *Service) recordEvent(ctx context.Context, phase, resourceID, resourceName string, metadata map[string]any) error {
 	if s.config.EventRecorder == nil {
 		return nil

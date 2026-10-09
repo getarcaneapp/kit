@@ -21,25 +21,25 @@ import (
 	updatetypes "go.getarcane.app/updater/types"
 )
 
-type targetedDockerInternal struct {
+type targetedDocker struct {
 	mu         sync.Mutex
 	containers []container.InspectResponse
 	created    map[string]string
 	mutations  int
 }
 
-func newTargetedContainerInternal(id, constraint string) container.InspectResponse {
+func newTargetedContainer(id, constraint string) container.InspectResponse {
 	return container.InspectResponse{
 		ID: id, Name: "/" + id, Image: "sha256:shared", State: &container.State{Running: true},
 		Config: &container.Config{Image: "app:1.0.0", Labels: map[string]string{labels.LabelUpdateStrategy: "tag", labels.LabelUpdateConstraint: constraint}},
 	}
 }
 
-func targetedPendingInternal(id, target string) ImageUpdateRecord {
+func targetedPending(id, target string) ImageUpdateRecord {
 	return ImageUpdateRecord{ID: "sha256:shared", ContainerID: id, Repository: "app", Tag: "1.0.0", LatestVersion: &target, HasUpdate: true, UpdateType: UpdateTypeTag}
 }
 
-func (f *targetedDockerInternal) handlerInternal(t *testing.T) http.HandlerFunc {
+func (f *targetedDocker) handler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -92,7 +92,7 @@ func (f *targetedDockerInternal) handlerInternal(t *testing.T) http.HandlerFunc 
 	}
 }
 
-func TestApplyPendingTargetedSharedImageInternal(t *testing.T) {
+func TestApplyPendingTargetedSharedImage(t *testing.T) {
 	for _, tt := range []struct {
 		name, secondTarget, secondConstraint string
 		wantPulls                            int
@@ -103,13 +103,13 @@ func TestApplyPendingTargetedSharedImageInternal(t *testing.T) {
 		{name: "dry run", secondTarget: "2.1.0", secondConstraint: "2.x", dryRun: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			fixture := &targetedDockerInternal{
-				containers: []container.InspectResponse{newTargetedContainerInternal("one", "1.x"), newTargetedContainerInternal("two", tt.secondConstraint)},
+			fixture := &targetedDocker{
+				containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", tt.secondConstraint)},
 				created:    map[string]string{},
 			}
 			fixture.containers[1].Config.Image = "docker.io/library/app:1.0.0"
-			dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
-			store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", tt.secondTarget))
+			dockerClient := newDockerClientForHandler(t, fixture.handler(t))
+			store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", tt.secondTarget))
 			puller := &fakePuller{}
 			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
 			result, err := service.ApplyPending(t.Context(), Options{DryRun: tt.dryRun})
@@ -138,7 +138,7 @@ func TestApplyPendingTargetedSharedImageInternal(t *testing.T) {
 	}
 }
 
-func TestApplyPendingTargetedRetainsRejectedInternal(t *testing.T) {
+func TestApplyPendingTargetedRetainsRejected(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
 		change    func(*container.InspectResponse)
@@ -159,13 +159,13 @@ func TestApplyPendingTargetedRetainsRejectedInternal(t *testing.T) {
 		{name: "pull failure", pullError: true, wantPulls: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			cnt := newTargetedContainerInternal("one", "1.x")
+			cnt := newTargetedContainer("one", "1.x")
 			if tt.change != nil {
 				tt.change(&cnt)
 			}
-			fixture := &targetedDockerInternal{containers: []container.InspectResponse{cnt}, created: map[string]string{}}
-			dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
-			store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"))
+			fixture := &targetedDocker{containers: []container.InspectResponse{cnt}, created: map[string]string{}}
+			dockerClient := newDockerClientForHandler(t, fixture.handler(t))
+			store := NewMemoryPendingStore(targetedPending("one", "1.2.0"))
 			puller := &fakePuller{}
 			if tt.pullError {
 				puller.err = errors.New("registry unavailable")
@@ -192,15 +192,15 @@ func TestApplyPendingTargetedRetainsRejectedInternal(t *testing.T) {
 	}
 }
 
-type targetedComposeAdapterInternal struct {
+type targetedComposeAdapter struct {
 	fakeProjectUpdater
-	fixture *targetedDockerInternal
+	fixture *targetedDocker
 	calls   int
 	changes map[string]updatetypes.ServiceImageChange
 	fail    bool
 }
 
-func (f *targetedComposeAdapterInternal) UpdateServiceImages(_ context.Context, projectID string, changes map[string]updatetypes.ServiceImageChange) error {
+func (f *targetedComposeAdapter) UpdateServiceImages(_ context.Context, projectID string, changes map[string]updatetypes.ServiceImageChange) error {
 	f.calls++
 	f.changes = changes
 	if f.fail {
@@ -217,7 +217,7 @@ func (f *targetedComposeAdapterInternal) UpdateServiceImages(_ context.Context, 
 	return nil
 }
 
-func TestApplyPendingTargetedComposeGroupsInternal(t *testing.T) {
+func TestApplyPendingTargetedComposeGroups(t *testing.T) {
 	for _, tt := range []struct {
 		name           string
 		conflict, fail bool
@@ -225,7 +225,7 @@ func TestApplyPendingTargetedComposeGroupsInternal(t *testing.T) {
 		{name: "group service changes"}, {name: "conflicting service targets", conflict: true}, {name: "adapter failure retained", fail: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			fixture := &targetedDockerInternal{containers: []container.InspectResponse{newTargetedContainerInternal("one", "1.x"), newTargetedContainerInternal("two", "1.x")}, created: map[string]string{}}
+			fixture := &targetedDocker{containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", "1.x")}, created: map[string]string{}}
 			for i := range fixture.containers {
 				fixture.containers[i].Config.Labels[compose.ProjectLabelKey] = "app"
 				fixture.containers[i].Config.Labels[compose.ServiceLabelKey] = fixture.containers[i].ID
@@ -233,9 +233,9 @@ func TestApplyPendingTargetedComposeGroupsInternal(t *testing.T) {
 			if tt.conflict {
 				fixture.containers[1].Config.Labels[compose.ServiceLabelKey] = "one"
 			}
-			dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
-			adapter := &targetedComposeAdapterInternal{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}, fixture: fixture, fail: tt.fail}
-			store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", "1.3.0"))
+			dockerClient := newDockerClientForHandler(t, fixture.handler(t))
+			adapter := &targetedComposeAdapter{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}, fixture: fixture, fail: tt.fail}
+			store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.3.0"))
 			puller := &fakePuller{}
 			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, ProjectUpdater: adapter})
 			result, err := service.ApplyPending(t.Context(), Options{})
@@ -268,13 +268,13 @@ func TestApplyPendingTargetedComposeGroupsInternal(t *testing.T) {
 	}
 }
 
-func TestApplyPendingTargetedScopedClearingInternal(t *testing.T) {
-	fixture := &targetedDockerInternal{containers: []container.InspectResponse{newTargetedContainerInternal("one", "1.x"), newTargetedContainerInternal("two", "<1.1.0")}, created: map[string]string{}}
+func TestApplyPendingTargetedScopedClearing(t *testing.T) {
+	fixture := &targetedDocker{containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", "<1.1.0")}, created: map[string]string{}}
 	// One record is already applied. Its successful verification must not clear
 	// the rejected record for a different container using the same image ID.
 	fixture.containers[0].Config.Image = "app:1.2.0"
-	dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
-	store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", "1.2.0"), targetedPendingInternal("missing", "1.2.0"))
+	dockerClient := newDockerClientForHandler(t, fixture.handler(t))
+	store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.2.0"), targetedPending("missing", "1.2.0"))
 	puller := &fakePuller{}
 	service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
 	result, err := service.ApplyPending(t.Context(), Options{})
@@ -300,29 +300,29 @@ func TestApplyPendingTargetedScopedClearingInternal(t *testing.T) {
 	}
 }
 
-type selectiveTargetPullerInternal struct{ failedRef string }
+type selectiveTargetPuller struct{ failedRef string }
 
-func (p selectiveTargetPullerInternal) PullImage(_ context.Context, ref string, _ io.Writer) error {
+func (p selectiveTargetPuller) PullImage(_ context.Context, ref string, _ io.Writer) error {
 	if ref == p.failedRef {
 		return errors.New("target unavailable")
 	}
 	return nil
 }
 
-func TestApplyPendingTargetedFailedComposeDependencyRetainedInternal(t *testing.T) {
-	fixture := &targetedDockerInternal{containers: []container.InspectResponse{newTargetedContainerInternal("one", "1.x"), newTargetedContainerInternal("two", "1.x")}, created: map[string]string{}}
+func TestApplyPendingTargetedFailedComposeDependencyRetained(t *testing.T) {
+	fixture := &targetedDocker{containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", "1.x")}, created: map[string]string{}}
 	for i := range fixture.containers {
 		fixture.containers[i].Config.Labels[compose.ProjectLabelKey] = "app"
 		fixture.containers[i].Config.Labels[compose.ServiceLabelKey] = fixture.containers[i].ID
 	}
 	fixture.containers[1].Config.Labels[labels.LabelDependsOn] = "one"
-	dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
-	adapter := &targetedComposeAdapterInternal{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}, fixture: fixture}
-	store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", "1.3.0"))
+	dockerClient := newDockerClientForHandler(t, fixture.handler(t))
+	adapter := &targetedComposeAdapter{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}, fixture: fixture}
+	store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.3.0"))
 	service := newService(Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		PendingStore:         store,
-		ImagePuller:          selectiveTargetPullerInternal{failedRef: "docker.io/library/app:1.3.0"},
+		ImagePuller:          selectiveTargetPuller{failedRef: "docker.io/library/app:1.3.0"},
 		ProjectUpdater:       adapter,
 	})
 	result, err := service.ApplyPending(t.Context(), Options{})
@@ -351,14 +351,12 @@ func TestApplyPendingTargetedFailedComposeDependencyRetainedInternal(t *testing.
 	}
 }
 
-// Settings exclusions, stopped containers and the Docker proxy are all left
-// alone by a pending batch, even when the batch is forced: the
-// IgnoreSettingsExclusions override is reserved for an explicitly requested
-// UpdateContainer target.
-func TestApplyPendingTargetedExcludedContainersInternal(t *testing.T) {
+// A pending batch, even forced, leaves settings exclusions, stopped containers and the Docker proxy
+// alone; IgnoreSettingsExclusions only applies to an explicit UpdateContainer target.
+func TestApplyPendingTargetedExcludedContainers(t *testing.T) {
 	for _, name := range []string{"stopped", "docker-proxy", "settings-excluded"} {
 		t.Run(name, func(t *testing.T) {
-			cnt := newTargetedContainerInternal(name, "1.x")
+			cnt := newTargetedContainer(name, "1.x")
 			if name == "stopped" {
 				cnt.State.Running = false
 			}
@@ -366,8 +364,8 @@ func TestApplyPendingTargetedExcludedContainersInternal(t *testing.T) {
 			if name == "settings-excluded" {
 				settings.excluded = []string{name}
 			}
-			fixture := &targetedDockerInternal{containers: []container.InspectResponse{cnt}, created: map[string]string{}}
-			server := httptest.NewServer(fixture.handlerInternal(t))
+			fixture := &targetedDocker{containers: []container.InspectResponse{cnt}, created: map[string]string{}}
+			server := httptest.NewServer(fixture.handler(t))
 			defer server.Close()
 			dockerClient, err := client.New(client.WithHost("tcp://docker-proxy:2375"), client.WithAPIVersion("1.41"), client.WithDialContext(func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
@@ -380,7 +378,7 @@ func TestApplyPendingTargetedExcludedContainersInternal(t *testing.T) {
 					t.Error(closeErr)
 				}
 			}()
-			store := NewMemoryPendingStore(targetedPendingInternal(name, "1.2.0"))
+			store := NewMemoryPendingStore(targetedPending(name, "1.2.0"))
 			puller := &fakePuller{}
 			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, Settings: settings})
 			result, err := service.ApplyPending(t.Context(), Options{Force: true, IgnoreSettingsExclusions: true})
@@ -400,12 +398,12 @@ func TestApplyPendingTargetedExcludedContainersInternal(t *testing.T) {
 	}
 }
 
-func TestApplyPendingTargetedSatisfiedDependencyClearedInternal(t *testing.T) {
-	fixture := &targetedDockerInternal{containers: []container.InspectResponse{newTargetedContainerInternal("one", "1.x"), newTargetedContainerInternal("two", "1.x")}, created: map[string]string{}}
+func TestApplyPendingTargetedSatisfiedDependencyCleared(t *testing.T) {
+	fixture := &targetedDocker{containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", "1.x")}, created: map[string]string{}}
 	fixture.containers[1].Config.Image = "app:1.3.0"
 	fixture.containers[1].Config.Labels[labels.LabelDependsOn] = "one"
-	dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
-	store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"), targetedPendingInternal("two", "1.3.0"))
+	dockerClient := newDockerClientForHandler(t, fixture.handler(t))
+	store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.3.0"))
 	service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: &fakePuller{}})
 	result, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
@@ -427,17 +425,17 @@ func TestApplyPendingTargetedSatisfiedDependencyClearedInternal(t *testing.T) {
 	}
 }
 
-func TestApplyPendingAutomaticTagPolicyInternal(t *testing.T) {
+func TestApplyPendingAutomaticTagPolicy(t *testing.T) {
 	for _, strategy := range []string{"", "auto", "digest"} {
 		t.Run(strategy, func(t *testing.T) {
-			cnt := newTargetedContainerInternal("one", "")
+			cnt := newTargetedContainer("one", "")
 			cnt.Config.Labels = map[string]string{}
 			if strategy != "" {
 				cnt.Config.Labels[labels.LabelUpdateStrategy] = strategy
 			}
-			fixture := &targetedDockerInternal{containers: []container.InspectResponse{cnt}, created: map[string]string{}}
-			dockerClient := newDockerClientForHandler(t, fixture.handlerInternal(t))
-			store := NewMemoryPendingStore(targetedPendingInternal("one", "1.2.0"))
+			fixture := &targetedDocker{containers: []container.InspectResponse{cnt}, created: map[string]string{}}
+			dockerClient := newDockerClientForHandler(t, fixture.handler(t))
+			store := NewMemoryPendingStore(targetedPending("one", "1.2.0"))
 			puller := &fakePuller{}
 			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
 			result, err := service.ApplyPending(t.Context(), Options{})

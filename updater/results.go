@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"context"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -17,18 +18,28 @@ func newTimedResult() (*Result, func(*error)) {
 	}
 }
 
-func (s *Service) applyResultCount(out *Result, item ResourceResult) {
+// appendResult counts item into out and appends it: every item counts as checked, and up-to-date ones as skipped too.
+func appendResult(out *Result, item ResourceResult) {
+	out.Checked++
 	switch item.Status {
 	case StatusUpdated:
 		out.Updated++
 	case StatusRestarted:
 		out.Restarted++
-	case StatusSkipped:
+	case StatusSkipped, StatusUpToDate:
 		out.Skipped++
 	case StatusFailed:
 		out.Failed++
-	case StatusChecked, StatusUpToDate, StatusUpdateAvailable:
-		out.Checked++
+	case StatusChecked, StatusUpdateAvailable:
+	}
+	out.Items = append(out.Items, item)
+}
+
+// appendRecordedResult appends item to out and reports it to the RunRecorder.
+func (s *Service) appendRecordedResult(ctx context.Context, out *Result, item ResourceResult) {
+	appendResult(out, item)
+	if s.config.RunRecorder != nil {
+		_ = s.config.RunRecorder.RecordUpdateRun(ctx, item)
 	}
 }
 
@@ -38,19 +49,6 @@ func failedContainerResult(id, name, message string) ResourceResult {
 
 func skippedContainerResult(id, name, message string) ResourceResult {
 	return ResourceResult{ResourceID: id, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusSkipped, Error: message}
-}
-
-func updatedContainerResult(id, name, oldImage, newImage string) ResourceResult {
-	return ResourceResult{
-		ResourceID:      id,
-		ResourceName:    name,
-		ResourceType:    ResourceTypeContainer,
-		Status:          StatusUpdated,
-		UpdateAvailable: true,
-		UpdateApplied:   true,
-		OldImage:        oldImage,
-		NewImage:        newImage,
-	}
 }
 
 func labelsFromInspect(inspect container.InspectResponse) map[string]string {

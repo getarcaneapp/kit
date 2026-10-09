@@ -14,19 +14,19 @@ import (
 	updatetypes "go.getarcane.app/updater/types"
 )
 
-type recordingProjectImagesInternal struct {
+type recordingProjectImages struct {
 	fakeProjectUpdater
 	changes   map[string]updatetypes.ServiceImageChange
 	projectID string
 	imageErr  error
 }
 
-func (f *recordingProjectImagesInternal) UpdateServiceImages(_ context.Context, projectID string, changes map[string]updatetypes.ServiceImageChange) error {
+func (f *recordingProjectImages) UpdateServiceImages(_ context.Context, projectID string, changes map[string]updatetypes.ServiceImageChange) error {
 	f.projectID, f.changes = projectID, changes
 	return f.imageErr
 }
 
-func TestPreflightComposeImageInternal(t *testing.T) {
+func TestPreflightComposeImage(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
 		adapter   ProjectUpdater
@@ -40,19 +40,19 @@ func TestPreflightComposeImageInternal(t *testing.T) {
 		{name: "missing service", labels: map[string]string{compose.ProjectLabelKey: "app"}, newRef: "app:2", wantError: true},
 		{name: "self update exempt", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}, selfID: "self", newRef: "app:2"},
 		{name: "digest exempt", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}, newRef: "docker.io/library/app:1"},
-		{name: "unresolved", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}, adapter: &recordingProjectImagesInternal{}, newRef: "app:2", wantError: true},
+		{name: "unresolved", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}, adapter: &recordingProjectImages{}, newRef: "app:2", wantError: true},
 		{
 			name: "empty project ID", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"},
-			adapter: &recordingProjectImagesInternal{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {}}}}, newRef: "app:2", wantError: true,
+			adapter: &recordingProjectImages{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {}}}}, newRef: "app:2", wantError: true,
 		},
 		{
 			name: "supported", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"},
-			adapter: &recordingProjectImagesInternal{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}}, newRef: "app:2",
+			adapter: &recordingProjectImages{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}}, newRef: "app:2",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			service := newService(Config{ProjectUpdater: tt.adapter, SelfContainerID: tt.selfID})
-			err := service.preflightComposeImageInternal(t.Context(), container.Summary{ID: "self"}, container.InspectResponse{Config: &container.Config{Image: "app:1", Labels: tt.labels}}, tt.newRef)
+			_, err := service.preflightComposeImage(t.Context(), "self", container.InspectResponse{Config: &container.Config{Image: "app:1", Labels: tt.labels}}, tt.newRef)
 			if (err != nil) != tt.wantError {
 				t.Fatalf("error = %v, wantError %v", err, tt.wantError)
 			}
@@ -60,14 +60,14 @@ func TestPreflightComposeImageInternal(t *testing.T) {
 	}
 }
 
-func TestUpdateComposeImageInternal(t *testing.T) {
+func TestUpdateComposeImage(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		name := "persists and verifies"
 		if failed {
 			name = "adapter failure"
 		}
 		t.Run(name, func(t *testing.T) {
-			adapter := &recordingProjectImagesInternal{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}}
+			adapter := &recordingProjectImages{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}}
 			if failed {
 				adapter.imageErr = errors.New("persist failed")
 			}
@@ -89,7 +89,7 @@ func TestUpdateComposeImageInternal(t *testing.T) {
 				Image:  "sha256:same",
 				Config: &container.Config{Image: "app:1", Labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}},
 			}
-			err := service.updateComposeImageInternal(t.Context(), container.Summary{ID: "old"}, inspect, "app:2")
+			err := service.updateComposeOrStandalone(t.Context(), container.Summary{ID: "old"}, inspect, "app:2")
 			if (err != nil) != failed {
 				t.Fatalf("error = %v", err)
 			}
@@ -100,7 +100,7 @@ func TestUpdateComposeImageInternal(t *testing.T) {
 	}
 }
 
-func TestVerifyComposeTargetInternal(t *testing.T) {
+func TestVerifyComposeService(t *testing.T) {
 	for _, tt := range []struct {
 		name, configuredRef, imageID string
 		running, empty, wantError    bool
@@ -134,7 +134,7 @@ func TestVerifyComposeTargetInternal(t *testing.T) {
 					http.NotFound(w, r)
 				}
 			})
-			err := verifyComposeTargetInternal(t.Context(), dockerClient, "app", "web", "app:2")
+			err := verifyComposeService(t.Context(), dockerClient, "app", "web", "", "app:2")
 			if (err != nil) != tt.wantError {
 				t.Fatalf("error = %v, wantError %v", err, tt.wantError)
 			}

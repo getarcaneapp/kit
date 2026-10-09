@@ -14,7 +14,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 )
 
-func tagsResponseInternal(r *http.Request, status int, body string) *http.Response {
+func tagsResponse(r *http.Request, status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}
 }
 
@@ -32,22 +32,22 @@ func TestFetchTagsPaginationAndAuthentication(t *testing.T) {
 			if user != "user" || password != "password" || r.URL.Query().Get("scope") != "repository:team/app:pull" {
 				t.Error("token request did not preserve credentials and scope")
 			}
-			return tagsResponseInternal(r, http.StatusOK, `{"token":"private-token"}`), nil
+			return tagsResponse(r, http.StatusOK, `{"token":"private-token"}`), nil
 		}
 		if r.Header.Get("Authorization") != "Bearer private-token" {
-			resp := tagsResponseInternal(r, http.StatusUnauthorized, "")
+			resp := tagsResponse(r, http.StatusUnauthorized, "")
 			resp.Header.Set("WWW-Authenticate", `Bearer realm="https://registry.test/token",service="registry"`)
 			return resp, nil
 		}
 		if r.URL.Path == "/v2/" {
-			return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+			return tagsResponse(r, http.StatusOK, "{}"), nil
 		}
 		pageCalls++
 		if r.URL.Query().Get("n") != "1000" {
 			t.Errorf("page %q requested without explicit page size: %s", r.URL.Query().Get("last"), r.URL.RawQuery)
 		}
 		page := pages[r.URL.Query().Get("last")]
-		resp := tagsResponseInternal(r, http.StatusOK, page.body)
+		resp := tagsResponse(r, http.StatusOK, page.body)
 		if page.link != "" {
 			resp.Header.Set("Link", page.link)
 		}
@@ -68,23 +68,23 @@ func TestFetchTagsRequestsChallengeScope(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/oauth2/token" {
 			if user, password, _ := r.BasicAuth(); user != "user" || password != "password" {
-				return tagsResponseInternal(r, http.StatusUnauthorized, ""), nil
+				return tagsResponse(r, http.StatusUnauthorized, ""), nil
 			}
 			if slices.Contains(r.URL.Query()["scope"], metadataScope) {
-				return tagsResponseInternal(r, http.StatusOK, `{"access_token":"metadata-token"}`), nil
+				return tagsResponse(r, http.StatusOK, `{"access_token":"metadata-token"}`), nil
 			}
-			return tagsResponseInternal(r, http.StatusOK, `{"access_token":"pull-token"}`), nil
+			return tagsResponse(r, http.StatusOK, `{"access_token":"pull-token"}`), nil
 		}
 		challenge := `Bearer realm="https://registry.test/oauth2/token",service="registry"`
 		switch {
 		case r.URL.Path == "/v2/" && r.Header.Get("Authorization") != "":
-			return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+			return tagsResponse(r, http.StatusOK, "{}"), nil
 		case r.URL.Path != "/v2/" && r.Header.Get("Authorization") == "Bearer metadata-token":
-			return tagsResponseInternal(r, http.StatusOK, `{"name":"team/app","tags":["1.1.1-1"]}`), nil
+			return tagsResponse(r, http.StatusOK, `{"name":"team/app","tags":["1.1.1-1"]}`), nil
 		case r.URL.Path != "/v2/":
 			challenge += `,scope="` + metadataScope + `"`
 		}
-		resp := tagsResponseInternal(r, http.StatusUnauthorized, "")
+		resp := tagsResponse(r, http.StatusUnauthorized, "")
 		resp.Header.Set("WWW-Authenticate", challenge)
 		return resp, nil
 	})}
@@ -108,13 +108,13 @@ func TestFetchTagsFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/v2/" {
-					return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+					return tagsResponse(r, http.StatusOK, "{}"), nil
 				}
 				status := tt.status
 				if status == 0 {
 					status = http.StatusOK
 				}
-				resp := tagsResponseInternal(r, status, tt.body)
+				resp := tagsResponse(r, status, tt.body)
 				if tt.link != "" {
 					resp.Header.Set("Link", tt.link)
 				}
@@ -135,12 +135,12 @@ func TestFetchTagsDockerHubAndEmpty(t *testing.T) {
 				t.Errorf("unexpected URL: %s", r.URL)
 			}
 			if r.URL.Path == "/v2/" {
-				return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+				return tagsResponse(r, http.StatusOK, "{}"), nil
 			}
 			if r.URL.Path != "/v2/library/alpine/tags/list" {
 				t.Errorf("unexpected URL: %s", r.URL)
 			}
-			return tagsResponseInternal(r, http.StatusOK, body), nil
+			return tagsResponse(r, http.StatusOK, body), nil
 		})}
 		tags, err := FetchTags(t.Context(), "docker.io", "library/alpine", nil, client)
 		if err != nil || len(tags) != 0 {
@@ -153,11 +153,11 @@ func TestFetchTagsDiscardsPartialListing(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch {
 		case r.URL.Path == "/v2/":
-			return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+			return tagsResponse(r, http.StatusOK, "{}"), nil
 		case r.URL.Query().Has("last"):
-			return tagsResponseInternal(r, http.StatusNotFound, ""), nil
+			return tagsResponse(r, http.StatusNotFound, ""), nil
 		}
-		resp := tagsResponseInternal(r, http.StatusOK, `{"tags":["1.0.0"]}`)
+		resp := tagsResponse(r, http.StatusOK, `{"tags":["1.0.0"]}`)
 		resp.Header.Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
 		return resp, nil
 	})}
@@ -197,7 +197,7 @@ func TestFetchTagsCancellation(t *testing.T) {
 				if err := r.Context().Err(); err != nil {
 					return nil, err
 				}
-				resp := tagsResponseInternal(r, http.StatusOK, `{"tags":["1.0.0"]}`)
+				resp := tagsResponse(r, http.StatusOK, `{"tags":["1.0.0"]}`)
 				if r.URL.Path != "/v2/" && !r.URL.Query().Has("last") {
 					resp.Header.Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
 				}
@@ -211,7 +211,7 @@ func TestFetchTagsCancellation(t *testing.T) {
 	}
 }
 
-func TestFetchTagsHonorsCallerDeadlineInternal(t *testing.T) {
+func TestFetchTagsHonorsCallerDeadline(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		timeout  time.Duration
@@ -235,7 +235,7 @@ func TestFetchTagsHonorsCallerDeadlineInternal(t *testing.T) {
 				if remaining := time.Until(deadline); remaining < tt.min || remaining > tt.max {
 					t.Fatalf("request deadline %s remaining, want between %s and %s", remaining, tt.min, tt.max)
 				}
-				return tagsResponseInternal(r, http.StatusOK, `{"tags":["1.0.0"]}`), nil
+				return tagsResponse(r, http.StatusOK, `{"tags":["1.0.0"]}`), nil
 			})}
 			if _, err := FetchTags(ctx, "registry.test", "team/app", nil, client); err != nil {
 				t.Fatal(err)
@@ -253,11 +253,11 @@ func TestFetchTagsFollowsRedirectsWithoutForwardingCredentials(t *testing.T) {
 				if r.Header.Get("Authorization") != "" {
 					t.Error("credentials forwarded to redirect target")
 				}
-				return tagsResponseInternal(r, http.StatusOK, `{"name":"mirror/team/app","tags":["1.0.0","1.1.0"]}`), nil
+				return tagsResponse(r, http.StatusOK, `{"name":"mirror/team/app","tags":["1.0.0","1.1.0"]}`), nil
 			case r.URL.Path == "/v2/":
-				return tagsResponseInternal(r, http.StatusOK, "{}"), nil
+				return tagsResponse(r, http.StatusOK, "{}"), nil
 			}
-			resp := tagsResponseInternal(r, http.StatusTemporaryRedirect, "")
+			resp := tagsResponse(r, http.StatusTemporaryRedirect, "")
 			resp.Header.Set("Location", "https://mirror.test/v2/mirror/team/app/tags/list")
 			return resp, nil
 		})}

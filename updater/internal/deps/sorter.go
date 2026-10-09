@@ -59,9 +59,8 @@ func (s *ContainerSorter) Sort() ([]ContainerWithDeps, error) {
 	return s.sorted, nil
 }
 
-// ExtractContainerDeps extracts dependency information from a container inspect
-// response. name is the caller's display name for the container, which the
-// returned value is keyed by.
+// ExtractContainerDeps extracts dependency information from a container
+// inspect response, keyed by the caller's display name for the container.
 func ExtractContainerDeps(ctx context.Context, name string, cnt container.Summary, inspect container.InspectResponse) ContainerWithDeps {
 	c := ContainerWithDeps{
 		Container: cnt,
@@ -74,24 +73,13 @@ func ExtractContainerDeps(ctx context.Context, name string, cnt container.Summar
 			linkName, _, _ := strings.Cut(link, ":")
 			c.Links = append(c.Links, strings.TrimPrefix(linkName, "/"))
 		}
-	}
-
-	if inspect.Config != nil && inspect.Config.Labels != nil {
-		if deps, ok := inspect.Config.Labels[labels.LabelDependsOn]; ok {
-			for dep := range strings.SplitSeq(deps, ",") {
-				dep = strings.TrimSpace(dep)
-				if dep != "" {
-					c.DependsOn = append(c.DependsOn, dep)
-				}
-			}
+		if inspect.HostConfig.NetworkMode.IsContainer() {
+			c.NetworkDeps = append(c.NetworkDeps, inspect.HostConfig.NetworkMode.ConnectedContainer())
 		}
 	}
-
-	if inspect.HostConfig != nil {
-		networkMode := inspect.HostConfig.NetworkMode
-		if networkMode.IsContainer() {
-			containerRef := strings.TrimPrefix(string(networkMode), "container:")
-			c.NetworkDeps = append(c.NetworkDeps, containerRef)
+	if inspect.Config != nil {
+		if deps, ok := inspect.Config.Labels[labels.LabelDependsOn]; ok {
+			c.DependsOn = kit.TrimNonEmpty(strings.Split(deps, ","))
 		}
 	}
 
@@ -99,9 +87,8 @@ func ExtractContainerDeps(ctx context.Context, name string, cnt container.Summar
 	return c
 }
 
-// UpdateImplicitRestart adds every container that depends on one already in
-// markedForRestart, and returns the names it newly marked. Callers repeat the
-// call until it returns nothing to reach the transitive closure.
+// UpdateImplicitRestart marks every container depending on a marked one and
+// returns the newly marked names; repeat until it returns none.
 func UpdateImplicitRestart(containers []ContainerWithDeps, markedForRestart map[string]bool) []string {
 	var implicitRestarts []string
 	for _, c := range containers {

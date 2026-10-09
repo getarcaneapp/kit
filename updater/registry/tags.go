@@ -15,9 +15,8 @@ const (
 	defaultTagsFetchTimeout = 120 * time.Second
 )
 
-// FetchTags lists all repository tags, including paginated results. A partial
-// listing is never returned on failure. The caller's deadline bounds the whole
-// walk; without one the lookup falls back to a 120-second limit.
+// FetchTags lists every repository tag across pages, never returning a partial listing. The caller's
+// deadline bounds the walk, defaulting to 120 seconds.
 func FetchTags(
 	ctx context.Context,
 	registryHost, repository string,
@@ -30,11 +29,11 @@ func FetchTags(
 		defer cancel()
 	}
 
-	repo, err := repositoryInternal(registryHost, repository)
+	repo, err := parseRepository(registryHost, repository)
 	if err != nil {
 		return nil, err
 	}
-	tags, err := remote.List(repo, append(remoteOptionsInternal(ctx, credential, httpClient), remote.WithPageSize(tagsPageSize))...)
+	tags, err := remote.List(repo, remote.WithContext(ctx), remote.WithAuth(authenticator(credential)), remote.WithTransport(baseTransport(httpClient)), remote.WithPageSize(tagsPageSize))
 	if err != nil {
 		return nil, fmt.Errorf("list registry tags: %w", err)
 	}

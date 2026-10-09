@@ -7,9 +7,8 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// DockerClientProvider provides Docker clients. The provider owns the returned
-// client's lifecycle; Service never closes returned clients. Providers may
-// return the same client across calls.
+// DockerClientProvider provides Docker clients. The provider owns their lifecycle, so Service never
+// closes them, and it may return the same client across calls.
 type DockerClientProvider interface {
 	DockerClient(ctx context.Context) (*client.Client, error)
 }

@@ -3,9 +3,8 @@ package types
 
 import "context"
 
-// Policy controls image updates. The zero policy follows the current tag's digest.
-// A constraint or tag pattern without a strategy, or strategy auto, selects tag
-// updates for stable complete semantic versions.
+// Policy controls image updates. The zero policy follows the current tag's digest; a constraint or
+// tag pattern, or strategy auto, selects tag updates for stable complete semantic versions.
 type Policy struct {
 	Strategy   string `json:"strategy,omitempty"`
 	Constraint string `json:"constraint,omitempty"`
@@ -47,9 +46,8 @@ type ServiceImageChange struct {
 	TargetRef   string `json:"targetRef"`
 }
 
-// ProjectImageUpdater persists service image changes and recreates those services.
-// Returning success guarantees persistence as well as recreation. Implement this
-// optional interface on the configured ProjectUpdater to support tag changes.
+// ProjectImageUpdater persists service image changes and recreates those services; success guarantees both.
+// Implement it on the configured ProjectUpdater to support tag changes.
 type ProjectImageUpdater interface {
 	UpdateServiceImages(ctx context.Context, projectID string, changes map[string]ServiceImageChange) error
 }

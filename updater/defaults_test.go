@@ -27,7 +27,7 @@ func TestDefaultRegistryDigestResolverFetchesDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := newRegistryDigestResolver(server.Client())
+	resolver := defaultRegistryDigestResolver{httpClient: server.Client()}
 
 	got, err := resolver.ImageDigest(t.Context(), serverURL.Host+"/owner/app:1.0")
 	if err != nil {

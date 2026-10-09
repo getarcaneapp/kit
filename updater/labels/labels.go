@@ -1,7 +1,5 @@
-// Package labels reads the container labels that tell the updater what a
-// container is: whether it opts out of updates, whether it is an Arcane server
-// or agent that must update itself, whether it belongs to Docker Swarm, and how
-// it wants to be stopped.
+// Package labels reads the container labels that tell the updater whether a container opts out, is an
+// Arcane server or agent that updates itself, belongs to Swarm, and how it wants to be stopped.
 package labels
 
 import (
@@ -45,18 +43,19 @@ func IsArcaneServerContainer(labels map[string]string) bool {
 	return (hasTruthyLabel(labels, LabelArcane) || hasTruthyLabel(labels, LabelArcaneLegacyServer)) && !IsArcaneAgentContainer(labels)
 }
 
-// ShouldDisableArcaneServerRedeploy reports whether redeploy or edit should be blocked
-// because the container is the running Arcane server or agent.
+// ShouldDisableArcaneServerRedeploy reports whether redeploy or edit should be
+// blocked because the container is the running Arcane server or agent.
 func ShouldDisableArcaneServerRedeploy(labels map[string]string, containerID, currentContainerID string, currentErr error) bool {
 	if !IsArcaneContainer(labels) {
 		return false
 	}
 
-	if currentErr != nil || strings.TrimSpace(currentContainerID) == "" {
+	current := strings.TrimSpace(currentContainerID)
+	if currentErr != nil || current == "" {
 		return true
 	}
-
-	return containerIDsMatch(containerID, currentContainerID)
+	containerID = strings.TrimSpace(containerID)
+	return containerID != "" && (strings.HasPrefix(containerID, current) || strings.HasPrefix(current, containerID))
 }
 
 // IsArcaneAgentContainer reports whether labels identify an Arcane agent.
@@ -75,7 +74,9 @@ func IsUpdateDisabled(labels map[string]string) bool {
 
 // IsSwarmTask reports whether labels identify a Docker Swarm task.
 func IsSwarmTask(labels map[string]string) bool {
-	return hasNonEmptyLabel(labels, LabelSwarmServiceID) || hasNonEmptyLabel(labels, LabelSwarmServiceName)
+	serviceID, _ := lookupLabel(labels, LabelSwarmServiceID)
+	serviceName, _ := lookupLabel(labels, LabelSwarmServiceName)
+	return strings.TrimSpace(serviceID) != "" || strings.TrimSpace(serviceName) != ""
 }
 
 // StopSignal returns a custom stop signal from labels.
@@ -93,11 +94,6 @@ func hasTruthyLabel(labels map[string]string, target string) bool {
 	return ok && truthy
 }
 
-func hasNonEmptyLabel(labels map[string]string, target string) bool {
-	value, ok := lookupLabel(labels, target)
-	return ok && strings.TrimSpace(value) != ""
-}
-
 func lookupLabel(labels map[string]string, target string) (string, bool) {
 	for key, value := range labels {
 		if strings.EqualFold(key, target) {
@@ -105,10 +101,4 @@ func lookupLabel(labels map[string]string, target string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func containerIDsMatch(a, b string) bool {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	return a != "" && b != "" && (strings.HasPrefix(a, b) || strings.HasPrefix(b, a))
 }

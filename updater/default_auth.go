@@ -8,89 +8,30 @@ import (
 	"strings"
 
 	dockerCliConfig "github.com/docker/cli/cli/config"
-	dockerCliConfigTypes "github.com/docker/cli/cli/config/types"
-	"github.com/google/go-containerregistry/pkg/authn"
-	dockerauthconfig "github.com/moby/moby/api/pkg/authconfig"
 	dockerregistry "github.com/moby/moby/api/types/registry"
-	"github.com/moby/moby/client"
-	kitregistry "go.getarcane.app/kit/pkg/registry"
 
-	"go.getarcane.app/updater/internal/registryhost"
+	"go.getarcane.app/updater/refs"
 )
 
-func defaultImagePullOptions(ctx context.Context, imageRef string) (client.ImagePullOptions, error) {
-	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
-	if err != nil {
-		return client.ImagePullOptions{}, err
-	}
-	if !ok {
-		logAnonymousRegistryFallback(ctx, imageRef, "no credentials found", nil)
-		return client.ImagePullOptions{}, nil
-	}
-
-	encoded, err := dockerauthconfig.Encode(authConfig)
-	if err != nil {
-		return client.ImagePullOptions{}, fmt.Errorf("encode registry auth: %w", err)
-	}
-	return client.ImagePullOptions{
-		RegistryAuth: encoded,
-		// Retry anonymously when the registry rejects the credentials.
-		PrivilegeFunc: func(context.Context) (string, error) { return "", nil },
-	}, nil
-}
-
-func defaultDigestCredentials(ctx context.Context, imageRef string) (*authn.AuthConfig, error) {
-	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		logAnonymousRegistryFallback(ctx, imageRef, "no credentials found", nil)
-		return nil, nil
-	}
-
-	credential := &authn.AuthConfig{
-		Username:      authConfig.Username,
-		Password:      authConfig.Password,
-		IdentityToken: authConfig.IdentityToken,
-		RegistryToken: authConfig.RegistryToken,
-	}
-	if (credential.Username == "" || credential.Password == "") && credential.IdentityToken == "" && credential.RegistryToken == "" {
-		logAnonymousRegistryFallback(ctx, imageRef, "no usable username/password or token", nil)
-		return nil, nil
-	}
-	return credential, nil
-}
-
+// defaultDockerConfigRegistryAuthConfig loads usable Docker config credentials for imageRef's registry,
+// reporting false when the request should go out anonymously.
 func defaultDockerConfigRegistryAuthConfig(ctx context.Context, imageRef string) (dockerregistry.AuthConfig, bool, error) {
-	server, err := registryhost.AuthAddress(imageRef)
+	parsed, err := refs.NormalizeReference(imageRef)
 	if err != nil {
 		return dockerregistry.AuthConfig{}, false, fmt.Errorf("get registry address: %w", err)
 	}
-	if kitregistry.Normalize(server) == "docker.io" {
-		server = "docker.io"
-	}
-
-	configDir := strings.TrimSpace(os.Getenv(dockerCliConfig.EnvOverrideConfigDir))
-	configFile, err := dockerCliConfig.Load(configDir)
+	configFile, err := dockerCliConfig.Load(strings.TrimSpace(os.Getenv(dockerCliConfig.EnvOverrideConfigDir)))
 	if err != nil {
 		return dockerregistry.AuthConfig{}, false, fmt.Errorf("load Docker config: %w", err)
 	}
 
-	authConfig, err := configFile.GetAuthConfig(server)
-	if err == nil {
-		if defaultDockerConfigAuthEmpty(authConfig) {
-			logAnonymousRegistryFallback(ctx, imageRef, "empty credentials", nil)
-			return dockerregistry.AuthConfig{}, false, nil
-		}
-		return dockerRegistryAuthConfigFromDockerConfig(authConfig), true, nil
+	authConfig, err := configFile.GetAuthConfig(parsed.RegistryHost)
+	if err != nil {
+		slog.DebugContext(ctx, "registry credentials unavailable; proceeding anonymously", "imageRef", imageRef, "reason", "credential lookup failed", "error", err)
+		return dockerregistry.AuthConfig{}, false, nil
 	}
-	logAnonymousRegistryFallback(ctx, imageRef, "credential lookup failed", err)
-	return dockerregistry.AuthConfig{}, false, nil
-}
-
-func dockerRegistryAuthConfigFromDockerConfig(authConfig dockerCliConfigTypes.AuthConfig) dockerregistry.AuthConfig {
-	return dockerregistry.AuthConfig{
+	// docker/cli decodes "auth" into Username and Password when it loads the config.
+	credential := dockerregistry.AuthConfig{
 		Username:      strings.TrimSpace(authConfig.Username),
 		Password:      strings.TrimSpace(authConfig.Password),
 		Auth:          authConfig.Auth,
@@ -98,20 +39,9 @@ func dockerRegistryAuthConfigFromDockerConfig(authConfig dockerCliConfigTypes.Au
 		IdentityToken: strings.TrimSpace(authConfig.IdentityToken),
 		RegistryToken: strings.TrimSpace(authConfig.RegistryToken),
 	}
-}
-
-func defaultDockerConfigAuthEmpty(authConfig dockerCliConfigTypes.AuthConfig) bool {
-	return strings.TrimSpace(authConfig.Username) == "" &&
-		strings.TrimSpace(authConfig.Password) == "" &&
-		strings.TrimSpace(authConfig.Auth) == "" &&
-		strings.TrimSpace(authConfig.IdentityToken) == "" &&
-		strings.TrimSpace(authConfig.RegistryToken) == ""
-}
-
-func logAnonymousRegistryFallback(ctx context.Context, imageRef, reason string, err error) {
-	args := []any{"imageRef", imageRef, "reason", reason}
-	if err != nil {
-		args = append(args, "error", err)
+	if (credential.Username == "" || credential.Password == "") && credential.IdentityToken == "" && credential.RegistryToken == "" {
+		slog.DebugContext(ctx, "registry credentials unavailable; proceeding anonymously", "imageRef", imageRef, "reason", "no usable username/password or token")
+		return dockerregistry.AuthConfig{}, false, nil
 	}
-	slog.DebugContext(ctx, "registry credentials unavailable; proceeding anonymously", args...)
+	return credential, true, nil
 }

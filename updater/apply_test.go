@@ -94,7 +94,7 @@ func TestApplyPendingSkipsUnchangedPulledImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
-	if got.Checked != 1 || got.Updated != 0 || got.Skipped != 0 || got.Failed != 0 {
+	if got.Checked != 1 || got.Updated != 0 || got.Skipped != 1 || got.Failed != 0 {
 		t.Fatalf("ApplyPending() counts = checked:%d updated:%d skipped:%d failed:%d", got.Checked, got.Updated, got.Skipped, got.Failed)
 	}
 	if len(got.Items) != 1 || got.Items[0].Status != StatusUpToDate {
@@ -264,7 +264,7 @@ func TestApplyPendingReportsUpToDateWhenKnownDigestMatchesAnyLocalRepoDigest(t *
 	if err != nil {
 		t.Fatalf("ApplyPending() error = %v", err)
 	}
-	if got.Checked != 1 || got.Updated != 0 || got.Skipped != 0 || got.Failed != 0 {
+	if got.Checked != 1 || got.Updated != 0 || got.Skipped != 1 || got.Failed != 0 {
 		t.Fatalf("ApplyPending() counts = checked:%d updated:%d skipped:%d failed:%d", got.Checked, got.Updated, got.Skipped, got.Failed)
 	}
 	if len(got.Items) != 1 || got.Items[0].Status != StatusUpToDate {
@@ -302,7 +302,7 @@ func TestApplyPendingRestartsStaleContainersWhenImageAlreadyPulled(t *testing.T)
 				{ID: "app-id", Names: []string{"/app"}, Image: "app:1", ImageID: "sha256:old-app", State: "running"},
 			})
 		case r.Method == http.MethodGet && path == "/containers/app-id/json":
-			writeDockerJSON(t, w, container.InspectResponse{ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
+			writeDockerJSON(t, w, container.InspectResponse{State: &container.State{Running: true}, ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/stop"):
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
@@ -376,8 +376,8 @@ func TestApplyPendingReusesDockerClientWhileBuildingPlans(t *testing.T) {
 
 	_, _ = service.ApplyPending(t.Context(), Options{})
 
-	if provider.calls != 2 {
-		t.Fatalf("DockerClient calls = %d, want 2 total calls independent of record count", provider.calls)
+	if provider.calls != 1 {
+		t.Fatalf("DockerClient calls = %d, want 1 call independent of record count", provider.calls)
 	}
 }
 
@@ -407,7 +407,7 @@ func TestApplyPendingKeepsPulledRecordWhenRestartFails(t *testing.T) {
 				{ID: "app-id", Names: []string{"/app"}, Image: "app:1", ImageID: "sha256:old-app", State: "running"},
 			})
 		case r.Method == http.MethodGet && path == "/containers/app-id/json":
-			writeDockerJSON(t, w, container.InspectResponse{ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
+			writeDockerJSON(t, w, container.InspectResponse{State: &container.State{Running: true}, ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/stop"):
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):

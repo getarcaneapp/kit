@@ -43,17 +43,17 @@ func TestIsFallbackEligibleDaemonError(t *testing.T) {
 
 const testDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
-// fakeRegistryInternal serves registry.test with bearer auth from auth.test and
+// fakeRegistry serves registry.test with bearer auth from auth.test and
 // passes authorized requests to handle.
-func fakeRegistryInternal(t *testing.T, realm string, checkToken func(*http.Request), handle func(*http.Request) *http.Response) *http.Client {
+func fakeRegistry(t *testing.T, realm string, checkToken func(*http.Request), handle func(*http.Request) *http.Response) *http.Client {
 	t.Helper()
 	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Host == "auth.test" {
 			checkToken(r)
-			return tagsResponseInternal(r, http.StatusOK, `{"token":"registry-token"}`), nil
+			return tagsResponse(r, http.StatusOK, `{"token":"registry-token"}`), nil
 		}
 		if r.Header.Get("Authorization") != "Bearer registry-token" {
-			resp := tagsResponseInternal(r, http.StatusUnauthorized, "")
+			resp := tagsResponse(r, http.StatusUnauthorized, "")
 			resp.Header.Set("WWW-Authenticate", `Bearer realm="`+realm+`",service="registry.test"`)
 			return resp, nil
 		}
@@ -61,8 +61,8 @@ func fakeRegistryInternal(t *testing.T, realm string, checkToken func(*http.Requ
 	})}
 }
 
-func manifestResponseInternal(r *http.Request, body, digest string) *http.Response {
-	resp := tagsResponseInternal(r, http.StatusOK, body)
+func manifestResponse(r *http.Request, body, digest string) *http.Response {
+	resp := tagsResponse(r, http.StatusOK, body)
 	if r.Method == http.MethodHead {
 		resp.Body = http.NoBody
 	}
@@ -100,7 +100,7 @@ func TestFetchDigestUsesHeadWithTokenAuth(t *testing.T) {
 		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			client := fakeRegistryInternal(t, "https://auth.test/token", func(r *http.Request) {
+			client := fakeRegistry(t, "https://auth.test/token", func(r *http.Request) {
 				if r.URL.Query().Get("scope") != "repository:team/app:pull" && r.FormValue("scope") != "repository:team/app:pull" {
 					t.Errorf("token request missing pull scope: %s", r.URL)
 				}
@@ -114,7 +114,7 @@ func TestFetchDigestUsesHeadWithTokenAuth(t *testing.T) {
 						t.Errorf("Accept = %q, want %s", r.Header.Get("Accept"), mediaType)
 					}
 				}
-				return manifestResponseInternal(r, "{}", testDigest)
+				return manifestResponse(r, "{}", testDigest)
 			})
 			digest, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", tt.credential, client)
 			if err != nil || digest != testDigest {
@@ -127,8 +127,8 @@ func TestFetchDigestUsesHeadWithTokenAuth(t *testing.T) {
 func TestFetchDigestFallsBackToGetWithoutDigestHeader(t *testing.T) {
 	body := `{"schemaVersion":2}`
 	sum := sha256.Sum256([]byte(body))
-	client := fakeRegistryInternal(t, "https://auth.test/token", func(*http.Request) {}, func(r *http.Request) *http.Response {
-		return manifestResponseInternal(r, body, "")
+	client := fakeRegistry(t, "https://auth.test/token", func(*http.Request) {}, func(r *http.Request) *http.Response {
+		return manifestResponse(r, body, "")
 	})
 	digest, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client)
 	if want := "sha256:" + hex.EncodeToString(sum[:]); err != nil || digest != want {
@@ -137,11 +137,11 @@ func TestFetchDigestFallsBackToGetWithoutDigestHeader(t *testing.T) {
 }
 
 func TestFetchDigestDoesNotFallBackOnRegistryError(t *testing.T) {
-	client := fakeRegistryInternal(t, "https://auth.test/token", func(*http.Request) {}, func(r *http.Request) *http.Response {
+	client := fakeRegistry(t, "https://auth.test/token", func(*http.Request) {}, func(r *http.Request) *http.Response {
 		if r.Method != http.MethodHead {
 			t.Errorf("unexpected %s after registry error", r.Method)
 		}
-		return tagsResponseInternal(r, http.StatusNotFound, "")
+		return tagsResponse(r, http.StatusNotFound, "")
 	})
 	if _, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client); err == nil {
 		t.Fatal("FetchDigest returned nil error")
@@ -149,10 +149,10 @@ func TestFetchDigestDoesNotFallBackOnRegistryError(t *testing.T) {
 }
 
 func TestFetchDigestRejectsNonHTTPSAuthRealm(t *testing.T) {
-	client := fakeRegistryInternal(t, "http://auth.test/token", func(*http.Request) {
+	client := fakeRegistry(t, "http://auth.test/token", func(*http.Request) {
 		t.Error("token requested from non-HTTPS realm")
 	}, func(r *http.Request) *http.Response {
-		return manifestResponseInternal(r, "{}", testDigest)
+		return manifestResponse(r, "{}", testDigest)
 	})
 	if _, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client); err == nil {
 		t.Fatal("FetchDigest returned nil error")
@@ -161,7 +161,7 @@ func TestFetchDigestRejectsNonHTTPSAuthRealm(t *testing.T) {
 
 func TestFetchRegistryRateLimitUsesHead(t *testing.T) {
 	for _, credential := range []*authn.AuthConfig{nil, {Username: "user", Password: "secret"}} {
-		client := fakeRegistryInternal(t, "https://auth.test/token", func(r *http.Request) {
+		client := fakeRegistry(t, "https://auth.test/token", func(r *http.Request) {
 			if user, _, _ := r.BasicAuth(); credential != nil && user != "user" {
 				t.Errorf("token user = %q, want user", user)
 			}
@@ -169,7 +169,7 @@ func TestFetchRegistryRateLimitUsesHead(t *testing.T) {
 			if r.Method != http.MethodHead {
 				t.Errorf("manifest method = %s, want HEAD", r.Method)
 			}
-			resp := manifestResponseInternal(r, "{}", testDigest)
+			resp := manifestResponse(r, "{}", testDigest)
 			resp.Header.Set("RateLimit-Limit", "100;w=21600")
 			resp.Header.Set("RateLimit-Remaining", "90;w=21600")
 			return resp
