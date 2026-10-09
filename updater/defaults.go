@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"cmp"
 	"context"
 	json "encoding/json/v2"
 	"errors"
@@ -9,15 +10,16 @@ import (
 	"net/http"
 	"sync/atomic"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	dockerauthconfig "github.com/moby/moby/api/pkg/authconfig"
 	"github.com/moby/moby/client"
 
 	"go.getarcane.app/updater/refs"
 	"go.getarcane.app/updater/registry"
 )
 
-// DockerClient is the built-in DockerClientProvider. It lazily opens one
-// Docker client, verifies it with a ping on every hand-out, and reconnects
-// after the daemon goes away. Construct one with NewDockerClientProvider.
+// DockerClient is the built-in DockerClientProvider: it lazily opens one client, pings it on every
+// hand-out, and reconnects after the daemon goes away. Construct one with NewDockerClientProvider.
 type DockerClient struct {
 	options []client.Opt
 	client  atomic.Pointer[client.Client]
@@ -31,29 +33,20 @@ type defaultRegistryDigestResolver struct {
 	httpClient *http.Client
 }
 
-// NewDockerClientProvider returns a Docker client provider that reads the
-// local Docker environment, plus any options given. The caller owns the result
-// and should Close it when done — unless it was left to New to build, in which
-// case Service.Close handles it.
+// NewDockerClientProvider returns a provider for the local Docker environment plus options. The caller
+// owns it and should Close it, unless New built it, in which case Service.Close does.
 func NewDockerClientProvider(options ...client.Opt) *DockerClient {
 	return &DockerClient{options: append([]client.Opt{client.FromEnv}, options...)}
 }
 
 // NewImagePuller returns an image puller backed by Docker's ImagePull API.
 func NewImagePuller(provider DockerClientProvider) ImagePuller {
-	if provider == nil {
-		provider = NewDockerClientProvider()
-	}
-	return defaultImagePuller{dockerClientProvider: provider}
+	return defaultImagePuller{dockerClientProvider: cmp.Or[DockerClientProvider](provider, NewDockerClientProvider())}
 }
 
 // NewRegistryDigestResolver returns a registry HTTP digest resolver.
 func NewRegistryDigestResolver() RegistryDigestResolver {
-	return newRegistryDigestResolver(nil)
-}
-
-func newRegistryDigestResolver(httpClient *http.Client) RegistryDigestResolver {
-	return defaultRegistryDigestResolver{httpClient: httpClient}
+	return defaultRegistryDigestResolver{}
 }
 
 // DockerClient returns a live Docker client, opening or reopening one as
@@ -64,13 +57,11 @@ func (p *DockerClient) DockerClient(ctx context.Context) (*client.Client, error)
 	}
 	if dockerClient := p.client.Load(); dockerClient != nil {
 		if _, err := dockerClient.Ping(ctx, client.PingOptions{}); err != nil {
+			var closeErr error
 			if p.client.CompareAndSwap(dockerClient, nil) {
-				closeErr := dockerClient.Close()
-				if closeErr != nil {
-					return nil, fmt.Errorf("ping docker daemon: %w", errors.Join(err, closeErr))
-				}
+				closeErr = dockerClient.Close()
 			}
-			return nil, fmt.Errorf("ping docker daemon: %w", err)
+			return nil, fmt.Errorf("ping docker daemon: %w", errors.Join(err, closeErr))
 		}
 		return dockerClient, nil
 	}
@@ -79,12 +70,8 @@ func (p *DockerClient) DockerClient(ctx context.Context) (*client.Client, error)
 	if err != nil {
 		return nil, err
 	}
-	_, err = dockerClient.Ping(ctx, client.PingOptions{})
-	if err != nil {
-		if closeErr := dockerClient.Close(); closeErr != nil {
-			return nil, fmt.Errorf("ping docker daemon: %w", errors.Join(err, closeErr))
-		}
-		return nil, fmt.Errorf("ping docker daemon: %w", err)
+	if _, err = dockerClient.Ping(ctx, client.PingOptions{}); err != nil {
+		return nil, fmt.Errorf("ping docker daemon: %w", errors.Join(err, dockerClient.Close()))
 	}
 	if p.client.CompareAndSwap(nil, dockerClient) {
 		return dockerClient, nil
@@ -117,9 +104,17 @@ func (p defaultImagePuller) PullImage(ctx context.Context, imageRef string, prog
 	if err != nil {
 		return fmt.Errorf("docker connect: %w", err)
 	}
-	pullOptions, err := defaultImagePullOptions(ctx, imageRef)
+	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
 	if err != nil {
 		return fmt.Errorf("registry auth: %w", err)
+	}
+	var pullOptions client.ImagePullOptions
+	if ok {
+		if pullOptions.RegistryAuth, err = dockerauthconfig.Encode(authConfig); err != nil {
+			return fmt.Errorf("registry auth: encode registry auth: %w", err)
+		}
+		// Retry anonymously when the registry rejects the credentials.
+		pullOptions.PrivilegeFunc = func(context.Context) (string, error) { return "", nil }
 	}
 	resp, err := dockerClient.ImagePull(ctx, imageRef, pullOptions)
 	if err != nil {
@@ -151,9 +146,13 @@ func (r defaultRegistryDigestResolver) ImageDigest(ctx context.Context, imageRef
 	if err != nil {
 		return "", err
 	}
-	credential, err := defaultDigestCredentials(ctx, imageRef)
+	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
 	if err != nil {
 		return "", fmt.Errorf("registry auth: %w", err)
+	}
+	var credential *authn.AuthConfig
+	if ok {
+		credential = &authn.AuthConfig{Username: authConfig.Username, Password: authConfig.Password, IdentityToken: authConfig.IdentityToken, RegistryToken: authConfig.RegistryToken}
 	}
 	return registry.FetchDigest(ctx, parsed.RegistryHost, parsed.Repository, parsed.Tag, credential, r.httpClient)
 }

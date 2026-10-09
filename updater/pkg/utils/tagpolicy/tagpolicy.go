@@ -13,9 +13,8 @@ import (
 	"go.getarcane.app/updater/types"
 )
 
-// Resolve selects a strategy from the configured reference and validates tag policies.
-// An undeclared strategy follows the digest unless a constraint or tag pattern is set;
-// auto follows stable complete semantic versions and uses digests for other tags.
+// Resolve validates policy and picks its strategy: digest unless a constraint or tag pattern is set,
+// while auto follows stable complete semantic versions and uses digests for other tags.
 func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
 	if refs.IsDigestPinnedReference(imageRef) || refs.IsImageIDLikeReference(imageRef) {
 		policy.Strategy = "digest"
@@ -40,7 +39,7 @@ func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
 		return policy, nil
 	}
 	if strategy == "auto" && !hasRules {
-		version, parseErr := parseInternal(parsed.Tag, nil)
+		version, parseErr := parse(parsed.Tag, nil)
 		if parseErr != nil || version.Prerelease() != "" {
 			policy.Strategy = "digest"
 			return policy, nil //nolint:nilerr // Non-version tags intentionally select digest updates in auto mode.
@@ -57,11 +56,11 @@ func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
 // Select returns the highest eligible newer tag, or current when none qualifies.
 // Equal candidate versions are resolved using the lexically smallest tag.
 func Select(current string, tags []string, policy types.Policy) (string, error) {
-	pattern, constraint, err := compileInternal(policy)
+	pattern, constraint, err := compile(policy)
 	if err != nil {
 		return "", err
 	}
-	currentVersion, err := parseInternal(current, pattern)
+	currentVersion, err := parse(current, pattern)
 	if err != nil {
 		return "", fmt.Errorf("invalid current tag %q: %w", current, err)
 	}
@@ -71,7 +70,7 @@ func Select(current string, tags []string, policy types.Policy) (string, error) 
 	selected := current
 	best := currentVersion
 	for _, tag := range tags {
-		version, parseErr := parseInternal(tag, pattern)
+		version, parseErr := parse(tag, pattern)
 		if parseErr != nil || !version.GreaterThan(currentVersion) {
 			continue
 		}
@@ -91,18 +90,18 @@ func Select(current string, tags []string, policy types.Policy) (string, error) 
 
 // Version extracts and parses a tag's complete semantic version.
 func Version(tag string, policy types.Policy) (string, error) {
-	pattern, _, err := compileInternal(policy)
+	pattern, _, err := compile(policy)
 	if err != nil {
 		return "", err
 	}
-	version, err := parseInternal(tag, pattern)
+	version, err := parse(tag, pattern)
 	if err != nil {
 		return "", err
 	}
 	return version.String(), nil
 }
 
-func compileInternal(policy types.Policy) (*regexp.Regexp, *semver.Constraints, error) {
+func compile(policy types.Policy) (*regexp.Regexp, *semver.Constraints, error) {
 	var pattern *regexp.Regexp
 	if policy.TagPattern != "" {
 		var err error
@@ -131,7 +130,7 @@ func compileInternal(policy types.Policy) (*regexp.Regexp, *semver.Constraints, 
 	return pattern, constraint, nil
 }
 
-func parseInternal(tag string, pattern *regexp.Regexp) (*semver.Version, error) {
+func parse(tag string, pattern *regexp.Regexp) (*semver.Version, error) {
 	value := tag
 	if pattern != nil {
 		matches := pattern.FindStringSubmatch(tag)

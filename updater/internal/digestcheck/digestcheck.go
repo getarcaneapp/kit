@@ -1,6 +1,5 @@
-// Package digestcheck compares the image digests Docker holds locally with the
-// digests a registry reports, so the updater can tell a real update from a
-// no-op re-pull.
+// Package digestcheck compares local image digests with registry digests, so the updater can tell a
+// real update from a no-op re-pull.
 package digestcheck
 
 import (
@@ -9,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/moby/moby/client"
@@ -18,9 +18,8 @@ import (
 	"go.getarcane.app/updater/refs"
 )
 
-// Resolver resolves a remote image digest without pulling. It is declared
-// structurally so the root package's public resolver interface satisfies it
-// without this package importing the root.
+// Resolver resolves a remote image digest without pulling. It is structural so
+// the root package's public resolver satisfies it without an import cycle.
 type Resolver interface {
 	ImageDigest(ctx context.Context, imageRef string) (string, error)
 }
@@ -40,10 +39,29 @@ type CheckResult struct {
 	CheckedViaAPI bool
 }
 
-// NewChecker creates a digest checker. Both arguments are optional; the checks
-// that need them report an error instead of panicking when they are absent.
+// NewChecker creates a digest checker. Both arguments are optional; checks that
+// need a missing one report an error.
 func NewChecker(dockerClient *client.Client, digestResolver Resolver) *Checker {
 	return &Checker{dockerClient: dockerClient, digestResolver: digestResolver}
+}
+
+// RepoDigests returns the normalized digests in repoDigests that belong to
+// imageRef's repository, ignoring digests the image carries for other repositories.
+func RepoDigests(repoDigests []string, imageRef string) []string {
+	target, err := refs.NormalizeReference(imageRef)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, repoDigest := range repoDigests {
+		name, _, _ := strings.Cut(repoDigest, "@")
+		repo, repoErr := refs.NormalizeReference(name)
+		normalized, ok := digest.FromReferenceSuffix(repoDigest)
+		if repoErr == nil && ok && repo.RegistryHost == target.RegistryHost && repo.Repository == target.Repository {
+			out = append(out, normalized)
+		}
+	}
+	return out
 }
 
 // CheckImageNeedsUpdate compares local and remote digests for an image.
@@ -61,13 +79,22 @@ func (c *Checker) CheckImageNeedsUpdate(ctx context.Context, imageRef string) Ch
 
 	slog.DebugContext(ctx, "CheckImageNeedsUpdate: checking image", "imageRef", imageRef, "normalizedRef", refs.NormalizeImageUpdateRef(imageRef))
 
-	localDigest, err := c.localDigest(ctx, imageRef)
+	inspect, err := c.dockerClient.ImageInspect(ctx, imageRef)
 	if err != nil {
 		result.NeedsUpdate = true
-		result.Error = err
+		result.Error = fmt.Errorf("image not found locally: %w", err)
 		return result
 	}
-	result.LocalDigest = localDigest
+	localDigests := RepoDigests(inspect.RepoDigests, imageRef)
+	if len(localDigests) == 0 && inspect.ID != "" {
+		localDigests = []string{inspect.ID}
+	}
+	if len(localDigests) == 0 {
+		result.NeedsUpdate = true
+		result.Error = errors.New("no digest available for image")
+		return result
+	}
+	result.LocalDigest = localDigests[0]
 
 	if c.digestResolver == nil {
 		result.Error = errors.New("remote digest resolver unavailable")
@@ -82,7 +109,7 @@ func (c *Checker) CheckImageNeedsUpdate(ctx context.Context, imageRef string) Ch
 
 	result.RemoteDigest = remoteDigest
 	result.CheckedViaAPI = true
-	result.NeedsUpdate = localDigest != remoteDigest
+	result.NeedsUpdate = !slices.Contains(localDigests, remoteDigest)
 	return result
 }
 
@@ -110,19 +137,14 @@ func (c *Checker) CheckImageMatchesKnownDigest(ctx context.Context, imageRef, kn
 		return result
 	}
 
-	for _, repoDigest := range inspect.RepoDigests {
-		localDigest, ok := digest.FromReferenceSuffix(repoDigest)
-		if !ok {
-			continue
-		}
-		result.LocalDigest = localDigest
-		if localDigest == normalizedDigest {
-			return result
-		}
+	localDigests := RepoDigests(inspect.RepoDigests, imageRef)
+	if len(localDigests) == 0 {
+		localDigests = []string{strings.TrimSpace(inspect.ID)}
 	}
-
-	if result.LocalDigest == "" && strings.TrimSpace(inspect.ID) != "" {
-		result.LocalDigest = strings.TrimSpace(inspect.ID)
+	result.LocalDigest = localDigests[0]
+	if slices.Contains(localDigests, normalizedDigest) {
+		result.LocalDigest = normalizedDigest
+		return result
 	}
 	result.NeedsUpdate = true
 	return result
@@ -159,11 +181,8 @@ func (c *Checker) GetImageIDsForRef(ctx context.Context, ref string) ([]string, 
 	normalizedRef := refs.NormalizeImageUpdateRef(ref)
 	var ids []string
 	for _, img := range imageList.Items {
-		for _, tag := range img.RepoTags {
-			if refs.NormalizeImageUpdateRef(tag) == normalizedRef {
-				ids = append(ids, img.ID)
-				break
-			}
+		if slices.ContainsFunc(img.RepoTags, func(tag string) bool { return refs.NormalizeImageUpdateRef(tag) == normalizedRef }) {
+			ids = append(ids, img.ID)
 		}
 	}
 	return ids, nil
@@ -179,8 +198,7 @@ type RefIDCache struct {
 func NewRefIDCache(checker *Checker) *RefIDCache {
 	return &RefIDCache{
 		checker: checker,
-		// This cache is a per-scan snapshot; eviction could make repeated
-		// lookups for one ref observe different Docker image state.
+		// Never evict: repeated lookups for one ref must see one Docker snapshot.
 		ids: hot.NewHotCache[string, []string](hot.LRU, math.MaxInt).
 			WithoutLocking().
 			Build(),
@@ -196,20 +214,4 @@ func (c *RefIDCache) IDsForRef(ctx context.Context, ref string) []string {
 	ids, _ := c.checker.GetImageIDsForRef(ctx, ref)
 	c.ids.Set(ref, ids)
 	return ids
-}
-
-func (c *Checker) localDigest(ctx context.Context, imageRef string) (string, error) {
-	inspect, err := c.dockerClient.ImageInspect(ctx, imageRef)
-	if err != nil {
-		return "", fmt.Errorf("image not found locally: %w", err)
-	}
-	for _, repoDigest := range inspect.RepoDigests {
-		if normalized, ok := digest.FromReferenceSuffix(repoDigest); ok {
-			return normalized, nil
-		}
-	}
-	if inspect.ID != "" {
-		return inspect.ID, nil
-	}
-	return "", errors.New("no digest available for image")
 }

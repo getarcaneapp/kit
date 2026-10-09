@@ -13,29 +13,18 @@ type Options struct {
 	// DryRun reports what would be updated without pulling or recreating
 	// anything.
 	DryRun bool `json:"dryRun,omitempty"`
-	// IgnoreSettingsExclusions lets UpdateContainer update its explicitly
-	// requested container even when the SettingsProvider excludes it from
-	// automatic updates. It applies only to that target: ApplyPending and the
-	// restart and dependency passes keep honoring exclusions, and a container
-	// that is disabled by label, a Swarm task, or on an immutable reference
-	// stays ineligible. The exclusion itself is never modified.
+	// IgnoreSettingsExclusions lets UpdateContainer update its requested container despite a settings
+	// exclusion. Batch and dependency passes still honor exclusions, and label, Swarm, and immutability checks still apply.
 	IgnoreSettingsExclusions bool `json:"ignoreSettingsExclusions,omitempty"`
 }
 
-// exclusionPolicy tells containerEligibilityInternal whether to consult the
-// SettingsProvider's exclusion list.
+// exclusionPolicy tells containerEligibility whether to consult the SettingsProvider's exclusions.
 type exclusionPolicy bool
 
 const (
 	enforceSettingsExclusions exclusionPolicy = true
 	ignoreSettingsExclusions  exclusionPolicy = false
 )
-
-// targetExclusionPolicyInternal is the policy for the container a caller
-// explicitly asked UpdateContainer to update.
-func (o Options) targetExclusionPolicyInternal() exclusionPolicy {
-	return exclusionPolicy(!o.IgnoreSettingsExclusions)
-}
 
 // ResourceResult represents the result of an update operation on one resource.
 type ResourceResult struct {
@@ -149,9 +138,8 @@ type SelfUpdateTarget struct {
 	// NewImageRef is the resolved image reference the self-updater should
 	// upgrade the container to. Empty when the updater could not resolve one.
 	NewImageRef string
-	// PullImageRef is an immutable reference the host froze the update to.
-	// The container must still be recreated as NewImageRef. Empty when the
-	// host pulls NewImageRef directly.
+	// PullImageRef is an immutable reference the host froze the update to; the container is still
+	// recreated as NewImageRef. Empty when the host pulls NewImageRef directly.
 	PullImageRef string
 }
 

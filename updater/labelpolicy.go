@@ -7,10 +7,8 @@ import (
 	"go.getarcane.app/updater/types"
 )
 
-// LabelPolicy decides, from a container's labels, whether the updater may touch
-// it, whether the host application must update it itself, and how to stop it.
-// Every field is optional; a nil func answers false (or "" for StopSignalFunc),
-// and New fills the nil ones in from DefaultLabelPolicy.
+// LabelPolicy decides from a container's labels whether the updater may touch it, whether the host must
+// update it itself, and how to stop it. New fills nil funcs from DefaultLabelPolicy.
 type LabelPolicy struct {
 	TagPolicyFunc          func(map[string]string) types.Policy
 	IsUpdateDisabledFunc   func(map[string]string) bool
@@ -41,9 +39,8 @@ func DefaultLabelPolicy() LabelPolicy {
 	}
 }
 
-// mergeLabelPolicyDefaults fills every nil func in policy from
-// DefaultLabelPolicy. The merge is per field, so a caller that overrides one
-// behavior keeps the defaults for the rest.
+// mergeLabelPolicyDefaults fills every nil func in policy from DefaultLabelPolicy, field by field, so
+// overriding one behavior keeps the defaults for the rest.
 func mergeLabelPolicyDefaults(policy LabelPolicy) LabelPolicy {
 	defaults := DefaultLabelPolicy()
 	if policy.TagPolicyFunc == nil {

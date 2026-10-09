@@ -3,6 +3,7 @@
 package registry
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -68,12 +69,15 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	ref, err := manifestReferenceInternal(registryHost, repository, tag)
+	repo, err := parseRepository(registryHost, repository)
 	if err != nil {
 		return nil, err
 	}
-	repo := ref.Context()
-	authorized, err := transport.NewWithContext(requestCtx, repo.Registry, authenticatorInternal(credential), baseTransportInternal(httpClient), []string{repo.Scope(transport.PullScope)})
+	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(tag))
+	if err != nil {
+		return nil, fmt.Errorf("parse image tag: %w", err)
+	}
+	authorized, err := transport.NewWithContext(requestCtx, repo.Registry, authenticator(credential), baseTransport(httpClient), []string{repo.Scope(transport.PullScope)})
 	if err != nil {
 		return nil, fmt.Errorf("authorize registry: %w", err)
 	}
@@ -99,7 +103,26 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 	if err != nil {
 		return nil, err
 	}
-	return extractRateLimitFromHeaders(resp.Header)
+
+	info := &RateLimitInfo{}
+	if limit, window := parseRateLimitHeader(resp.Header.Get("Ratelimit-Limit")); limit != nil {
+		info.Limit = limit
+		info.WindowSeconds = window
+		info.Source = registryRateLimitHeaderSource
+	}
+	if remaining, window := parseRateLimitHeader(resp.Header.Get("Ratelimit-Remaining")); remaining != nil {
+		info.Remaining = remaining
+		info.WindowSeconds = cmp.Or(info.WindowSeconds, window)
+		info.Source = registryRateLimitHeaderSource
+	}
+	if used, usedErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Docker-Ratelimit-Used"))); usedErr == nil {
+		info.Used = &used
+		info.Source = cmp.Or(info.Source, "docker")
+	}
+	if info.Limit == nil && info.Remaining == nil && info.Used == nil {
+		return nil, errors.New("no registry rate limit headers found")
+	}
+	return info, nil
 }
 
 // FetchDigest fetches the manifest digest for a registry image reference.
@@ -107,11 +130,15 @@ func FetchDigest(ctx context.Context, registryHost, repository, tag string, cred
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	ref, err := manifestReferenceInternal(registryHost, repository, tag)
+	repo, err := parseRepository(registryHost, repository)
 	if err != nil {
 		return "", err
 	}
-	options := remoteOptionsInternal(requestCtx, credential, httpClient)
+	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(tag))
+	if err != nil {
+		return "", fmt.Errorf("parse image tag: %w", err)
+	}
+	options := []remote.Option{remote.WithContext(requestCtx), remote.WithAuth(authenticator(credential)), remote.WithTransport(baseTransport(httpClient))}
 
 	// HEAD does not count as a pull. Fall back to GET only when the registry
 	// answered without a digest header, since GET computes it from the manifest.
@@ -129,7 +156,7 @@ func FetchDigest(ctx context.Context, registryHost, repository, tag string, cred
 	return desc.Digest.String(), nil
 }
 
-func repositoryInternal(registryHost, repository string) (name.Repository, error) {
+func parseRepository(registryHost, repository string) (name.Repository, error) {
 	registryHost = kitregistry.Normalize(registryHost)
 	if registryHost == "docker.io" {
 		registryHost = defaultRegistryHost
@@ -141,64 +168,18 @@ func repositoryInternal(registryHost, repository string) (name.Repository, error
 	return repo, nil
 }
 
-func manifestReferenceInternal(registryHost, repository, tag string) (name.Tag, error) {
-	repo, err := repositoryInternal(registryHost, repository)
-	if err != nil {
-		return name.Tag{}, err
-	}
-	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(tag))
-	if err != nil {
-		return name.Tag{}, fmt.Errorf("parse image tag: %w", err)
-	}
-	return ref, nil
-}
-
-func remoteOptionsInternal(ctx context.Context, credential *authn.AuthConfig, httpClient *http.Client) []remote.Option {
-	return []remote.Option{
-		remote.WithContext(ctx),
-		remote.WithAuth(authenticatorInternal(credential)),
-		remote.WithTransport(baseTransportInternal(httpClient)),
-	}
-}
-
-func baseTransportInternal(httpClient *http.Client) http.RoundTripper {
+func baseTransport(httpClient *http.Client) http.RoundTripper {
 	if httpClient != nil && httpClient.Transport != nil {
 		return httpClient.Transport
 	}
 	return http.DefaultTransport
 }
 
-func authenticatorInternal(credential *authn.AuthConfig) authn.Authenticator {
+func authenticator(credential *authn.AuthConfig) authn.Authenticator {
 	if credential == nil || *credential == (authn.AuthConfig{}) {
 		return authn.Anonymous
 	}
 	return authn.FromConfig(*credential)
-}
-
-func extractRateLimitFromHeaders(header http.Header) (*RateLimitInfo, error) {
-	info := &RateLimitInfo{}
-	if limit, window := parseRateLimitHeader(header.Get("Ratelimit-Limit")); limit != nil {
-		info.Limit = limit
-		info.WindowSeconds = window
-		info.Source = registryRateLimitHeaderSource
-	}
-	if remaining, window := parseRateLimitHeader(header.Get("Ratelimit-Remaining")); remaining != nil {
-		info.Remaining = remaining
-		if info.WindowSeconds == nil {
-			info.WindowSeconds = window
-		}
-		info.Source = registryRateLimitHeaderSource
-	}
-	if used, err := strconv.Atoi(strings.TrimSpace(header.Get("Docker-Ratelimit-Used"))); err == nil {
-		info.Used = &used
-		if info.Source == "" {
-			info.Source = "docker"
-		}
-	}
-	if info.Limit == nil && info.Remaining == nil && info.Used == nil {
-		return nil, errors.New("no registry rate limit headers found")
-	}
-	return info, nil
 }
 
 func parseRateLimitHeader(value string) (*int, *int) {

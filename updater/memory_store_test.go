@@ -53,7 +53,7 @@ func TestMemoryPendingStoreRespectsCanceledContext(t *testing.T) {
 	}
 }
 
-func TestMemoryPendingStoreScopesSharedImageInternal(t *testing.T) {
+func TestMemoryPendingStoreScopesSharedImage(t *testing.T) {
 	latest := "1.1.0"
 	first := ImageUpdateRecord{ID: "shared", ContainerID: "first", Repository: "app", Tag: "1.0.0", LatestVersion: &latest, HasUpdate: true, UpdateType: UpdateTypeTag}
 	second := first

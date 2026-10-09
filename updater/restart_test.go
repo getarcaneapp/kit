@@ -28,6 +28,7 @@ func TestRestartContainersUsingOldImagesRestartsDependenciesInWatchtowerOrder(t 
 			})
 		case r.Method == http.MethodGet && path == "/containers/db-id/json":
 			writeDockerJSON(t, w, container.InspectResponse{
+				State: &container.State{Running: true},
 				ID:    "db-id",
 				Name:  "/db",
 				Image: "sha256:old-db",
@@ -37,6 +38,7 @@ func TestRestartContainersUsingOldImagesRestartsDependenciesInWatchtowerOrder(t 
 			})
 		case r.Method == http.MethodGet && path == "/containers/web-id/json":
 			writeDockerJSON(t, w, container.InspectResponse{
+				State: &container.State{Running: true},
 				ID:    "web-id",
 				Name:  "/web",
 				Image: "sha256:web",
@@ -106,9 +108,15 @@ func TestRestartContainersUsingOldImagesLogsCycleFallback(t *testing.T) {
 				{ID: "b-id", Names: []string{"/b"}, Image: "b:1", ImageID: "sha256:old-b", Labels: map[string]string{labels.LabelDependsOn: "a"}, State: "running"},
 			})
 		case r.Method == http.MethodGet && path == "/containers/a-id/json":
-			writeDockerJSON(t, w, container.InspectResponse{ID: "a-id", Name: "/a", Image: "sha256:old-a", Config: &container.Config{Image: "a:1", Labels: map[string]string{labels.LabelDependsOn: "b"}}})
+			writeDockerJSON(t, w, container.InspectResponse{
+				ID: "a-id", Name: "/a", Image: "sha256:old-a", State: &container.State{Running: true},
+				Config: &container.Config{Image: "a:1", Labels: map[string]string{labels.LabelDependsOn: "b"}},
+			})
 		case r.Method == http.MethodGet && path == "/containers/b-id/json":
-			writeDockerJSON(t, w, container.InspectResponse{ID: "b-id", Name: "/b", Image: "sha256:old-b", Config: &container.Config{Image: "b:1", Labels: map[string]string{labels.LabelDependsOn: "a"}}})
+			writeDockerJSON(t, w, container.InspectResponse{
+				ID: "b-id", Name: "/b", Image: "sha256:old-b", State: &container.State{Running: true},
+				Config: &container.Config{Image: "b:1", Labels: map[string]string{labels.LabelDependsOn: "a"}},
+			})
 		case r.Method == http.MethodGet && path == "/images/a:2/json":
 			writeDockerJSON(t, w, image.InspectResponse{ID: "sha256:new-a"})
 		case r.Method == http.MethodGet && path == "/images/b:2/json":
@@ -177,6 +185,7 @@ func TestRestartContainersUsingOldImagesRoutesLegacyArcaneServerThroughSelfUpdat
 			})
 		case r.Method == http.MethodGet && path == "/containers/arcane-id/json":
 			writeDockerJSON(t, w, container.InspectResponse{
+				State: &container.State{Running: true},
 				ID:    "arcane-id",
 				Name:  "/arcane",
 				Image: "sha256:old-arcane",
@@ -246,6 +255,7 @@ func TestRestartContainersUsingOldImagesSelfContainerIDFiresAfterStandalone(t *t
 			})
 		case r.Method == http.MethodGet && path == "/containers/app-id/json":
 			writeDockerJSON(t, w, container.InspectResponse{
+				State:  &container.State{Running: true},
 				ID:     "app-id",
 				Name:   "/app",
 				Image:  "sha256:old-app",
@@ -253,6 +263,7 @@ func TestRestartContainersUsingOldImagesSelfContainerIDFiresAfterStandalone(t *t
 			})
 		case r.Method == http.MethodGet && path == "/containers/self-id/json":
 			writeDockerJSON(t, w, container.InspectResponse{
+				State:  &container.State{Running: true},
 				ID:     "self-id",
 				Name:   "/arcane",
 				Image:  "sha256:old-arcane",
@@ -345,6 +356,7 @@ func TestRestartContainersUsingOldImagesVerifiesComposeServiceAfterProjectError(
 			})
 		case r.Method == http.MethodGet && path == "/containers/web-old/json":
 			writeDockerJSON(t, w, container.InspectResponse{
+				State: &container.State{Running: true},
 				ID:    "web-old",
 				Name:  "/web",
 				Image: "sha256:old-app",
@@ -390,7 +402,7 @@ func TestRestartContainersUsingOldImagesOperationTimeoutCancelsSlowStop(t *testi
 				{ID: "app-id", Names: []string{"/app"}, Image: "app:1", ImageID: "sha256:old-app", State: "running"},
 			})
 		case r.Method == http.MethodGet && path == "/containers/app-id/json":
-			writeDockerJSON(t, w, container.InspectResponse{ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
+			writeDockerJSON(t, w, container.InspectResponse{State: &container.State{Running: true}, ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
 		case r.Method == http.MethodGet && path == "/images/app:2/json":
 			writeDockerJSON(t, w, image.InspectResponse{ID: "sha256:new-app"})
 		case r.Method == http.MethodPost && path == "/containers/app-id/stop":

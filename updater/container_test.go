@@ -57,31 +57,12 @@ func TestClearPendingRecord(t *testing.T) {
 			store := &fakePendingStore{records: []ImageUpdateRecord{tt.record}}
 			service := newServiceForTest(t, Config{PendingStore: store})
 
-			service.clearPendingRecordInternal(t.Context(), "container", tt.appliedRef)
+			service.clearPendingRecord(t.Context(), "container", tt.appliedRef)
 
 			if cleared := len(store.cleared) > 0; cleared != tt.wantCleared {
 				t.Fatalf("cleared = %v (%v), want %v", cleared, store.cleared, tt.wantCleared)
 			}
 		})
-	}
-}
-
-func TestRefreshRecreatedImageLabelsInternalPreservesEqualValueOverride(t *testing.T) {
-	containerLabels := map[string]string{
-		"org.opencontainers.image.version": "v2.6.0-next.30",
-	}
-	targetImageLabels := map[string]string{
-		"org.opencontainers.image.version": "v2.7.0-next.17",
-		"org.opencontainers.image.title":   "Arcane",
-	}
-
-	got := refreshRecreatedImageLabelsInternal(containerLabels, targetImageLabels, "")
-
-	if got["org.opencontainers.image.version"] != "v2.6.0-next.30" {
-		t.Fatalf("OCI version = %q, want equal-value container override", got["org.opencontainers.image.version"])
-	}
-	if got["org.opencontainers.image.title"] != "Arcane" {
-		t.Fatalf("OCI title = %q, want target image value for missing label", got["org.opencontainers.image.title"])
 	}
 }
 
@@ -155,16 +136,15 @@ func TestUpdateStandaloneContainerRollsBackAndRemovesDanglingCreateOnStartFailur
 		EventRecorder:        recorder,
 	})
 
-	err := service.updateStandaloneContainer(t.Context(),
+	err := service.updateComposeOrStandalone(t.Context(),
 		container.Summary{ID: "old-id", Names: []string{"/app"}},
-		container.InspectResponse{ID: "old-id", Name: "/app", Image: "sha256:old-image", Config: &container.Config{
+		container.InspectResponse{State: &container.State{Running: true}, ID: "old-id", Name: "/app", Image: "sha256:old-image", Config: &container.Config{
 			Image: "app:1",
 			Labels: map[string]string{
 				"org.opencontainers.image.version":  "v2.6.0-next.30",
 				"org.opencontainers.image.revision": "old-revision",
 				"org.opencontainers.image.source":   "https://container.example/override",
 				"com.docker.compose.image":          "sha256:old-image",
-				"com.docker.compose.project":        "arcane",
 				"com.example.custom":                "keep",
 			},
 		}},
@@ -172,7 +152,7 @@ func TestUpdateStandaloneContainerRollsBackAndRemovesDanglingCreateOnStartFailur
 	)
 
 	if err == nil {
-		t.Fatal("updateStandaloneContainer() error = nil, want start failure with rollback outcome")
+		t.Fatal("updateComposeOrStandalone() error = nil, want start failure with rollback outcome")
 	}
 	if !strings.Contains(err.Error(), "rollback succeeded") {
 		t.Fatalf("error = %q, want rollback succeeded detail", err.Error())
@@ -180,35 +160,22 @@ func TestUpdateStandaloneContainerRollsBackAndRemovesDanglingCreateOnStartFailur
 	if len(createdImages) != 2 || createdImages[0] != "app:2" || createdImages[1] != "sha256:old-image" {
 		t.Fatalf("created images = %#v, want new ref then old image ID", createdImages)
 	}
-	if got := createdLabels[0]["org.opencontainers.image.version"]; got != "v2.6.0-next.30" {
-		t.Fatalf("new container OCI version = %q, want equal-value container override", got)
-	}
-	if got := createdLabels[0]["org.opencontainers.image.revision"]; got != "old-revision" {
-		t.Fatalf("new container OCI revision = %q, want equal-value container override", got)
-	}
-	if got := createdLabels[0]["org.opencontainers.image.source"]; got != "https://container.example/override" {
-		t.Fatalf("new container OCI source = %q, want container override", got)
-	}
-	if got := createdLabels[0]["org.opencontainers.image.title"]; got != "new-title" {
-		t.Fatalf("new container OCI title = %q, want target image value for missing label", got)
+	// Labels equal to the old image's were inherited, so they are dropped for the daemon to merge in the new image's.
+	for i, phase := range []string{"new", "rollback"} {
+		for _, key := range []string{"org.opencontainers.image.version", "org.opencontainers.image.revision", "org.opencontainers.image.title"} {
+			if got, ok := createdLabels[i][key]; ok {
+				t.Fatalf("%s container %s = %q, want inherited label left to the image", phase, key, got)
+			}
+		}
+		if got := createdLabels[i]["org.opencontainers.image.source"]; got != "https://container.example/override" {
+			t.Fatalf("%s container OCI source = %q, want container override", phase, got)
+		}
+		if got := createdLabels[i]["com.example.custom"]; got != "keep" {
+			t.Fatalf("%s container custom label = %q, want keep", phase, got)
+		}
 	}
 	if got := createdLabels[0]["com.docker.compose.image"]; got != "sha256:new-image" {
 		t.Fatalf("new container Compose image = %q, want sha256:new-image", got)
-	}
-	if got := createdLabels[0]["com.docker.compose.project"]; got != "arcane" {
-		t.Fatalf("new container Compose project = %q, want arcane", got)
-	}
-	if got := createdLabels[0]["com.example.custom"]; got != "keep" {
-		t.Fatalf("new container custom label = %q, want keep", got)
-	}
-	if got := createdLabels[1]["org.opencontainers.image.version"]; got != "v2.6.0-next.30" {
-		t.Fatalf("rollback container OCI version = %q, want v2.6.0-next.30", got)
-	}
-	if got := createdLabels[1]["org.opencontainers.image.source"]; got != "https://container.example/override" {
-		t.Fatalf("rollback container OCI source = %q, want container override", got)
-	}
-	if got := createdLabels[1]["org.opencontainers.image.title"]; got != "old-title" {
-		t.Fatalf("rollback container OCI title = %q, want previous image value for missing label", got)
 	}
 	if got := createdLabels[1]["com.docker.compose.image"]; got != "sha256:old-image" {
 		t.Fatalf("rollback container Compose image = %q, want sha256:old-image", got)
@@ -307,9 +274,10 @@ func TestUpdateStandaloneContainerRemovesCreatedContainerWhenExtraNetworkConnect
 		OperationTimeout:     10 * time.Millisecond,
 	})
 
-	err := service.updateStandaloneContainer(t.Context(),
+	err := service.updateComposeOrStandalone(t.Context(),
 		container.Summary{ID: "old-id", Names: []string{"/app"}},
 		container.InspectResponse{
+			State:  &container.State{Running: true},
 			ID:     "old-id",
 			Name:   "/app",
 			Image:  "sha256:old-image",
@@ -323,7 +291,7 @@ func TestUpdateStandaloneContainerRemovesCreatedContainerWhenExtraNetworkConnect
 	)
 
 	if err == nil {
-		t.Fatal("updateStandaloneContainer() error = nil, want network timeout with rollback outcome")
+		t.Fatal("updateComposeOrStandalone() error = nil, want network timeout with rollback outcome")
 	}
 	if !strings.Contains(err.Error(), "rollback succeeded") {
 		t.Fatalf("error = %q, want rollback succeeded detail", err.Error())
@@ -376,13 +344,13 @@ func TestUpdateStandaloneContainerTreatsAmbiguousStartErrorAsSuccessWhenInspectR
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 	})
 
-	err := service.updateStandaloneContainer(t.Context(),
+	err := service.updateComposeOrStandalone(t.Context(),
 		container.Summary{ID: "old-id", Names: []string{"/app"}},
-		container.InspectResponse{ID: "old-id", Name: "/app", Image: "sha256:old-image", Config: &container.Config{Image: "app:1"}},
+		container.InspectResponse{State: &container.State{Running: true}, ID: "old-id", Name: "/app", Image: "sha256:old-image", Config: &container.Config{Image: "app:1"}},
 		"app:2",
 	)
 	if err != nil {
-		t.Fatalf("updateStandaloneContainer() error = %v, want nil after inspect confirms running", err)
+		t.Fatalf("updateComposeOrStandalone() error = %v, want nil after inspect confirms running", err)
 	}
 	assertOperationsInOrder(t, operations, []string{
 		"start:new-id",
@@ -443,14 +411,14 @@ func TestUpdateStandaloneContainerRollsBackAmbiguousStartErrorWhenInspectNotRunn
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 	})
 
-	err := service.updateStandaloneContainer(t.Context(),
+	err := service.updateComposeOrStandalone(t.Context(),
 		container.Summary{ID: "old-id", Names: []string{"/app"}},
-		container.InspectResponse{ID: "old-id", Name: "/app", Image: "sha256:old-image", Config: &container.Config{Image: "app:1"}},
+		container.InspectResponse{State: &container.State{Running: true}, ID: "old-id", Name: "/app", Image: "sha256:old-image", Config: &container.Config{Image: "app:1"}},
 		"app:2",
 	)
 
 	if err == nil {
-		t.Fatal("updateStandaloneContainer() error = nil, want ambiguous start failure with rollback outcome")
+		t.Fatal("updateComposeOrStandalone() error = nil, want ambiguous start failure with rollback outcome")
 	}
 	if !strings.Contains(err.Error(), "rollback succeeded") {
 		t.Fatalf("error = %q, want rollback succeeded detail", err.Error())
@@ -488,9 +456,9 @@ func TestServiceFallsBackToStandaloneWhenComposeProjectUnresolved(t *testing.T) 
 	}
 }
 
-const tagSelectionContainerIDInternal, tagSelectionContainerNameInternal = "app", "web"
+const tagSelectionContainerID, tagSelectionContainerName = "app", "web"
 
-type tagSelectionScenarioInternal struct {
+type tagSelectionScenario struct {
 	name                string
 	dry, force, self    bool
 	current, constraint string
@@ -506,9 +474,9 @@ type tagSelectionScenarioInternal struct {
 	wantSkipped     bool
 }
 
-func TestUpdateContainerTagSelectionInternal(t *testing.T) {
-	const containerID, containerName = tagSelectionContainerIDInternal, tagSelectionContainerNameInternal
-	for _, scenario := range []tagSelectionScenarioInternal{
+func TestUpdateContainerTagSelection(t *testing.T) {
+	const containerID, containerName = tagSelectionContainerID, tagSelectionContainerName
+	for _, scenario := range []tagSelectionScenario{
 		{name: "same digest still changes standalone reference"},
 		{name: "dry run selects target", dry: true},
 		{name: "self receives new tag", self: true},
@@ -534,21 +502,21 @@ func TestUpdateContainerTagSelectionInternal(t *testing.T) {
 		{name: "override keeps unchanged digest", excluded: containerName, override: true, unchangedDigest: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			runTagSelectionScenarioInternal(t, scenario)
+			runTagSelectionScenario(t, scenario)
 		})
 	}
 }
 
-// tagSelectionDockerInternal serves a single container to the updater and
+// tagSelectionDocker serves a single container to the updater and
 // records the images it recreates and every mutating request.
-type tagSelectionDockerInternal struct {
+type tagSelectionDocker struct {
 	current   string
 	values    map[string]string
 	created   []string
 	mutations int
 }
 
-func newTagSelectionDockerInternal(scenario tagSelectionScenarioInternal) *tagSelectionDockerInternal {
+func newTagSelectionDocker(scenario tagSelectionScenario) *tagSelectionDocker {
 	current := scenario.current
 	if current == "" {
 		current = cmp.Or(scenario.repository, "app") + ":1.0.0"
@@ -567,12 +535,12 @@ func newTagSelectionDockerInternal(scenario tagSelectionScenarioInternal) *tagSe
 		values["com.docker.compose.project"] = "project"
 		values["com.docker.compose.service"] = "web"
 	}
-	return &tagSelectionDockerInternal{current: current, values: values}
+	return &tagSelectionDocker{current: current, values: values}
 }
 
-func (d *tagSelectionDockerInternal) handlerInternal(t *testing.T) http.HandlerFunc {
+func (d *tagSelectionDocker) handler(t *testing.T) http.HandlerFunc {
 	t.Helper()
-	const containerID, containerName = tagSelectionContainerIDInternal, tagSelectionContainerNameInternal
+	const containerID, containerName = tagSelectionContainerID, tagSelectionContainerName
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := dockerAPIPath(r.URL.Path)
 		if r.Method != http.MethodGet {
@@ -583,7 +551,8 @@ func (d *tagSelectionDockerInternal) handlerInternal(t *testing.T) http.HandlerF
 			writeDockerJSON(t, w, []container.Summary{{ID: containerID, Names: []string{"/" + containerName}, Image: d.current, ImageID: "same", Labels: d.values}})
 		case path == "/containers/"+containerID+"/json":
 			writeDockerJSON(t, w, container.InspectResponse{
-				ID: containerID, Name: "/" + containerName, Image: "same",
+				State: &container.State{Running: true},
+				ID:    containerID, Name: "/" + containerName, Image: "same",
 				Config: &container.Config{Image: d.current, Labels: d.values}, HostConfig: &container.HostConfig{},
 			})
 		case strings.HasPrefix(path, "/images/"):
@@ -607,10 +576,10 @@ func (d *tagSelectionDockerInternal) handlerInternal(t *testing.T) http.HandlerF
 	}
 }
 
-func runTagSelectionScenarioInternal(t *testing.T, scenario tagSelectionScenarioInternal) {
+func runTagSelectionScenario(t *testing.T, scenario tagSelectionScenario) {
 	t.Helper()
-	docker := newTagSelectionDockerInternal(scenario)
-	dockerClient := newDockerClientForHandler(t, docker.handlerInternal(t))
+	docker := newTagSelectionDocker(scenario)
+	dockerClient := newDockerClientForHandler(t, docker.handler(t))
 	puller := &fakePuller{}
 	lister := &testTagLister{tags: []string{"1.1.0", "2.0.0"}}
 	self := &fakeSelfUpdater{}
@@ -620,10 +589,10 @@ func runTagSelectionScenarioInternal(t *testing.T, scenario tagSelectionScenario
 	}
 	cfg := Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, RegistryTagLister: lister, ImagePuller: puller, SelfUpdater: self, Settings: settings}
 	if scenario.self {
-		cfg.SelfContainerID = tagSelectionContainerIDInternal
+		cfg.SelfContainerID = tagSelectionContainerID
 	}
 	service := newServiceForTest(t, cfg)
-	result, err := service.UpdateContainer(t.Context(), tagSelectionContainerIDInternal, Options{DryRun: scenario.dry, Force: scenario.force, IgnoreSettingsExclusions: scenario.override})
+	result, err := service.UpdateContainer(t.Context(), tagSelectionContainerID, Options{DryRun: scenario.dry, Force: scenario.force, IgnoreSettingsExclusions: scenario.override})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,10 +617,10 @@ func runTagSelectionScenarioInternal(t *testing.T, scenario tagSelectionScenario
 		}
 		return
 	}
-	assertTagSelectionUpdatedInternal(t, scenario, result, docker, puller, self)
+	assertTagSelectionUpdated(t, scenario, result, docker, puller, self)
 }
 
-func assertTagSelectionUpdatedInternal(t *testing.T, scenario tagSelectionScenarioInternal, result *Result, docker *tagSelectionDockerInternal, puller *fakePuller, self *fakeSelfUpdater) {
+func assertTagSelectionUpdated(t *testing.T, scenario tagSelectionScenario, result *Result, docker *tagSelectionDocker, puller *fakePuller, self *fakeSelfUpdater) {
 	t.Helper()
 	wantCreated := cmp.Or(scenario.repository, "app") + ":1.1.0"
 	if scenario.constraint != "" {

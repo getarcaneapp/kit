@@ -1,6 +1,5 @@
-// Package refs normalizes Docker image references so that the many spellings of
-// one image — "nginx", "nginx:latest", "docker.io/library/nginx:latest" — compare
-// equal, and identifies the references that cannot meaningfully be updated.
+// Package refs normalizes image references so every spelling of one image ("nginx", "nginx:latest",
+// "docker.io/library/nginx:latest") compares equal, and flags references that cannot be updated.
 package refs
 
 import (
@@ -60,9 +59,8 @@ func NormalizeImageUpdateRef(imageRef string) string {
 	return parts.NormalizedRef
 }
 
-// NormalizeImageUpdateRefMapKeys returns a copy of refToValue keyed by the
-// normalized form of each reference; entries whose keys fail to normalize are
-// dropped.
+// NormalizeImageUpdateRefMapKeys returns refToValue keyed by normalized reference, dropping keys that
+// fail to normalize.
 func NormalizeImageUpdateRefMapKeys(refToValue map[string]string) map[string]string {
 	out := make(map[string]string, len(refToValue))
 	for imageRef, value := range refToValue {
@@ -73,11 +71,8 @@ func NormalizeImageUpdateRefMapKeys(refToValue map[string]string) map[string]str
 	return out
 }
 
-// PreserveConfiguredRef returns targetRef spelled like configuredRef. An
-// equivalent target returns configuredRef itself; a target in the same
-// repository keeps the configured repository and takes the target's tag.
-// Image IDs, digest-pinned targets, and other repositories return targetRef
-// unchanged.
+// PreserveConfiguredRef returns targetRef spelled like configuredRef: the configured repository with the
+// target's tag. Image IDs, digest-pinned targets, and other repositories come back unchanged.
 func PreserveConfiguredRef(configuredRef, targetRef string) string {
 	configuredRef = strings.TrimSpace(configuredRef)
 	targetRef = strings.TrimSpace(targetRef)
@@ -129,29 +124,14 @@ func IsDigestPinnedReference(imageRef string) bool {
 	return err == nil
 }
 
-// PullableImageRef chooses the best reference to pull for a container from what
-// Docker reports about it: the image in its config, the image on its list
-// summary, then its image's repo tags. Image IDs and digest-pinned references
-// are rejected because re-pulling them can never produce a newer image, so ""
-// means the container has no updatable reference.
+// PullableImageRef picks the reference to pull for a container: its config
+// image, its summary image, then its repo tags. Image IDs and digests never update, so "" means none.
 func PullableImageRef(summaryImage, inspectConfigImage string, repoTags []string) string {
-	if image := strings.TrimSpace(inspectConfigImage); isMutablePullableRef(image) {
-		return image
-	}
-	if image := strings.TrimSpace(summaryImage); isMutablePullableRef(image) {
-		return image
-	}
-	for _, tag := range repoTags {
-		trimmed := strings.TrimSpace(tag)
-		if trimmed == "<none>:<none>" || !isMutablePullableRef(trimmed) {
-			continue
+	for _, imageRef := range append([]string{inspectConfigImage, summaryImage}, repoTags...) {
+		imageRef = strings.TrimSpace(imageRef)
+		if imageRef != "" && imageRef != "<none>:<none>" && !IsImageIDLikeReference(imageRef) && !IsDigestPinnedReference(imageRef) {
+			return imageRef
 		}
-		return trimmed
 	}
 	return ""
-}
-
-func isMutablePullableRef(imageRef string) bool {
-	imageRef = strings.TrimSpace(imageRef)
-	return imageRef != "" && !IsImageIDLikeReference(imageRef) && !IsDigestPinnedReference(imageRef)
 }

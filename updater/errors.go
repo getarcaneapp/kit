@@ -46,31 +46,3 @@ func (e *ConfigError) Error() string {
 func (e *ConfigError) Unwrap() error {
 	return e.Reason
 }
-
-// validate reports the first problem that would leave the Service unable to
-// run. It is called after defaults are applied, so it catches only what a
-// default cannot supply.
-//
-// The three port checks below are defensive: applyConfigDefaults fills each of
-// them with a constructor that never returns nil, so New cannot reach them
-// today. They exist so that a future default which can fail is caught here
-// rather than at the first Docker call. The sentinels they carry are returned
-// for real from the call sites that need those ports — ErrPendingStoreRequired
-// from ApplyPending, ErrDockerClientProviderRequired from dockerClient — which
-// a caller can still reach by constructing a Service around a nil port
-// directly.
-func (c Config) validate() error {
-	if c.DockerClientProvider == nil {
-		return &ConfigError{Field: "DockerClientProvider", Reason: ErrDockerClientProviderRequired}
-	}
-	if c.ImagePuller == nil {
-		return &ConfigError{Field: "ImagePuller", Reason: ErrImagePullerRequired}
-	}
-	if c.PendingStore == nil {
-		return &ConfigError{Field: "PendingStore", Reason: ErrPendingStoreRequired}
-	}
-	if c.OperationTimeout < 0 {
-		return &ConfigError{Field: "OperationTimeout", Reason: errors.New("must not be negative")}
-	}
-	return nil
-}

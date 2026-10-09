@@ -4,13 +4,14 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+
+	kit "go.getarcane.app/kit/pkg"
 )
 
 // Status returns a point-in-time updater status snapshot.
 func (s *Service) Status() Status {
-	containerIDs := statusSnapshot(&s.updatingContainers)
-	projectIDs := statusSnapshot(&s.updatingProjects)
-
+	containerIDs := append([]string{}, kit.FromPtr(s.updatingContainers.Load())...)
+	projectIDs := append([]string{}, kit.FromPtr(s.updatingProjects.Load())...)
 	return Status{
 		UpdatingContainers: len(containerIDs),
 		UpdatingProjects:   len(projectIDs),
@@ -21,69 +22,39 @@ func (s *Service) Status() Status {
 
 // BeginContainerUpdate marks a container as updating and returns a completion callback.
 func (s *Service) BeginContainerUpdate(containerID string) func() {
-	return s.beginStatusUpdate(containerID, &s.updatingContainers)
+	containerID = strings.TrimSpace(containerID)
+	if containerID == "" {
+		return func() {}
+	}
+	updateStatusSnapshot(&s.updatingContainers, containerID, true)
+	return func() { updateStatusSnapshot(&s.updatingContainers, containerID, false) }
 }
 
 // BeginProjectUpdate marks a project as updating and returns a completion callback.
 func (s *Service) BeginProjectUpdate(projectID string) func() {
-	return s.beginStatusUpdate(projectID, &s.updatingProjects)
-}
-
-func (s *Service) beginStatusUpdate(id string, active *atomic.Pointer[[]string]) func() {
-	id = strings.TrimSpace(id)
-	if id == "" {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
 		return func() {}
 	}
-
-	updateStatusSnapshot(active, id, true)
-	return func() {
-		updateStatusSnapshot(active, id, false)
-	}
+	updateStatusSnapshot(&s.updatingProjects, projectID, true)
+	return func() { updateStatusSnapshot(&s.updatingProjects, projectID, false) }
 }
 
-func statusSnapshot(active *atomic.Pointer[[]string]) []string {
-	if active == nil {
-		return []string{}
-	}
-	ids := active.Load()
-	if ids == nil || len(*ids) == 0 {
-		return []string{}
-	}
-	return slices.Clone(*ids)
-}
-
+// updateStatusSnapshot adds or removes id in the sorted snapshot active points at, retrying lost CAS races.
 func updateStatusSnapshot(active *atomic.Pointer[[]string], id string, add bool) {
-	if active == nil {
-		return
-	}
 	for {
 		currentPtr := active.Load()
-		var current []string
-		if currentPtr != nil {
-			current = *currentPtr
-		}
-
+		current := kit.FromPtr(currentPtr)
 		index, found := slices.BinarySearch(current, id)
-		if add {
-			if found {
-				return
-			}
-			next := make([]string, 0, len(current)+1)
-			next = append(next, current[:index]...)
-			next = append(next, id)
-			next = append(next, current[index:]...)
-			if active.CompareAndSwap(currentPtr, &next) {
-				return
-			}
-			continue
-		}
-
-		if !found {
+		if found == add {
 			return
 		}
-		next := make([]string, 0, len(current)-1)
-		next = append(next, current[:index]...)
-		next = append(next, current[index+1:]...)
+		next := slices.Clone(current)
+		if add {
+			next = slices.Insert(next, index, id)
+		} else {
+			next = slices.Delete(next, index, index+1)
+		}
 		if active.CompareAndSwap(currentPtr, &next) {
 			return
 		}

@@ -15,9 +15,9 @@ type composeGroup struct {
 	err         error
 	projectName string
 	services    []string
-	seen        map[string]struct{}
 }
 
+// buildComposeGroups groups planned Compose containers by resolved project, flagging conflicting service targets.
 func (s *Service) buildComposeGroups(ctx context.Context, sorted []deps.ContainerWithDeps, plansByName map[string]*restartPlan) map[string]composeGroup {
 	groups := map[string]composeGroup{}
 	if s.config.ProjectUpdater == nil {
@@ -26,15 +26,10 @@ func (s *Service) buildComposeGroups(ctx context.Context, sorted []deps.Containe
 
 	for _, candidate := range sorted {
 		plan := plansByName[candidate.Name]
-		if plan == nil || plan.newRef == "" || plan.inspect == nil || plan.inspect.Config == nil {
+		if plan == nil || plan.newRef == "" || plan.inspect == nil || plan.inspect.Config == nil || s.config.LabelPolicy.IsSelfUpdateTarget(plan.inspect.Config.Labels) {
 			continue
 		}
-		labels := plan.inspect.Config.Labels
-		if s.config.LabelPolicy.IsSelfUpdateTarget(labels) {
-			continue
-		}
-		projectName := compose.ProjectLabel(labels)
-		serviceName := compose.ServiceLabel(labels)
+		projectName, serviceName := compose.ProjectLabel(plan.inspect.Config.Labels), compose.ServiceLabel(plan.inspect.Config.Labels)
 		if projectName == "" || serviceName == "" {
 			continue
 		}
@@ -44,35 +39,20 @@ func (s *Service) buildComposeGroups(ctx context.Context, sorted []deps.Containe
 		}
 		group := groups[project.ID]
 		group.projectName = projectName
-		if group.seen == nil {
-			group.seen = map[string]struct{}{}
-		}
 		if group.images == nil {
 			group.images = map[string]types.ServiceImageChange{}
 		}
 		change := types.ServiceImageChange{ExpectedRef: plan.inspect.Config.Image, TargetRef: plan.newRef}
-		if previous, ok := group.images[serviceName]; ok && previous != change {
+		previous, seen := group.images[serviceName]
+		if seen && previous != change {
 			group.err = fmt.Errorf("conflicting targets for compose service %s/%s", projectName, serviceName)
 		}
-		group.images[serviceName] = change
-		group.tagChanges = group.tagChanges || isComposeTagChangeInternal(plan)
-		if _, seen := group.seen[serviceName]; !seen {
+		if !seen {
 			group.services = append(group.services, serviceName)
-			group.seen[serviceName] = struct{}{}
 		}
+		group.images[serviceName] = change
+		group.tagChanges = group.tagChanges || isComposeTagChange(plan.inspect, plan.newRef)
 		groups[project.ID] = group
 	}
 	return groups
-}
-
-func composeProjectID(projectName string, groups map[string]composeGroup) string {
-	if projectName == "" {
-		return ""
-	}
-	for projectID, group := range groups {
-		if group.projectName == projectName {
-			return projectID
-		}
-	}
-	return ""
 }

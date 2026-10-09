@@ -15,102 +15,79 @@ import (
 	updatetypes "go.getarcane.app/updater/types"
 )
 
-func (s *Service) preflightComposeImageInternal(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, newRef string) error {
+// preflightComposeImage resolves the Compose project a tag change to newRef must be persisted
+// through, and returns "" when the change needs none.
+func (s *Service) preflightComposeImage(ctx context.Context, containerID string, inspect container.InspectResponse, newRef string) (string, error) {
 	labels := labelsFromInspect(inspect)
-	if s.isSelfUpdateCandidate(cnt.ID, labels) {
-		return nil
-	}
-	if inspect.Config != nil && refs.NormalizeImageUpdateRef(inspect.Config.Image) == refs.NormalizeImageUpdateRef(newRef) {
-		return nil
+	if s.isSelfUpdateCandidate(containerID, labels) || !isComposeTagChange(&inspect, newRef) {
+		return "", nil
 	}
 	projectName, serviceName := compose.ProjectLabel(labels), compose.ServiceLabel(labels)
-	if projectName == "" && serviceName == "" {
-		projectName, serviceName = compose.ProjectLabel(cnt.Labels), compose.ServiceLabel(cnt.Labels)
-	}
-	if projectName == "" && serviceName == "" {
-		return nil
-	}
 	if projectName == "" || serviceName == "" {
-		return errors.New("compose tag update requires project and service labels")
+		return "", errors.New("compose tag update requires project and service labels")
 	}
 	if _, ok := s.config.ProjectUpdater.(updatetypes.ProjectImageUpdater); !ok {
-		return fmt.Errorf("compose project %s requires a ProjectImageUpdater adapter for tag updates", projectName)
+		return "", fmt.Errorf("compose project %s requires a ProjectImageUpdater adapter for tag updates", projectName)
 	}
 	project, err := s.config.ProjectUpdater.ProjectByComposeName(ctx, projectName)
 	if err != nil {
-		return fmt.Errorf("resolve compose project %s for tag update: %w", projectName, err)
+		return "", fmt.Errorf("resolve compose project %s for tag update: %w", projectName, err)
 	}
 	if strings.TrimSpace(project.ID) == "" {
-		return fmt.Errorf("compose project %s has no project ID for tag update", projectName)
+		return "", fmt.Errorf("compose project %s has no project ID for tag update", projectName)
 	}
-	return nil
+	return project.ID, nil
 }
 
-func (s *Service) updateComposeImageInternal(ctx context.Context, target container.Summary, inspect container.InspectResponse, newRef string) error {
-	if err := s.preflightComposeImageInternal(ctx, target, inspect, newRef); err != nil {
-		return err
-	}
-	labels := labelsFromInspect(inspect)
-	projectName, serviceName := compose.ProjectLabel(labels), compose.ServiceLabel(labels)
-	if projectName == "" && serviceName == "" {
-		projectName, serviceName = compose.ProjectLabel(target.Labels), compose.ServiceLabel(target.Labels)
-	}
-	adapter, ok := s.config.ProjectUpdater.(updatetypes.ProjectImageUpdater)
-	if !ok || projectName == "" || serviceName == "" || inspect.Config == nil {
-		return errors.New("compose tag update requires an image updater and complete container configuration")
-	}
-	project, err := s.config.ProjectUpdater.ProjectByComposeName(ctx, projectName)
-	if err != nil {
-		return fmt.Errorf("resolve compose project %s for tag update: %w", projectName, err)
-	}
-	if strings.TrimSpace(project.ID) == "" {
-		return fmt.Errorf("compose project %s has no project ID for tag update", projectName)
-	}
-	opCtx, cancel := s.opCtx(ctx)
-	defer cancel()
-	err = adapter.UpdateServiceImages(opCtx, project.ID, map[string]updatetypes.ServiceImageChange{
-		serviceName: {ExpectedRef: inspect.Config.Image, TargetRef: newRef},
-	})
-	if err != nil {
-		return fmt.Errorf("update compose service %s/%s image: %w", projectName, serviceName, err)
-	}
-	dockerClient, err := s.dockerClient(ctx)
-	if err != nil {
-		return err
-	}
-	return verifyComposeTargetInternal(ctx, dockerClient, projectName, serviceName, newRef)
+// isComposeTagChange reports whether recreating a Compose container as newRef changes its configured image,
+// which only a ProjectImageUpdater can persist.
+func isComposeTagChange(inspect *container.InspectResponse, newRef string) bool {
+	return inspect != nil && inspect.Config != nil &&
+		refs.NormalizeImageUpdateRef(inspect.Config.Image) != refs.NormalizeImageUpdateRef(newRef) &&
+		(compose.ProjectLabel(inspect.Config.Labels) != "" || compose.ServiceLabel(inspect.Config.Labels) != "")
 }
 
-func verifyComposeTargetInternal(ctx context.Context, dockerClient *client.Client, projectName, serviceName, newRef string) error {
-	normalizedRef := refs.NormalizeImageUpdateRef(newRef)
-	if dockerClient == nil || strings.TrimSpace(projectName) == "" || strings.TrimSpace(serviceName) == "" || normalizedRef == "" {
-		return errors.New("verify compose target requires a Docker client, project, service, and valid target reference")
+// verifyComposeService checks that a service's running containers run targetRef or, without a target,
+// no longer run oldImageID.
+func verifyComposeService(ctx context.Context, dockerClient *client.Client, projectName, serviceName, oldImageID, targetRef string) error {
+	if targetRef == "" && oldImageID == "" {
+		return nil
 	}
-	image, err := dockerClient.ImageInspect(ctx, newRef)
+	targetID := ""
+	if targetRef != "" {
+		image, err := dockerClient.ImageInspect(ctx, targetRef)
+		if err != nil {
+			return fmt.Errorf("verify compose service: inspect target image: %w", err)
+		}
+		if targetID = strings.TrimSpace(image.ID); targetID == "" {
+			return errors.New("verify compose service: target image has no image ID")
+		}
+	}
+	filters := make(client.Filters).Add("label", compose.ProjectLabelKey+"="+projectName, compose.ServiceLabelKey+"="+serviceName, compose.ServiceContainerFilter)
+	containers, err := dockerClient.ContainerList(ctx, client.ContainerListOptions{Filters: filters})
 	if err != nil {
-		return fmt.Errorf("verify compose target: inspect target image: %w", err)
-	}
-	if strings.TrimSpace(image.ID) == "" {
-		return errors.New("verify compose target: target image has no image ID")
-	}
-	filters := make(client.Filters)
-	filters = filters.Add("label", compose.ProjectLabelKey+"="+projectName)
-	filters = filters.Add("label", compose.ServiceLabelKey+"="+serviceName)
-	containers, err := dockerClient.ContainerList(ctx, client.ContainerListOptions{All: false, Filters: filters})
-	if err != nil {
-		return fmt.Errorf("verify compose target: list service containers: %w", err)
+		return fmt.Errorf("verify compose service: list service containers: %w", err)
 	}
 	if len(containers.Items) == 0 {
 		return fmt.Errorf("compose service %s/%s has no running container after update", projectName, serviceName)
 	}
 	for _, cnt := range containers.Items {
-		inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
-		if inspectErr != nil {
-			return fmt.Errorf("verify compose target: inspect container %s: %w", cnt.ID, inspectErr)
+		currentImageID := strings.TrimSpace(cnt.ImageID)
+		var current container.InspectResponse
+		if targetID != "" || currentImageID == "" {
+			inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
+			if inspectErr != nil {
+				return fmt.Errorf("verify compose service: inspect container %s: %w", cnt.ID, inspectErr)
+			}
+			current = inspected.Container
+			currentImageID = strings.TrimSpace(current.Image)
 		}
-		current := inspected.Container
-		if current.Config == nil || refs.NormalizeImageUpdateRef(current.Config.Image) != normalizedRef || current.Image != image.ID || current.State == nil || !current.State.Running {
-			return fmt.Errorf("compose service %s/%s container %s does not run target %s (%s)", projectName, serviceName, cnt.ID, newRef, image.ID)
+		switch {
+		case targetID == "" && currentImageID == oldImageID:
+			return fmt.Errorf("compose service %s/%s still running old image %s after update", projectName, serviceName, oldImageID)
+		case targetID != "" && (current.Config == nil || refs.NormalizeImageUpdateRef(current.Config.Image) != refs.NormalizeImageUpdateRef(targetRef) ||
+			currentImageID != targetID || current.State == nil || !current.State.Running):
+			return fmt.Errorf("compose service %s/%s container %s does not run target %s (%s)", projectName, serviceName, cnt.ID, targetRef, targetID)
 		}
 	}
 	return nil

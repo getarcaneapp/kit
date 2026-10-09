@@ -1,9 +1,11 @@
 package updater
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -21,14 +23,13 @@ type dockerComposeProjectMetadata struct {
 	projectName string
 	workingDir  string
 	configFiles []string
+	envFiles    []string
+	dockerHost  string
 }
 
 // NewDockerComposeProjectUpdater returns a Docker Compose CLI project updater.
 func NewDockerComposeProjectUpdater(provider DockerClientProvider) ProjectUpdater {
-	if provider == nil {
-		provider = NewDockerClientProvider()
-	}
-	return dockerComposeProjectUpdater{dockerClientProvider: provider}
+	return dockerComposeProjectUpdater{dockerClientProvider: cmp.Or[DockerClientProvider](provider, NewDockerClientProvider())}
 }
 
 func (u dockerComposeProjectUpdater) ProjectByComposeName(ctx context.Context, composeName string) (ComposeProject, error) {
@@ -39,6 +40,8 @@ func (u dockerComposeProjectUpdater) ProjectByComposeName(ctx context.Context, c
 	return ComposeProject{ID: metadata.projectName, Name: metadata.projectName}, nil
 }
 
+// UpdateServices recreates services with the project directory, config and env files Compose recorded,
+// against the same engine the provider uses.
 func (u dockerComposeProjectUpdater) UpdateServices(ctx context.Context, projectID string, services []string) error {
 	metadata, err := u.resolveProjectMetadata(ctx, projectID)
 	if err != nil {
@@ -50,23 +53,36 @@ func (u dockerComposeProjectUpdater) UpdateServices(ctx context.Context, project
 	}
 
 	args := []string{"compose", "-p", metadata.projectName}
+	if metadata.workingDir != "" {
+		args = append(args, "--project-directory", metadata.workingDir)
+	}
 	for _, configFile := range metadata.configFiles {
 		args = append(args, "-f", configFile)
+	}
+	for _, envFile := range metadata.envFiles {
+		args = append(args, "--env-file", envFile)
 	}
 	args = append(args, "up", "-d", "--no-deps", "--force-recreate")
 	args = append(args, services...)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	if metadata.workingDir != "" {
-		cmd.Dir = metadata.workingDir
+	cmd.Dir = metadata.workingDir
+	if metadata.dockerHost != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+metadata.dockerHost)
 	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("docker compose update failed: %w: %s", err, truncateComposeOutput(strings.TrimSpace(string(output))))
+		const maxComposeErrorOutput = 4096
+		message := strings.TrimSpace(string(output))
+		if len(message) > maxComposeErrorOutput {
+			message = message[:maxComposeErrorOutput] + " (truncated)"
+		}
+		return fmt.Errorf("docker compose update failed: %w: %s", err, message)
 	}
 	return nil
 }
 
+// resolveProjectMetadata reads a project's Compose labels from one of its service containers.
 func (u dockerComposeProjectUpdater) resolveProjectMetadata(ctx context.Context, composeName string) (dockerComposeProjectMetadata, error) {
 	composeName = strings.TrimSpace(composeName)
 	if composeName == "" {
@@ -78,8 +94,7 @@ func (u dockerComposeProjectUpdater) resolveProjectMetadata(ctx context.Context,
 		return dockerComposeProjectMetadata{}, fmt.Errorf("docker connect: %w", err)
 	}
 
-	filters := make(client.Filters)
-	filters = filters.Add("label", compose.ProjectLabelKey+"="+composeName)
+	filters := make(client.Filters).Add("label", compose.ProjectLabelKey+"="+composeName, compose.ServiceContainerFilter)
 	containers, err := dockerClient.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
 	if err != nil {
 		return dockerComposeProjectMetadata{}, fmt.Errorf("list compose containers: %w", err)
@@ -87,25 +102,12 @@ func (u dockerComposeProjectUpdater) resolveProjectMetadata(ctx context.Context,
 	if len(containers.Items) == 0 {
 		return dockerComposeProjectMetadata{}, fmt.Errorf("compose project not found: %s", composeName)
 	}
-
-	for _, summary := range containers.Items {
-		if compose.ProjectLabel(summary.Labels) != composeName {
-			continue
-		}
-		return dockerComposeProjectMetadata{
-			projectName: composeName,
-			workingDir:  compose.WorkingDirLabel(summary.Labels),
-			configFiles: compose.ConfigFilesLabel(summary.Labels),
-		}, nil
-	}
-	return dockerComposeProjectMetadata{}, fmt.Errorf("compose project not found: %s", composeName)
-}
-
-func truncateComposeOutput(output string) string {
-	const maxComposeErrorOutput = 4096
-	output = strings.TrimSpace(output)
-	if len(output) <= maxComposeErrorOutput {
-		return output
-	}
-	return output[:maxComposeErrorOutput] + " (truncated)"
+	labels := containers.Items[0].Labels
+	return dockerComposeProjectMetadata{
+		projectName: composeName,
+		workingDir:  strings.TrimSpace(labels[compose.WorkingDirLabelKey]),
+		configFiles: kit.TrimNonEmpty(strings.Split(labels[compose.ConfigFilesLabelKey], ",")),
+		envFiles:    kit.TrimNonEmpty(strings.Split(labels[compose.EnvironmentFileLabelKey], ",")),
+		dockerHost:  dockerClient.DaemonHost(),
+	}, nil
 }
