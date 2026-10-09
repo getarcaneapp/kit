@@ -1,3 +1,13 @@
+## updater/v0.11.6
+
+### Bug fixes
+
+* recreate containers per docker and compose spec ([#18](https://github.com/getarcaneapp/kit/pull/18) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.5...updater/v0.11.6
+
 ## updater/v0.11.5
 
 ### Bug fixes
