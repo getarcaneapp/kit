@@ -1,3 +1,13 @@
+## docker/compat/v0.1.3
+
+### Bug fixes
+
+* bump deps across all modules([bf8bf7f](https://github.com/getarcaneapp/kit/commit/bf8bf7fb40e108ff9b3bb580b4e47b3eae85da69) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/compat/v0.1.2...docker/compat/v0.1.3
+
 ## docker/compat/v0.1.2
 
 ### Bug fixes
