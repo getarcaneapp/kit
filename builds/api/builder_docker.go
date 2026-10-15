@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -13,8 +14,10 @@ import (
 	"strings"
 
 	"github.com/containerd/platforms"
+	"github.com/docker/cli/cli/config"
 	"github.com/docker/go-units"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/session/auth/authprovider"
 	"github.com/moby/go-archive"
 	dockerbuild "github.com/moby/moby/api/types/build"
 	dockercontainer "github.com/moby/moby/api/types/container"
@@ -53,7 +56,7 @@ type buildFilesystemInput struct {
 	dockerfileInline     string
 }
 
-func parseUlimitsInternal(values map[string]string) ([]*dockercontainer.Ulimit, error) {
+func parseUlimits(values map[string]string) ([]*dockercontainer.Ulimit, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -80,7 +83,7 @@ func parseUlimitsInternal(values map[string]string) ([]*dockercontainer.Ulimit, 
 	return out, nil
 }
 
-func prepareBuildFilesystemInputInternal(req types.BuildRequest) (buildFilesystemInput, error) {
+func prepareBuildFilesystemInput(req types.BuildRequest) (buildFilesystemInput, error) {
 	contextDir := filepath.Clean(req.ContextDir)
 	if contextDir == "" {
 		return buildFilesystemInput{}, &types.BuildContextDirRequiredError{}
@@ -95,39 +98,30 @@ func prepareBuildFilesystemInputInternal(req types.BuildRequest) (buildFilesyste
 		}, nil
 	}
 
-	dockerfilePath := strings.TrimSpace(req.Dockerfile)
-	dockerfilePath = kit.Ternary(dockerfilePath == "", "Dockerfile", dockerfilePath)
-
-	fullDockerfilePath := dockerfilePath
-	if !filepath.IsAbs(dockerfilePath) {
-		fullDockerfilePath = filepath.Join(contextDir, dockerfilePath)
-	}
+	dockerfilePath := cmp.Or(strings.TrimSpace(req.Dockerfile), "Dockerfile")
+	fullDockerfilePath := kit.Ternary(filepath.IsAbs(dockerfilePath), dockerfilePath, filepath.Join(contextDir, dockerfilePath))
 
 	relDockerfile, relErr := filepath.Rel(contextDir, fullDockerfilePath)
-	dockerfileOutsideCtx := relErr != nil || !filepath.IsLocal(relDockerfile)
-	if !dockerfileOutsideCtx {
-		excluded, err := dockerfileExcludedByDockerignoreInternal(contextDir, relDockerfile)
-		if err != nil {
-			return buildFilesystemInput{}, err
+	dockerfileOutsideCtx, err := func() (bool, error) {
+		if relErr != nil || !filepath.IsLocal(relDockerfile) {
+			return true, nil
 		}
-		dockerfileOutsideCtx = excluded
+		return dockerfileExcludedByDockerignore(contextDir, relDockerfile)
+	}()
+	if err != nil {
+		return buildFilesystemInput{}, err
 	}
-	relDockerfile = kit.Ternary(
-		dockerfileOutsideCtx,
-		filepath.Base(fullDockerfilePath),
-		filepath.ToSlash(relDockerfile),
-	)
 
 	return buildFilesystemInput{
 		contextDir:           contextDir,
 		fullDockerfilePath:   fullDockerfilePath,
-		relDockerfile:        relDockerfile,
+		relDockerfile:        kit.Ternary(dockerfileOutsideCtx, filepath.Base(fullDockerfilePath), filepath.ToSlash(relDockerfile)),
 		dockerfileOutsideCtx: dockerfileOutsideCtx,
 	}, nil
 }
 
-func prepareDockerBuildInputInternal(req types.BuildRequest) (dockerBuildInput, bool, error) {
-	fsInput, err := prepareBuildFilesystemInputInternal(req)
+func prepareDockerBuildInput(req types.BuildRequest) (dockerBuildInput, bool, error) {
+	fsInput, err := prepareBuildFilesystemInput(req)
 	if err != nil {
 		return dockerBuildInput{}, false, err
 	}
@@ -136,12 +130,7 @@ func prepareDockerBuildInputInternal(req types.BuildRequest) (dockerBuildInput, 
 		return dockerBuildInput{}, true, &types.DockerBuildMultiPlatformUnsupportedError{}
 	}
 
-	platform := ""
-	if len(req.Platforms) == 1 {
-		platform = strings.TrimSpace(req.Platforms[0])
-	}
-
-	ulimits, err := parseUlimitsInternal(req.Ulimits)
+	ulimits, err := parseUlimits(req.Ulimits)
 	if err != nil {
 		return dockerBuildInput{}, false, err
 	}
@@ -159,45 +148,32 @@ func prepareDockerBuildInputInternal(req types.BuildRequest) (dockerBuildInput, 
 		}
 		labels[k] = val
 	}
-	if len(labels) == 0 {
-		labels = nil
-	}
 
 	cacheFrom := kit.TrimNonEmpty(req.CacheFrom)
-	if len(cacheFrom) == 0 {
-		cacheFrom = nil
-	}
-
 	extraHosts := kit.TrimNonEmpty(req.ExtraHosts)
-	if len(extraHosts) == 0 {
-		extraHosts = nil
-	}
 
 	return dockerBuildInput{
 		buildFilesystemInput: fsInput,
-		platform:             platform,
-		buildArgs:            buildArgs,
-		labels:               labels,
-		cacheFrom:            cacheFrom,
-		noCache:              req.NoCache,
-		pullParent:           req.Pull,
-		networkMode:          strings.TrimSpace(req.Network),
-		isolation:            strings.TrimSpace(req.Isolation),
-		shmSize:              req.ShmSize,
-		ulimits:              ulimits,
-		extraHosts:           extraHosts,
+		platform: func() string {
+			if len(req.Platforms) == 0 {
+				return ""
+			}
+			return strings.TrimSpace(req.Platforms[0])
+		}(),
+		buildArgs:   buildArgs,
+		labels:      kit.Ternary(len(labels) == 0, nil, labels),
+		cacheFrom:   kit.Ternary(len(cacheFrom) == 0, nil, cacheFrom),
+		noCache:     req.NoCache,
+		pullParent:  req.Pull,
+		networkMode: strings.TrimSpace(req.Network),
+		isolation:   strings.TrimSpace(req.Isolation),
+		shmSize:     req.ShmSize,
+		ulimits:     ulimits,
+		extraHosts:  kit.Ternary(len(extraHosts) == 0, nil, extraHosts),
 	}, false, nil
 }
 
-func createBuildContextInternal(contextDir string) (io.ReadCloser, error) {
-	excludes, err := readDockerignoreInternal(contextDir)
-	if err != nil {
-		return nil, err
-	}
-	return archive.TarWithOptions(contextDir, &archive.TarOptions{ExcludePatterns: excludes})
-}
-
-func copyFileWithModeInternal(src, dst string, mode os.FileMode) (copyErr error) {
+func copyFileWithMode(src, dst string, mode os.FileMode) (copyErr error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -222,24 +198,37 @@ func copyFileWithModeInternal(src, dst string, mode os.FileMode) (copyErr error)
 	return nil
 }
 
-func copyContextTreeInternal(srcRoot, dstRoot string) error {
-	return filepath.WalkDir(srcRoot, func(path string, d os.DirEntry, walkErr error) error {
+func prepareBuildContext(input buildFilesystemInput) (string, string, func(), error) {
+	if input.dockerfileInline == "" && !input.dockerfileOutsideCtx {
+		return input.contextDir, input.relDockerfile, func() {}, nil
+	}
+
+	stagingDir, err := os.MkdirTemp("", "arcane-docker-build-*")
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to create temporary build directory: %w", err)
+	}
+
+	cleanup := func() {
+		_ = os.RemoveAll(stagingDir)
+	}
+
+	err = filepath.WalkDir(input.contextDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 
-		relPath, err := filepath.Rel(srcRoot, path)
-		if err != nil {
-			return err
+		relPath, relErr := filepath.Rel(input.contextDir, path)
+		if relErr != nil {
+			return relErr
 		}
 		if relPath == "." {
 			return nil
 		}
 
-		targetPath := filepath.Join(dstRoot, relPath)
-		info, err := d.Info()
-		if err != nil {
-			return err
+		targetPath := filepath.Join(stagingDir, relPath)
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return infoErr
 		}
 
 		if d.IsDir() {
@@ -254,30 +243,13 @@ func copyContextTreeInternal(srcRoot, dstRoot string) error {
 			return os.Symlink(linkTarget, targetPath) //nolint:gosec // build context staging intentionally preserves symlinks from the user-selected source tree.
 		}
 
-		err = os.MkdirAll(filepath.Dir(targetPath), 0o755)
-		if err != nil {
-			return err
+		mkdirErr := os.MkdirAll(filepath.Dir(targetPath), 0o755)
+		if mkdirErr != nil {
+			return mkdirErr
 		}
 
-		return copyFileWithModeInternal(path, targetPath, info.Mode())
+		return copyFileWithMode(path, targetPath, info.Mode())
 	})
-}
-
-func prepareBuildContextInternal(input buildFilesystemInput) (string, string, func(), error) {
-	if input.dockerfileInline == "" && !input.dockerfileOutsideCtx {
-		return input.contextDir, input.relDockerfile, func() {}, nil
-	}
-
-	stagingDir, err := os.MkdirTemp("", "arcane-docker-build-*")
-	if err != nil {
-		return "", "", nil, fmt.Errorf("failed to create temporary build directory: %w", err)
-	}
-
-	cleanup := func() {
-		_ = os.RemoveAll(stagingDir)
-	}
-
-	err = copyContextTreeInternal(input.contextDir, stagingDir)
 	if err != nil {
 		cleanup()
 		return "", "", nil, fmt.Errorf("failed to stage build context: %w", err)
@@ -307,7 +279,7 @@ func prepareBuildContextInternal(input buildFilesystemInput) (string, string, fu
 		return "", "", nil, fmt.Errorf("failed to stat Dockerfile: %w", err)
 	}
 
-	err = copyFileWithModeInternal(input.fullDockerfilePath, stagedDockerfilePath, dockerfileInfo.Mode())
+	err = copyFileWithMode(input.fullDockerfilePath, stagedDockerfilePath, dockerfileInfo.Mode())
 	if err != nil {
 		cleanup()
 		return "", "", nil, fmt.Errorf("failed to stage Dockerfile: %w", err)
@@ -316,7 +288,7 @@ func prepareBuildContextInternal(input buildFilesystemInput) (string, string, fu
 	return stagingDir, stagedDockerfile, cleanup, nil
 }
 
-func (b *Service) performDockerBuildInternal(
+func (b *Service) performDockerBuild(
 	ctx context.Context,
 	dockerClient *dockerclient.Client,
 	buildContext io.Reader,
@@ -327,7 +299,10 @@ func (b *Service) performDockerBuildInternal(
 	if err != nil {
 		return err
 	}
-	buildSession.Allow(b.newBuildkitAuthProviderInternal())
+	buildSession.Allow(authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
+		AuthConfigProvider: buildkitAuthConfigProvider(authprovider.LoadAuthConfig(config.LoadDefaultConfigFile(os.Stderr)), b.registryAuthProvider),
+	}))
+	// keep: buildOpts is a by-value copy; SessionID only known after session creation
 	buildOpts.SessionID = buildSession.ID()
 
 	sessionCtx, cancelSession := context.WithCancel(ctx)
@@ -346,55 +321,67 @@ func (b *Service) performDockerBuildInternal(
 	}
 
 	return errors.Join(
-		renderDockerBuildStreamInternal(ctx, resp.Body, progressWriter),
+		renderDockerBuildStream(ctx, resp.Body, progressWriter),
 		resp.Body.Close(),
 	)
 }
 
-func (b *Service) pushDockerImagesInternal(
+func (b *Service) pushDockerImages(
 	ctx context.Context,
 	dockerClient *dockerclient.Client,
 	tags []string,
 	progressWriter io.Writer,
 ) error {
-	if progressWriter == nil {
-		progressWriter = io.Discard
-	}
 	for _, tag := range tags {
 		if strings.TrimSpace(tag) == "" {
 			continue
 		}
-		pushOptions := dockerclient.ImagePushOptions{}
-		if b.registryAuthProvider != nil {
-			authHeader, authErr := registryAuthHeaderForImageInternal(ctx, b.registryAuthProvider, tag)
-			if authErr != nil {
-				_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for "+tag)
-			} else if authHeader != "" {
-				pushOptions.RegistryAuth = authHeader
-			}
-		}
-		pushResp, pushErr := dockerClient.ImagePush(ctx, tag, pushOptions)
+		pushResp, pushErr := dockerClient.ImagePush(ctx, tag, dockerclient.ImagePushOptions{
+			RegistryAuth: func() string {
+				if b.registryAuthProvider == nil {
+					return ""
+				}
+				authHeader, authErr := registryAuthHeaderForImage(ctx, b.registryAuthProvider, tag)
+				if authErr != nil {
+					_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for "+tag)
+					return ""
+				}
+				return authHeader
+			}(),
+		})
 		if pushErr != nil {
 			return pushErr
 		}
-		if pushResp != nil {
-			if err := dockerutils.RenderJSONMessageStream(pushResp, progressWriter); err != nil {
-				_ = pushResp.Close()
-				return err
-			}
+		if err := dockerutils.RenderJSONMessageStream(pushResp, progressWriter); err != nil {
 			_ = pushResp.Close()
+			return err
 		}
+		_ = pushResp.Close()
 	}
 	return nil
 }
 
-func buildDockerImageOptionsInternal(
+func buildDockerImageOptions(
 	req types.BuildRequest,
 	input dockerBuildInput,
 	dockerfileForBuild string,
 	authConfigs map[string]dockerregistry.AuthConfig,
 ) (dockerclient.ImageBuildOptions, error) {
-	buildOpts := dockerclient.ImageBuildOptions{
+	platformSpecs, parseErr := func() ([]ocispec.Platform, error) {
+		if input.platform == "" {
+			return nil, nil
+		}
+		platform, err := platforms.Parse(input.platform)
+		if err != nil {
+			return nil, err
+		}
+		return []ocispec.Platform{platform}, nil
+	}()
+	if parseErr != nil {
+		return dockerclient.ImageBuildOptions{}, parseErr
+	}
+
+	return dockerclient.ImageBuildOptions{
 		Version:     dockerbuild.BuilderBuildKit,
 		Tags:        req.Tags,
 		Dockerfile:  dockerfileForBuild,
@@ -411,24 +398,12 @@ func buildDockerImageOptionsInternal(
 		ShmSize:     input.shmSize,
 		Ulimits:     input.ulimits,
 		ExtraHosts:  input.extraHosts,
-		AuthConfigs: authConfigs,
-	}
-	if len(buildOpts.AuthConfigs) == 0 {
-		buildOpts.AuthConfigs = nil
-	}
-
-	if input.platform != "" {
-		platform, parseErr := platforms.Parse(input.platform)
-		if parseErr != nil {
-			return dockerclient.ImageBuildOptions{}, parseErr
-		}
-		buildOpts.Platforms = []ocispec.Platform{platform}
-	}
-
-	return buildOpts, nil
+		AuthConfigs: kit.Ternary(len(authConfigs) == 0, nil, authConfigs),
+		Platforms:   platformSpecs,
+	}, nil
 }
 
-func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRequest, progressWriter io.Writer) (*types.BuildResult, error) {
+func (b *Service) buildWithDocker(ctx context.Context, req types.BuildRequest, progressWriter io.Writer) (*types.BuildResult, error) {
 	if b.dockerClientProvider == nil {
 		return nil, &types.BuildDockerServiceUnavailableError{}
 	}
@@ -438,47 +413,49 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
-	input, _, err := prepareDockerBuildInputInternal(req)
+	input, _, err := prepareDockerBuildInput(req)
 	if err != nil {
 		return nil, err
 	}
 
-	buildContextDir, dockerfileForBuild, cleanupBuildContext, err := prepareBuildContextInternal(input.buildFilesystemInput)
+	buildContextDir, dockerfileForBuild, cleanupBuildContext, err := prepareBuildContext(input.buildFilesystemInput)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanupBuildContext()
 
-	buildContext, err := createBuildContextInternal(buildContextDir)
+	excludes, err := readDockerignore(buildContextDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create build context: %w", err)
+	}
+	buildContext, err := archive.TarWithOptions(buildContextDir, &archive.TarOptions{ExcludePatterns: excludes})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create build context: %w", err)
 	}
 	defer func() { _ = buildContext.Close() }()
 
-	var authConfigs map[string]dockerregistry.AuthConfig
-	if b.registryAuthProvider != nil {
+	buildOpts, buildOptsErr := buildDockerImageOptions(req, input, dockerfileForBuild, func() map[string]dockerregistry.AuthConfig {
+		if b.registryAuthProvider == nil {
+			return nil
+		}
 		loadedAuthConfigs, authErr := b.registryAuthProvider.GetAllRegistryAuthConfigs(ctx)
 		if authErr != nil {
-			if progressWriter != nil {
-				_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for build")
-			}
-		} else {
-			authConfigs = loadedAuthConfigs
+			_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for build")
+			return nil
 		}
-	}
-
-	buildOpts, buildOptsErr := buildDockerImageOptionsInternal(req, input, dockerfileForBuild, authConfigs)
+		return loadedAuthConfigs
+	}())
 	if buildOptsErr != nil {
 		return nil, buildOptsErr
 	}
 
-	err = b.performDockerBuildInternal(ctx, dockerClient, buildContext, buildOpts, progressWriter)
+	err = b.performDockerBuild(ctx, dockerClient, buildContext, buildOpts, progressWriter)
 	if err != nil {
 		return nil, err
 	}
 
 	if req.Push {
-		err = b.pushDockerImagesInternal(ctx, dockerClient, req.Tags, progressWriter)
+		err = b.pushDockerImages(ctx, dockerClient, req.Tags, progressWriter)
 		if err != nil {
 			return nil, err
 		}
@@ -490,7 +467,7 @@ func (b *Service) buildWithDockerInternal(ctx context.Context, req types.BuildRe
 	}, nil
 }
 
-func readDockerignoreInternal(contextDir string) ([]string, error) {
+func readDockerignore(contextDir string) ([]string, error) {
 	file, err := os.Open(filepath.Join(contextDir, ".dockerignore"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -508,8 +485,8 @@ func readDockerignoreInternal(contextDir string) ([]string, error) {
 	return patterns, nil
 }
 
-func dockerfileExcludedByDockerignoreInternal(contextDir, dockerfilePath string) (bool, error) {
-	patterns, err := readDockerignoreInternal(contextDir)
+func dockerfileExcludedByDockerignore(contextDir, dockerfilePath string) (bool, error) {
+	patterns, err := readDockerignore(contextDir)
 	if err != nil {
 		return false, err
 	}

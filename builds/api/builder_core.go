@@ -1,22 +1,22 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/docker/cli/cli/config"
 	configtypes "github.com/docker/cli/cli/config/types"
 	buildkit "github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth/authprovider"
+	kit "go.getarcane.app/kit/pkg"
 	"go.getarcane.app/kit/pkg/utils"
 
+	dockerutils "go.getarcane.app/builds/pkg/docker"
 	"go.getarcane.app/builds/types"
 )
 
@@ -32,21 +32,14 @@ type Service struct {
 
 // NewService constructs a build service.
 func NewService(cfg Config) *Service {
-	providers := map[string]any{
-		"depot": &depotBuildKitProvider{settings: cfg.SettingsProvider},
-	}
-
-	logger := cfg.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-
 	return &Service{
 		settings:             cfg.SettingsProvider,
 		dockerClientProvider: cfg.DockerClientProvider,
 		registryAuthProvider: cfg.RegistryAuthProvider,
-		logger:               logger,
-		providers:            providers,
+		logger:               cmp.Or(cfg.Logger, slog.Default()),
+		providers: map[string]any{
+			"depot": &depotBuildKitProvider{settings: cfg.SettingsProvider},
+		},
 	}
 }
 
@@ -69,39 +62,68 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 	}
 
 	settings := b.settings.BuildSettings()
-	providerName, provider, err := b.resolveProviderInternal(req.Provider, settings.BuildProvider)
-	if err != nil {
-		return nil, err
+	providerName := cmp.Or(strings.ToLower(strings.TrimSpace(req.Provider)), strings.ToLower(strings.TrimSpace(settings.BuildProvider)), "local")
+	providerRaw, known := b.providers[providerName]
+	if providerName != "local" && !known {
+		return nil, fmt.Errorf("unknown build provider: %s", providerName)
+	}
+	provider, ok := providerRaw.(buildProvider)
+	if providerName != "local" && !ok {
+		return nil, fmt.Errorf("invalid build provider: %s", providerName)
 	}
 
-	buildCtx, cancel := context.WithTimeout(ctx, buildTimeoutDurationInternal(settings.BuildTimeoutSecs))
+	buildCtx, cancel := context.WithTimeout(ctx, kit.Ternary(settings.BuildTimeoutSecs > 0, time.Duration(settings.BuildTimeoutSecs)*time.Second, defaultBuildTimeout))
 	defer cancel()
 
-	req = normalizeBuildRequestInternal(req, providerName)
-	req.Tags = utils.NormalizeSet(req.Tags)
+	progressWriter = cmp.Or(progressWriter, io.Discard)
 
-	err = validateBuildRequestInternal(req, providerName)
+	// keep: req is a by-value copy; a full 22-field BuildRequest literal reads worse
+	req.Tags = utils.NormalizeSet(req.Tags)
+	req.Push = req.Push || (!req.Load && providerName == "depot")
+	req.Load = req.Load || (!req.Push && providerName != "depot")
+
+	err := validateBuildRequest(req, providerName)
 	if err != nil {
 		return nil, err
 	}
 
 	if providerName == "local" {
-		requiresDirectBuildkitSession, requiresErr := requiresDirectLocalBuildkitSessionInternal(req)
+		requiresDirectBuildkitSession, requiresErr := requiresDirectLocalBuildkitSession(req)
 		if requiresErr != nil {
 			return nil, requiresErr
 		}
-		if requiresDirectBuildkitSession {
-			localSession, sessionErr := b.newLocalBuildkitSessionInternal(buildCtx)
-			if sessionErr != nil {
-				return nil, sessionErr
-			}
-			return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, providerName, localSession)
+		if !requiresDirectBuildkitSession {
+			return b.buildWithDocker(buildCtx, req, progressWriter)
 		}
-		return b.buildWithDockerInternal(buildCtx, req, progressWriter)
-	}
 
-	if provider == nil {
-		return nil, &types.BuildProviderUnavailableError{}
+		if b.dockerClientProvider == nil {
+			return nil, &types.BuildDockerServiceUnavailableError{}
+		}
+
+		dockerClient, clientErr := b.dockerClientProvider.GetClient(buildCtx)
+		if clientErr != nil {
+			return nil, fmt.Errorf("failed to connect to Docker: %w", clientErr)
+		}
+
+		bk, bkErr := buildkit.New(buildCtx, "", dockerutils.ClientOpts(dockerClient)...)
+		if bkErr != nil {
+			return nil, fmt.Errorf("failed to connect to Docker BuildKit: %w", bkErr)
+		}
+
+		waitCtx, waitCancel := context.WithTimeout(buildCtx, 30*time.Second)
+		waitErr := bk.Wait(waitCtx)
+		waitCancel()
+		if waitErr != nil {
+			_ = bk.Close()
+			return nil, fmt.Errorf("failed to wait for Docker BuildKit: %w", waitErr)
+		}
+
+		return b.buildWithBuildkitSession(buildCtx, req, progressWriter, providerName, &buildSession{
+			Client: bk,
+			Close: func(_ error) error {
+				return bk.Close()
+			},
+		})
 	}
 
 	providerSession, err := provider.NewSession(buildCtx, req)
@@ -109,20 +131,16 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 		return nil, err
 	}
 
-	return b.buildWithBuildkitSessionInternal(buildCtx, req, progressWriter, providerName, providerSession)
+	return b.buildWithBuildkitSession(buildCtx, req, progressWriter, providerName, providerSession)
 }
 
-func (b *Service) buildWithBuildkitSessionInternal(
+func (b *Service) buildWithBuildkitSession(
 	ctx context.Context,
 	req types.BuildRequest,
 	progressWriter io.Writer,
 	providerName string,
 	bkSession *buildSession,
 ) (*types.BuildResult, error) {
-	if bkSession == nil || bkSession.Client == nil {
-		return nil, &types.BuildSessionUnavailableError{}
-	}
-
 	var buildErr error
 	defer func() {
 		if cerr := bkSession.Close(buildErr); cerr != nil {
@@ -130,24 +148,22 @@ func (b *Service) buildWithBuildkitSessionInternal(
 		}
 	}()
 
-	solveOpt, loadErrCh, cleanupSolveOpt, err := b.buildSolveOptInternal(ctx, req, providerName)
+	solveOpt, loadErrCh, cleanupSolveOpt, err := b.buildSolveOpt(ctx, req, providerName)
 	if err != nil {
 		buildErr = err
 		return nil, err
 	}
 	defer cleanupSolveOpt()
 
-	solveOpt.Session = append(solveOpt.Session, b.newBuildkitAuthProviderInternal())
-
 	statusCh := make(chan *buildkit.SolveStatus, 16)
 	streamErrCh := make(chan error, 1)
 	go func() {
-		streamErrCh <- streamSolveStatusInternal(ctx, statusCh, progressWriter)
+		streamErrCh <- streamSolveStatus(ctx, statusCh, progressWriter)
 	}()
 
 	resp, err := bkSession.Client.Solve(ctx, nil, solveOpt, statusCh)
 	if err != nil {
-		err = wrapBuildkitSolveErrorInternal(err, providerName)
+		err = wrapBuildkitSolveError(err, providerName)
 		buildErr = err
 		return nil, err
 	}
@@ -164,44 +180,25 @@ func (b *Service) buildWithBuildkitSessionInternal(
 	}
 
 	if providerName == "local" && req.Push {
-		if b.dockerClientProvider == nil {
-			missingClientErr := &types.BuildDockerServiceUnavailableError{}
-			buildErr = missingClientErr
-			return nil, missingClientErr
-		}
-
 		dockerClient, dockerClientErr := b.dockerClientProvider.GetClient(ctx)
 		if dockerClientErr != nil {
 			buildErr = dockerClientErr
 			return nil, dockerClientErr
 		}
-		if pushErr := b.pushDockerImagesInternal(ctx, dockerClient, req.Tags, progressWriter); pushErr != nil {
+		if pushErr := b.pushDockerImages(ctx, dockerClient, req.Tags, progressWriter); pushErr != nil {
 			buildErr = pushErr
 			return nil, pushErr
-		}
-	}
-
-	digest := ""
-	if resp != nil {
-		if v, ok := resp.ExporterResponse["containerimage.digest"]; ok {
-			digest = v
 		}
 	}
 
 	return &types.BuildResult{
 		Provider: providerName,
 		Tags:     req.Tags,
-		Digest:   digest,
+		Digest:   kit.FromPtr(resp).ExporterResponse["containerimage.digest"],
 	}, nil
 }
 
-func (b *Service) newBuildkitAuthProviderInternal() session.Attachable {
-	return authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
-		AuthConfigProvider: buildkitAuthConfigProviderInternal(authprovider.LoadAuthConfig(config.LoadDefaultConfigFile(os.Stderr)), b.registryAuthProvider),
-	})
-}
-
-func wrapBuildkitSolveErrorInternal(err error, providerName string) error {
+func wrapBuildkitSolveError(err error, providerName string) error {
 	if err == nil {
 		return nil
 	}
@@ -217,61 +214,24 @@ func wrapBuildkitSolveErrorInternal(err error, providerName string) error {
 	return err
 }
 
-func buildkitAuthConfigProviderInternal(defaultProvider authprovider.AuthConfigProvider, registryAuthProvider types.RegistryAuthProvider) authprovider.AuthConfigProvider {
+func buildkitAuthConfigProvider(defaultProvider authprovider.AuthConfigProvider, registryAuthProvider types.RegistryAuthProvider) authprovider.AuthConfigProvider {
 	return func(ctx context.Context, host string, scope []string, cacheCheck authprovider.ExpireCachedAuthCheck) (configtypes.AuthConfig, error) {
 		if registryAuthProvider != nil {
-			registryCfg, ok, err := registryAuthConfigForHostInternal(ctx, registryAuthProvider, host)
+			registryCfg, ok, err := registryAuthConfigForHost(ctx, registryAuthProvider, host)
 			if err != nil {
 				slog.WarnContext(ctx, "failed to resolve build registry auth from database, falling back to docker config", "registry", host, "error", err)
 			} else if ok {
-				authConfig := configtypes.AuthConfig{
+				return configtypes.AuthConfig{
 					Username:      registryCfg.Username,
 					Password:      registryCfg.Password,
 					Auth:          registryCfg.Auth,
-					ServerAddress: registryCfg.ServerAddress,
+					ServerAddress: kit.Ternary(strings.TrimSpace(registryCfg.ServerAddress) == "", host, registryCfg.ServerAddress),
 					IdentityToken: registryCfg.IdentityToken,
 					RegistryToken: registryCfg.RegistryToken,
-				}
-				if strings.TrimSpace(authConfig.ServerAddress) == "" {
-					authConfig.ServerAddress = host
-				}
-				return authConfig, nil
+				}, nil
 			}
-		}
-
-		if defaultProvider == nil {
-			return configtypes.AuthConfig{}, nil
 		}
 
 		return defaultProvider(ctx, host, scope, cacheCheck)
 	}
-}
-
-func buildTimeoutDurationInternal(settingSeconds int) time.Duration {
-	if settingSeconds > 0 {
-		return time.Duration(settingSeconds) * time.Second
-	}
-	return defaultBuildTimeout
-}
-
-func (b *Service) resolveProviderInternal(override, defaultProvider string) (string, buildProvider, error) {
-	providerName := strings.ToLower(strings.TrimSpace(override))
-	if providerName == "" {
-		providerName = strings.ToLower(strings.TrimSpace(defaultProvider))
-	}
-	if providerName == "" {
-		providerName = "local"
-	}
-	if providerName == "local" {
-		return providerName, nil, nil
-	}
-	providerRaw, ok := b.providers[providerName]
-	if !ok {
-		return "", nil, fmt.Errorf("unknown build provider: %s", providerName)
-	}
-	provider, ok := providerRaw.(buildProvider)
-	if !ok || provider == nil {
-		return "", nil, fmt.Errorf("invalid build provider: %s", providerName)
-	}
-	return providerName, provider, nil
 }

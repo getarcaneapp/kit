@@ -48,14 +48,12 @@ func (p *depotBuildKitProvider) NewSession(ctx context.Context, req types.BuildR
 		return nil, &types.DepotProjectCredentialsRequiredError{}
 	}
 
-	buildReq := &cliv1.CreateBuildRequest{ProjectId: projectID}
-	build, err := depotbuild.NewBuild(ctx, buildReq, token)
+	build, err := depotbuild.NewBuild(ctx, &cliv1.CreateBuildRequest{ProjectId: projectID}, token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Depot build: %w", err)
 	}
 
-	arch := selectDepotArchInternal(req.Platforms)
-	machine, err := depotmachine.Acquire(ctx, build.ID, build.Token, arch)
+	machine, err := depotmachine.Acquire(ctx, build.ID, build.Token, selectDepotArch(req.Platforms))
 	if err != nil {
 		build.Finish(err)
 		return nil, fmt.Errorf("failed to acquire Depot BuildKit machine: %w", err)
@@ -82,7 +80,7 @@ func (p *depotBuildKitProvider) NewSession(ctx context.Context, req types.BuildR
 	}, nil
 }
 
-func selectDepotArchInternal(requested []string) string {
+func selectDepotArch(requested []string) string {
 	for _, value := range requested {
 		platform, err := platforms.Parse(strings.TrimSpace(value))
 		if err != nil {

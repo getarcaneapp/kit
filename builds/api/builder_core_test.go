@@ -30,7 +30,7 @@ func TestBuildkitAuthConfigProvider_UsesRegistryAuthProviderForHost(t *testing.T
 		ServerAddress: "ghcr.io",
 	}
 
-	provider := buildkitAuthConfigProviderInternal(
+	provider := buildkitAuthConfigProvider(
 		func(_ context.Context, _ string, _ []string, _ authprovider.ExpireCachedAuthCheck) (configtypes.AuthConfig, error) {
 			return configtypes.AuthConfig{Username: "default"}, nil
 		},
@@ -50,7 +50,7 @@ func TestBuildkitAuthConfigProvider_FallsBackToDefaultProvider(t *testing.T) {
 
 	t.Run("registry provider error", func(t *testing.T) {
 		defaultCalled = false
-		provider := buildkitAuthConfigProviderInternal(
+		provider := buildkitAuthConfigProvider(
 			func(_ context.Context, _ string, _ []string, _ authprovider.ExpireCachedAuthCheck) (configtypes.AuthConfig, error) {
 				defaultCalled = true
 				return defaultCfg, nil
@@ -66,7 +66,7 @@ func TestBuildkitAuthConfigProvider_FallsBackToDefaultProvider(t *testing.T) {
 
 	t.Run("registry provider missing host", func(t *testing.T) {
 		defaultCalled = false
-		provider := buildkitAuthConfigProviderInternal(
+		provider := buildkitAuthConfigProvider(
 			func(_ context.Context, _ string, _ []string, _ authprovider.ExpireCachedAuthCheck) (configtypes.AuthConfig, error) {
 				defaultCalled = true
 				return defaultCfg, nil
@@ -81,19 +81,19 @@ func TestBuildkitAuthConfigProvider_FallsBackToDefaultProvider(t *testing.T) {
 	})
 }
 
-func TestWrapBuildkitSolveErrorInternal_LeavesGenericErrorsUnchanged(t *testing.T) {
+func TestWrapBuildkitSolveError_LeavesGenericErrorsUnchanged(t *testing.T) {
 	err := errors.New("failed to solve: Dockerfile parse error on line 3")
 
-	wrapped := wrapBuildkitSolveErrorInternal(err, "local")
+	wrapped := wrapBuildkitSolveError(err, "local")
 
 	require.ErrorIs(t, wrapped, err)
 	assert.Equal(t, err.Error(), wrapped.Error())
 }
 
-func TestWrapBuildkitSolveErrorInternal_WrapsDockerAndImageExporterErrors(t *testing.T) {
+func TestWrapBuildkitSolveError_WrapsDockerAndImageExporterErrors(t *testing.T) {
 	t.Run("docker exporter", func(t *testing.T) {
 		rawErr := errors.New(`failed to solve: exporter "docker" could not be found`)
-		wrapped := wrapBuildkitSolveErrorInternal(rawErr, "local")
+		wrapped := wrapBuildkitSolveError(rawErr, "local")
 
 		require.ErrorIs(t, wrapped, rawErr)
 		assert.Contains(t, wrapped.Error(), "the Docker Engine embedded BuildKit requires the docker image-store exporter")
@@ -101,21 +101,21 @@ func TestWrapBuildkitSolveErrorInternal_WrapsDockerAndImageExporterErrors(t *tes
 
 	t.Run("image exporter", func(t *testing.T) {
 		rawErr := errors.New(`failed to solve: exporter "image" could not be found`)
-		wrapped := wrapBuildkitSolveErrorInternal(rawErr, "depot")
+		wrapped := wrapBuildkitSolveError(rawErr, "depot")
 
 		require.ErrorIs(t, wrapped, rawErr)
 		assert.Contains(t, wrapped.Error(), "depot and remote BuildKit providers require the image exporter")
 	})
 }
 
-type testSettingsProviderInternal struct{}
+type testSettingsProvider struct{}
 
-func (testSettingsProviderInternal) BuildSettings() types.BuildSettings {
+func (testSettingsProvider) BuildSettings() types.BuildSettings {
 	return types.BuildSettings{}
 }
 
 func TestNewServiceReturnsBuildEngine(t *testing.T) {
-	service := NewService(Config{SettingsProvider: testSettingsProviderInternal{}})
+	service := NewService(Config{SettingsProvider: testSettingsProvider{}})
 
 	var _ types.Builder = service
 }

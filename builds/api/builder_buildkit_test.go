@@ -17,7 +17,7 @@ import (
 	"go.getarcane.app/builds/types"
 )
 
-func TestBuildSolveOptInternal_StagesInlineDockerfile(t *testing.T) {
+func TestBuildSolveOpt_StagesInlineDockerfile(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "app.txt"), []byte("hello\n"), 0o644))
 
@@ -30,7 +30,7 @@ func TestBuildSolveOptInternal_StagesInlineDockerfile(t *testing.T) {
 		},
 	}
 
-	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(t.Context(), req, "local")
+	solveOpt, loadErrCh, cleanup, err := b.buildSolveOpt(t.Context(), req, "local")
 	require.NoError(t, err)
 	defer cleanup()
 	assert.Nil(t, loadErrCh)
@@ -56,11 +56,11 @@ func TestBuildSolveOptInternal_StagesInlineDockerfile(t *testing.T) {
 	assert.Equal(t, "hello\n", string(appContents))
 }
 
-func TestBuildSolveOptInternal_LocalLoadUsesMobyExporter(t *testing.T) {
+func TestBuildSolveOpt_LocalLoadUsesMobyExporter(t *testing.T) {
 	contextDir := createBuildkitTestContext(t)
 	b := &Service{}
 
-	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(t.Context(), types.BuildRequest{
+	solveOpt, loadErrCh, cleanup, err := b.buildSolveOpt(t.Context(), types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{"arcane.local/app:test"},
@@ -77,11 +77,11 @@ func TestBuildSolveOptInternal_LocalLoadUsesMobyExporter(t *testing.T) {
 	assert.Nil(t, solveOpt.Exports[0].Output)
 }
 
-func TestBuildSolveOptInternal_LocalPushAndLoadUsesSingleMobyExporter(t *testing.T) {
+func TestBuildSolveOpt_LocalPushAndLoadUsesSingleMobyExporter(t *testing.T) {
 	contextDir := createBuildkitTestContext(t)
 	b := &Service{}
 
-	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(t.Context(), types.BuildRequest{
+	solveOpt, loadErrCh, cleanup, err := b.buildSolveOpt(t.Context(), types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{"registry.example.com/app:test"},
@@ -98,7 +98,7 @@ func TestBuildSolveOptInternal_LocalPushAndLoadUsesSingleMobyExporter(t *testing
 	assert.NotContains(t, solveOpt.Exports[0].Attrs, "push")
 }
 
-func TestBuildSolveOptInternal_NonLocalLoadKeepsDockerExporter(t *testing.T) {
+func TestBuildSolveOpt_NonLocalLoadKeepsDockerExporter(t *testing.T) {
 	contextDir := createBuildkitTestContext(t)
 	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1.54/images/load" {
@@ -119,7 +119,7 @@ func TestBuildSolveOptInternal_NonLocalLoadKeepsDockerExporter(t *testing.T) {
 	require.NoError(t, err)
 
 	b := &Service{dockerClientProvider: testDockerClientProvider{client: client}}
-	solveOpt, loadErrCh, cleanup, err := b.buildSolveOptInternal(t.Context(), types.BuildRequest{
+	solveOpt, loadErrCh, cleanup, err := b.buildSolveOpt(t.Context(), types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{"arcane.local/app:test"},
@@ -154,7 +154,7 @@ func (p testDockerClientProvider) GetClient(context.Context) (*moby.Client, erro
 	return p.client, nil
 }
 
-func TestParseBuildkitCacheEntriesInternal(t *testing.T) {
+func TestParseBuildkitCacheEntries(t *testing.T) {
 	testCases := []struct {
 		name    string
 		values  []string
@@ -187,7 +187,7 @@ func TestParseBuildkitCacheEntriesInternal(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseBuildkitCacheEntriesInternal(tc.values)
+			got, err := parseBuildkitCacheEntries(tc.values)
 			if tc.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "invalid cache entry")

@@ -1,29 +1,20 @@
 package api
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
+	kit "go.getarcane.app/kit/pkg"
 	"go.getarcane.app/kit/pkg/utils"
 
 	"go.getarcane.app/builds/types"
 )
 
-func normalizeBuildRequestInternal(req types.BuildRequest, providerName string) types.BuildRequest {
-	if !req.Push && !req.Load {
-		if providerName == "depot" {
-			req.Push = true
-		} else {
-			req.Load = true
-		}
-	}
-	return req
-}
-
-func validateBuildRequestInternal(req types.BuildRequest, providerName string) error {
+func validateBuildRequest(req types.BuildRequest, providerName string) error {
 	if strings.TrimSpace(req.ContextDir) == "" {
 		return &types.BuildContextDirRequiredError{}
 	}
@@ -41,35 +32,7 @@ func validateBuildRequestInternal(req types.BuildRequest, providerName string) e
 		return &types.DepotBuildPushRequiredError{}
 	}
 
-	if unsupported := unsupportedBuildOptionsInternal(req, providerName); len(unsupported) > 0 {
-		return fmt.Errorf("unsupported build options for provider %s: %s", providerName, strings.Join(unsupported, ", "))
-	}
-
-	if len(req.Tags) == 0 && (req.Push || req.Load) {
-		return &types.BuildTagsRequiredError{}
-	}
-
-	dockerfilePath := strings.TrimSpace(req.Dockerfile)
-	if strings.TrimSpace(req.DockerfileInline) != "" {
-		return nil
-	}
-	if dockerfilePath == "" {
-		dockerfilePath = "Dockerfile"
-	}
-	fullDockerfilePath := dockerfilePath
-	if !filepath.IsAbs(dockerfilePath) {
-		fullDockerfilePath = filepath.Join(contextDir, dockerfilePath)
-	}
-	if _, err := os.Stat(fullDockerfilePath); err != nil {
-		return fmt.Errorf("dockerfile not found: %w", err)
-	}
-
-	return nil
-}
-
-func unsupportedBuildOptionsInternal(req types.BuildRequest, providerName string) []string {
 	unsupported := make([]string, 0, 5)
-
 	switch providerName {
 	case "local":
 		if utils.HasNonEmpty(req.CacheTo) {
@@ -101,7 +64,23 @@ func unsupportedBuildOptionsInternal(req types.BuildRequest, providerName string
 			unsupported = append(unsupported, "extraHosts")
 		}
 	}
+	slices.Sort(unsupported)
 
-	sort.Strings(unsupported)
-	return unsupported
+	if len(unsupported) > 0 {
+		return fmt.Errorf("unsupported build options for provider %s: %s", providerName, strings.Join(unsupported, ", "))
+	}
+
+	if len(req.Tags) == 0 && (req.Push || req.Load) {
+		return &types.BuildTagsRequiredError{}
+	}
+
+	if strings.TrimSpace(req.DockerfileInline) != "" {
+		return nil
+	}
+	dockerfilePath := cmp.Or(strings.TrimSpace(req.Dockerfile), "Dockerfile")
+	if _, err := os.Stat(kit.Ternary(filepath.IsAbs(dockerfilePath), dockerfilePath, filepath.Join(contextDir, dockerfilePath))); err != nil {
+		return fmt.Errorf("dockerfile not found: %w", err)
+	}
+
+	return nil
 }

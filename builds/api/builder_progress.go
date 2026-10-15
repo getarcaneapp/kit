@@ -27,16 +27,13 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	return s.w.Write(p)
 }
 
-// streamSolveStatusInternal renders BuildKit solve progress exactly as
+// streamSolveStatus renders BuildKit solve progress exactly as
 // `docker buildx build --progress=plain` prints it. It consumes ch until it
 // is closed, keeping the solve unblocked even if rendering fails.
 //
 // ch is bidirectional because progressui's Display.UpdateFrom requires a
 // bidirectional channel; this function only receives from it.
-func streamSolveStatusInternal(ctx context.Context, ch chan *buildkit.SolveStatus, w io.Writer) error {
-	if w == nil {
-		w = io.Discard
-	}
+func streamSolveStatus(ctx context.Context, ch chan *buildkit.SolveStatus, w io.Writer) error {
 	display, err := progressui.NewDisplay(w, progressui.PlainMode)
 	if err != nil {
 		for status := range ch {
@@ -49,14 +46,11 @@ func streamSolveStatusInternal(ctx context.Context, ch chan *buildkit.SolveStatu
 	return err
 }
 
-// renderDockerBuildStreamInternal renders a daemon /build response as the raw
+// renderDockerBuildStream renders a daemon /build response as the raw
 // text the docker CLI prints in non-TTY mode. BuildKit trace aux frames are
 // decoded into solve statuses and rendered in plain progress mode; everything
 // else (classic status/stream lines, errors) renders via jsonmessage.
-func renderDockerBuildStreamInternal(ctx context.Context, reader io.Reader, w io.Writer) error {
-	if w == nil {
-		w = io.Discard
-	}
+func renderDockerBuildStream(ctx context.Context, reader io.Reader, w io.Writer) error {
 	// The progress display goroutine and the jsonmessage renderer below write
 	// to w concurrently; serialize so callers can pass any plain writer.
 	w = &syncWriter{w: w}
@@ -64,7 +58,7 @@ func renderDockerBuildStreamInternal(ctx context.Context, reader io.Reader, w io
 	statusCh := make(chan *buildkit.SolveStatus, 16)
 	displayDone := make(chan error, 1)
 	go func() {
-		displayDone <- streamSolveStatusInternal(ctx, statusCh, w)
+		displayDone <- streamSolveStatus(ctx, statusCh, w)
 	}()
 
 	aux := func(msg jsonstream.Message) {

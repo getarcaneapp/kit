@@ -1,14 +1,19 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/docker/cli/cli/config"
 	buildkit "github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/session/auth/authprovider"
 	"github.com/tonistiigi/fsutil"
 	kit "go.getarcane.app/kit/pkg"
 
@@ -16,10 +21,10 @@ import (
 	"go.getarcane.app/builds/types"
 )
 
-// parseBuildkitCacheEntriesInternal parses --cache-from/--cache-to style values.
+// parseBuildkitCacheEntries parses --cache-from/--cache-to style values.
 // A value without "=" is shorthand for a registry cache ref; otherwise it is a
 // CSV list of key=value attributes, so quoted fields may contain commas.
-func parseBuildkitCacheEntriesInternal(values []string) ([]buildkit.CacheOptionsEntry, error) {
+func parseBuildkitCacheEntries(values []string) ([]buildkit.CacheOptionsEntry, error) {
 	entries := make([]buildkit.CacheOptionsEntry, 0, len(values))
 
 	for _, raw := range values {
@@ -41,7 +46,8 @@ func parseBuildkitCacheEntriesInternal(values []string) ([]buildkit.CacheOptions
 			return nil, fmt.Errorf("invalid cache entry %q: %w", raw, err)
 		}
 
-		entry := buildkit.CacheOptionsEntry{Attrs: map[string]string{}}
+		cacheType := ""
+		attrs := map[string]string{}
 		for _, field := range fields {
 			field = strings.TrimSpace(field)
 			if field == "" {
@@ -59,17 +65,17 @@ func parseBuildkitCacheEntriesInternal(values []string) ([]buildkit.CacheOptions
 			}
 
 			if key == "type" {
-				entry.Type = value
+				cacheType = value
 				continue
 			}
 
-			entry.Attrs[key] = value
+			attrs[key] = value
 		}
 
-		if entry.Type == "" {
-			entry.Type = "registry"
-		}
-		entries = append(entries, entry)
+		entries = append(entries, buildkit.CacheOptionsEntry{
+			Type:  cmp.Or(cacheType, "registry"),
+			Attrs: attrs,
+		})
 	}
 
 	if len(entries) == 0 {
@@ -79,35 +85,30 @@ func parseBuildkitCacheEntriesInternal(values []string) ([]buildkit.CacheOptions
 	return entries, nil
 }
 
-func (b *Service) buildSolveOptInternal(ctx context.Context, req types.BuildRequest, providerName string) (buildkit.SolveOpt, <-chan error, func(), error) {
-	fsInput, err := prepareBuildFilesystemInputInternal(req)
+func (b *Service) buildSolveOpt(ctx context.Context, req types.BuildRequest, providerName string) (buildkit.SolveOpt, <-chan error, func(), error) {
+	fsInput, err := prepareBuildFilesystemInput(req)
 	if err != nil {
 		return buildkit.SolveOpt{}, nil, nil, err
 	}
 
-	cacheImports, err := parseBuildkitCacheEntriesInternal(req.CacheFrom)
+	cacheImports, err := parseBuildkitCacheEntries(req.CacheFrom)
 	if err != nil {
 		return buildkit.SolveOpt{}, nil, nil, err
 	}
-	cacheExports, err := parseBuildkitCacheEntriesInternal(req.CacheTo)
-	if err != nil {
-		return buildkit.SolveOpt{}, nil, nil, err
-	}
-
-	contextDir, dockerfilePath, cleanup, err := prepareBuildContextInternal(fsInput)
+	cacheExports, err := parseBuildkitCacheEntries(req.CacheTo)
 	if err != nil {
 		return buildkit.SolveOpt{}, nil, nil, err
 	}
 
-	dockerfileDir := contextDir
-	dockerfileFilename := dockerfilePath
-	if dockerfileRelDir := filepath.Dir(filepath.FromSlash(dockerfilePath)); dockerfileRelDir != "." {
-		dockerfileDir = filepath.Join(contextDir, dockerfileRelDir)
-		dockerfileFilename = filepath.Base(dockerfilePath)
+	contextDir, dockerfilePath, cleanup, err := prepareBuildContext(fsInput)
+	if err != nil {
+		return buildkit.SolveOpt{}, nil, nil, err
 	}
+
+	dockerfileRelDir := filepath.Dir(filepath.FromSlash(dockerfilePath))
 
 	frontendAttrs := map[string]string{
-		"filename": dockerfileFilename,
+		"filename": kit.Ternary(dockerfileRelDir == ".", dockerfilePath, filepath.Base(dockerfilePath)),
 	}
 	if strings.TrimSpace(req.Target) != "" {
 		frontendAttrs["target"] = strings.TrimSpace(req.Target)
@@ -137,97 +138,88 @@ func (b *Service) buildSolveOptInternal(ctx context.Context, req types.BuildRequ
 		cleanup()
 		return buildkit.SolveOpt{}, nil, nil, fmt.Errorf("failed to prepare build context mount: %w", err)
 	}
-	dockerfileMount, err := fsutil.NewFS(dockerfileDir)
+	dockerfileMount, err := fsutil.NewFS(kit.Ternary(dockerfileRelDir == ".", contextDir, filepath.Join(contextDir, dockerfileRelDir)))
 	if err != nil {
 		cleanup()
 		return buildkit.SolveOpt{}, nil, nil, fmt.Errorf("failed to prepare Dockerfile mount: %w", err)
 	}
 
-	entitlements := kit.TrimNonEmpty(req.Entitlements)
-	if req.Privileged {
-		entitlements = append(entitlements, "security.insecure")
+	exports, loadErrCh, err := func() ([]buildkit.ExportEntry, <-chan error, error) {
+		if providerName == "local" {
+			if !req.Load && !req.Push {
+				return nil, nil, nil
+			}
+			return []buildkit.ExportEntry{{
+				Type:  "moby",
+				Attrs: map[string]string{"name": strings.Join(req.Tags, ",")},
+			}}, nil, nil
+		}
+
+		var exports []buildkit.ExportEntry
+		if req.Push {
+			exports = append(exports, buildkit.ExportEntry{
+				Type: "image",
+				Attrs: map[string]string{
+					"name":           strings.Join(req.Tags, ","),
+					"push":           "true",
+					"oci-mediatypes": "true",
+				},
+			})
+		}
+		if !req.Load {
+			return exports, nil, nil
+		}
+
+		if b.dockerClientProvider == nil {
+			return nil, nil, &types.BuildDockerServiceUnavailableError{}
+		}
+
+		dockerClient, clientErr := b.dockerClientProvider.GetClient(ctx)
+		if clientErr != nil {
+			return nil, nil, fmt.Errorf("failed to connect to Docker: %w", clientErr)
+		}
+
+		pr, pw := io.Pipe()
+		loadErrCh := make(chan error, 1)
+		go func() {
+			defer func() { _ = pr.Close() }()
+			loadResp, loadErr := dockerClient.ImageLoad(ctx, pr)
+			if loadErr != nil {
+				loadErrCh <- loadErr
+				return
+			}
+			defer func() { _ = loadResp.Close() }()
+			loadErrCh <- dockerutils.RenderJSONMessageStream(loadResp, io.Discard)
+		}()
+
+		return append(exports, buildkit.ExportEntry{
+			Type:  "docker",
+			Attrs: kit.Ternary(len(req.Tags) > 0, map[string]string{"name": strings.Join(req.Tags, ",")}, map[string]string{}),
+			Output: func(_ map[string]string) (io.WriteCloser, error) {
+				return pw, nil
+			},
+		}), loadErrCh, nil
+	}()
+	if err != nil {
+		cleanup()
+		return buildkit.SolveOpt{}, nil, nil, err
 	}
 
-	solveOpt := buildkit.SolveOpt{
-		Frontend:      "dockerfile.v0",
-		FrontendAttrs: frontendAttrs,
+	return buildkit.SolveOpt{
+		Exports: exports,
 		LocalMounts: map[string]fsutil.FS{
 			"context":    contextMount,
 			"dockerfile": dockerfileMount,
 		},
-		CacheImports:        cacheImports,
-		CacheExports:        cacheExports,
-		AllowedEntitlements: kit.Unique(entitlements),
-	}
-
-	var loadErrCh chan error
-	exports := make([]buildkit.ExportEntry, 0, 2)
-	if req.Push && providerName != "local" {
-		exports = append(exports, buildkit.ExportEntry{
-			Type: "image",
-			Attrs: map[string]string{
-				"name":           strings.Join(req.Tags, ","),
-				"push":           "true",
-				"oci-mediatypes": "true",
-			},
-		})
-	}
-
-	if providerName == "local" && (req.Load || req.Push) {
-		exports = append(exports, buildkit.ExportEntry{
-			Type:  "moby",
-			Attrs: map[string]string{"name": strings.Join(req.Tags, ",")},
-		})
-	} else if req.Load {
-		exportEntry, errCh, loadExportErr := b.buildLoadExportInternal(ctx, req.Tags)
-		if loadExportErr != nil {
-			cleanup()
-			return buildkit.SolveOpt{}, nil, nil, loadExportErr
-		}
-		loadErrCh = errCh
-		exports = append(exports, exportEntry)
-	}
-
-	if len(exports) > 0 {
-		solveOpt.Exports = exports
-	}
-
-	return solveOpt, loadErrCh, cleanup, nil
-}
-
-func (b *Service) buildLoadExportInternal(ctx context.Context, tags []string) (buildkit.ExportEntry, chan error, error) {
-	if b.dockerClientProvider == nil {
-		return buildkit.ExportEntry{}, nil, &types.BuildDockerServiceUnavailableError{}
-	}
-
-	dockerClient, err := b.dockerClientProvider.GetClient(ctx)
-	if err != nil {
-		return buildkit.ExportEntry{}, nil, fmt.Errorf("failed to connect to Docker: %w", err)
-	}
-
-	pr, pw := io.Pipe()
-	loadErrCh := make(chan error, 1)
-	go func() {
-		defer func() { _ = pr.Close() }()
-		loadResp, loadErr := dockerClient.ImageLoad(ctx, pr)
-		if loadErr != nil {
-			loadErrCh <- loadErr
-			return
-		}
-		defer func() { _ = loadResp.Close() }()
-		loadErrCh <- dockerutils.RenderJSONMessageStream(loadResp, io.Discard)
-	}()
-
-	exportAttrs := map[string]string{}
-	if len(tags) > 0 {
-		exportAttrs["name"] = strings.Join(tags, ",")
-	}
-
-	return buildkit.ExportEntry{
-		Type:  "docker",
-		Attrs: exportAttrs,
-		Output: func(_ map[string]string) (io.WriteCloser, error) {
-			return pw, nil
+		Frontend:      "dockerfile.v0",
+		FrontendAttrs: frontendAttrs,
+		CacheExports:  cacheExports,
+		CacheImports:  cacheImports,
+		Session: []session.Attachable{
+			authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
+				AuthConfigProvider: buildkitAuthConfigProvider(authprovider.LoadAuthConfig(config.LoadDefaultConfigFile(os.Stderr)), b.registryAuthProvider),
+			}),
 		},
-	}, loadErrCh, nil
+		AllowedEntitlements: kit.Unique(append(kit.TrimNonEmpty(req.Entitlements), kit.Ternary(req.Privileged, []string{"security.insecure"}, nil)...)),
+	}, loadErrCh, cleanup, nil
 }

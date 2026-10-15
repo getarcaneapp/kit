@@ -11,7 +11,7 @@ import (
 	"go.getarcane.app/builds/types"
 )
 
-func createBuildContextWithDockerfileInternal(t *testing.T) string {
+func createBuildContextWithDockerfile(t *testing.T) string {
 	t.Helper()
 
 	contextDir := t.TempDir()
@@ -20,8 +20,8 @@ func createBuildContextWithDockerfileInternal(t *testing.T) string {
 	return contextDir
 }
 
-func TestValidateBuildRequestInternal_LocalProviderUnsupportedOptions(t *testing.T) {
-	contextDir := createBuildContextWithDockerfileInternal(t)
+func TestValidateBuildRequest_LocalProviderUnsupportedOptions(t *testing.T) {
+	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
 		ContextDir:   contextDir,
 		Dockerfile:   "Dockerfile",
@@ -33,12 +33,12 @@ func TestValidateBuildRequestInternal_LocalProviderUnsupportedOptions(t *testing
 		Platforms:    []string{"linux/amd64", "linux/arm64"},
 	}
 
-	err := validateBuildRequestInternal(req, "local")
+	err := validateBuildRequest(req, "local")
 	require.EqualError(t, err, "unsupported build options for provider local: cacheTo, entitlements, platforms, privileged")
 }
 
-func TestValidateBuildRequestInternal_DepotProviderUnsupportedOptions(t *testing.T) {
-	contextDir := createBuildContextWithDockerfileInternal(t)
+func TestValidateBuildRequest_DepotProviderUnsupportedOptions(t *testing.T) {
+	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
@@ -53,12 +53,12 @@ func TestValidateBuildRequestInternal_DepotProviderUnsupportedOptions(t *testing
 		ExtraHosts: []string{"registry.local:10.0.0.5"},
 	}
 
-	err := validateBuildRequestInternal(req, "depot")
+	err := validateBuildRequest(req, "depot")
 	require.EqualError(t, err, "unsupported build options for provider depot: extraHosts, isolation, network, shmSize, ulimits")
 }
 
-func TestValidateBuildRequestInternal_RespectsTrimmedValues(t *testing.T) {
-	contextDir := createBuildContextWithDockerfileInternal(t)
+func TestValidateBuildRequest_RespectsTrimmedValues(t *testing.T) {
+	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
 		ContextDir:   contextDir,
 		Dockerfile:   "Dockerfile",
@@ -70,11 +70,11 @@ func TestValidateBuildRequestInternal_RespectsTrimmedValues(t *testing.T) {
 		Platforms:    []string{"linux/amd64", "   "},
 	}
 
-	err := validateBuildRequestInternal(req, "local")
+	err := validateBuildRequest(req, "local")
 	assert.NoError(t, err)
 }
 
-func TestValidateBuildRequestInternal_AllowsInlineDockerfile(t *testing.T) {
+func TestValidateBuildRequest_AllowsInlineDockerfile(t *testing.T) {
 	contextDir := t.TempDir()
 	req := types.BuildRequest{
 		ContextDir:       contextDir,
@@ -83,12 +83,12 @@ func TestValidateBuildRequestInternal_AllowsInlineDockerfile(t *testing.T) {
 		Load:             true,
 	}
 
-	err := validateBuildRequestInternal(req, "local")
+	err := validateBuildRequest(req, "local")
 	assert.NoError(t, err)
 }
 
-func TestValidateBuildRequestInternal_RejectsDockerfileAndInlineTogether(t *testing.T) {
-	contextDir := createBuildContextWithDockerfileInternal(t)
+func TestValidateBuildRequest_RejectsDockerfileAndInlineTogether(t *testing.T) {
+	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
 		ContextDir:       contextDir,
 		Dockerfile:       "Dockerfile",
@@ -97,27 +97,27 @@ func TestValidateBuildRequestInternal_RejectsDockerfileAndInlineTogether(t *test
 		Load:             true,
 	}
 
-	err := validateBuildRequestInternal(req, "local")
+	err := validateBuildRequest(req, "local")
 	require.EqualError(t, err, "dockerfile and dockerfileInline are mutually exclusive")
 }
 
-func TestValidateBuildRequestInternal_ReturnsCommonTypedErrors(t *testing.T) {
-	err := validateBuildRequestInternal(types.BuildRequest{}, "local")
+func TestValidateBuildRequest_ReturnsCommonTypedErrors(t *testing.T) {
+	err := validateBuildRequest(types.BuildRequest{}, "local")
 	require.Error(t, err)
 
 	var typedErr *types.BuildContextDirRequiredError
 	assert.ErrorAs(t, err, &typedErr)
 }
 
-func TestPrepareDockerBuildInputInternal_ReturnsCommonTypedErrors(t *testing.T) {
-	contextDir := createBuildContextWithDockerfileInternal(t)
+func TestPrepareDockerBuildInput_ReturnsCommonTypedErrors(t *testing.T) {
+	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Platforms:  []string{"linux/amd64", "linux/arm64"},
 	}
 
-	_, reportProgress, err := prepareDockerBuildInputInternal(req)
+	_, reportProgress, err := prepareDockerBuildInput(req)
 	require.Error(t, err)
 	assert.True(t, reportProgress)
 

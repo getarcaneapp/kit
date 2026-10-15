@@ -28,13 +28,17 @@ func ParseGitBuildContextSource(raw string) (*GitBuildContextSource, bool, error
 		return nil, false, nil
 	}
 
-	source := &GitBuildContextSource{
-		Raw:           trimmed,
-		RepositoryURL: strings.TrimRight(repositoryURL, "/"),
+	newSource := func(ref, subdir string) *GitBuildContextSource {
+		return &GitBuildContextSource{
+			Raw:           trimmed,
+			RepositoryURL: strings.TrimRight(repositoryURL, "/"),
+			Ref:           ref,
+			Subdir:        subdir,
+		}
 	}
 
 	if !hasFragment {
-		return source, true, nil
+		return newSource("", ""), true, nil
 	}
 
 	fragment = strings.TrimSpace(fragment)
@@ -47,10 +51,9 @@ func ParseGitBuildContextSource(raw string) (*GitBuildContextSource, bool, error
 	if ref == "" {
 		return nil, true, &types.GitBuildContextRefRequiredError{}
 	}
-	source.Ref = ref
 
 	if !hasSubdir {
-		return source, true, nil
+		return newSource(ref, ""), true, nil
 	}
 
 	subdir = strings.TrimSpace(subdir)
@@ -66,13 +69,12 @@ func ParseGitBuildContextSource(raw string) (*GitBuildContextSource, bool, error
 		return nil, true, &types.GitBuildContextSubdirEscapesRepositoryError{}
 	}
 
-	source.Subdir = cleanSubdir
-	return source, true, nil
+	return newSource(ref, cleanSubdir), true, nil
 }
 
 func NormalizeGitBuildContextSourceForMatch(raw string) string {
 	source, ok, err := ParseGitBuildContextSource(raw)
-	if err != nil || !ok || source == nil {
+	if err != nil || !ok {
 		return ""
 	}
 	return git.NormalizeForMatch(source.RepositoryURL)

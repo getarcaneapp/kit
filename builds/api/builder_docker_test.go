@@ -27,29 +27,29 @@ import (
 	"go.getarcane.app/builds/types"
 )
 
-func TestPrepareDockerBuildInputInternal_RejectsMultiPlatform(t *testing.T) {
-	contextDir := createBuildContextWithDockerfileInternal(t)
+func TestPrepareDockerBuildInput_RejectsMultiPlatform(t *testing.T) {
+	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Platforms:  []string{"linux/amd64", "linux/arm64"},
 	}
 
-	_, reportProgress, err := prepareDockerBuildInputInternal(req)
+	_, reportProgress, err := prepareDockerBuildInput(req)
 	require.Error(t, err)
 	assert.True(t, reportProgress)
 	assert.Contains(t, err.Error(), "does not support multi-platform builds")
 }
 
-func TestBuildDockerImageOptionsInternal_UsesBuildkitAndIncludesAuthConfigs(t *testing.T) {
-	contextDir := createBuildContextWithDockerfileInternal(t)
+func TestBuildDockerImageOptions_UsesBuildkitAndIncludesAuthConfigs(t *testing.T) {
+	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{"ghcr.io/getarcaneapp/arcane:test"},
 		Platforms:  []string{"linux/amd64"},
 	}
-	input, _, err := prepareDockerBuildInputInternal(req)
+	input, _, err := prepareDockerBuildInput(req)
 	require.NoError(t, err)
 
 	authConfigs := map[string]dockerregistry.AuthConfig{
@@ -60,7 +60,7 @@ func TestBuildDockerImageOptionsInternal_UsesBuildkitAndIncludesAuthConfigs(t *t
 		},
 	}
 
-	buildOpts, err := buildDockerImageOptionsInternal(req, input, "Dockerfile", authConfigs)
+	buildOpts, err := buildDockerImageOptions(req, input, "Dockerfile", authConfigs)
 	require.NoError(t, err)
 	require.NotNil(t, buildOpts.AuthConfigs)
 	assert.Equal(t, authConfigs, buildOpts.AuthConfigs)
@@ -70,22 +70,22 @@ func TestBuildDockerImageOptionsInternal_UsesBuildkitAndIncludesAuthConfigs(t *t
 	assert.Equal(t, "amd64", buildOpts.Platforms[0].Architecture)
 }
 
-func TestBuildDockerImageOptionsInternal_EmptyAuthConfigsBecomesNil(t *testing.T) {
-	contextDir := createBuildContextWithDockerfileInternal(t)
+func TestBuildDockerImageOptions_EmptyAuthConfigsBecomesNil(t *testing.T) {
+	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{"ghcr.io/getarcaneapp/arcane:test"},
 	}
-	input, _, err := prepareDockerBuildInputInternal(req)
+	input, _, err := prepareDockerBuildInput(req)
 	require.NoError(t, err)
 
-	buildOpts, err := buildDockerImageOptionsInternal(req, input, "Dockerfile", map[string]dockerregistry.AuthConfig{})
+	buildOpts, err := buildDockerImageOptions(req, input, "Dockerfile", map[string]dockerregistry.AuthConfig{})
 	require.NoError(t, err)
 	assert.Nil(t, buildOpts.AuthConfigs)
 }
 
-func TestPerformDockerBuildInternal_KeepsSessionActiveForRegistryAuth(t *testing.T) {
+func TestPerformDockerBuild_KeepsSessionActiveForRegistryAuth(t *testing.T) {
 	testCases := []struct {
 		name               string
 		registryProvider   types.RegistryAuthProvider
@@ -170,7 +170,7 @@ func TestPerformDockerBuildInternal_KeepsSessionActiveForRegistryAuth(t *testing
 
 			service := &Service{registryAuthProvider: testCase.registryProvider}
 			var progress bytes.Buffer
-			err = service.performDockerBuildInternal(
+			err = service.performDockerBuild(
 				t.Context(),
 				dockerClient,
 				strings.NewReader("build context"),
@@ -200,7 +200,7 @@ func TestPerformDockerBuildInternal_KeepsSessionActiveForRegistryAuth(t *testing
 	}
 }
 
-func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
+func TestPerformDockerBuild_ClosesSessionOnBuildError(t *testing.T) {
 	t.Setenv("DOCKER_CONFIG", t.TempDir())
 
 	sessionManager, err := session.NewManager()
@@ -249,7 +249,7 @@ func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
 	defer func() { _ = dockerClient.Close() }()
 
 	service := &Service{}
-	err = service.performDockerBuildInternal(
+	err = service.performDockerBuild(
 		t.Context(),
 		dockerClient,
 		strings.NewReader("build context"),
@@ -272,7 +272,7 @@ func TestPerformDockerBuildInternal_ClosesSessionOnBuildError(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestPrepareBuildContextInternal_StagesInlineDockerfile(t *testing.T) {
+func TestPrepareBuildContext_StagesInlineDockerfile(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "app.txt"), []byte("hello\n"), 0o644))
 
@@ -281,11 +281,11 @@ func TestPrepareBuildContextInternal_StagesInlineDockerfile(t *testing.T) {
 		DockerfileInline: "FROM alpine:3.20\nCOPY app.txt /app.txt\n",
 	}
 
-	input, reportProgress, err := prepareDockerBuildInputInternal(req)
+	input, reportProgress, err := prepareDockerBuildInput(req)
 	require.NoError(t, err)
 	assert.False(t, reportProgress)
 
-	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContextInternal(input.buildFilesystemInput)
+	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContext(input.buildFilesystemInput)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -298,7 +298,7 @@ func TestPrepareBuildContextInternal_StagesInlineDockerfile(t *testing.T) {
 	assert.Equal(t, "hello\n", string(appContents))
 }
 
-func TestPrepareBuildContextInternal_StagesDockerfileExcludedByDockerignore(t *testing.T) {
+func TestPrepareBuildContext_StagesDockerfileExcludedByDockerignore(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, ".dockerignore"), []byte("**/Dockerfile*\n"), 0o644))
@@ -309,11 +309,11 @@ func TestPrepareBuildContextInternal_StagesDockerfileExcludedByDockerignore(t *t
 		Dockerfile: "Dockerfile",
 	}
 
-	input, reportProgress, err := prepareDockerBuildInputInternal(req)
+	input, reportProgress, err := prepareDockerBuildInput(req)
 	require.NoError(t, err)
 	assert.False(t, reportProgress)
 
-	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContextInternal(input.buildFilesystemInput)
+	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContext(input.buildFilesystemInput)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -329,27 +329,27 @@ func TestPrepareBuildContextInternal_StagesDockerfileExcludedByDockerignore(t *t
 	assert.Equal(t, "hello\n", string(appContents))
 }
 
-func TestDockerfileExcludedByDockerignoreInternal_ReturnsScannerError(t *testing.T) {
+func TestDockerfileExcludedByDockerignore_ReturnsScannerError(t *testing.T) {
 	contextDir := t.TempDir()
 	tooLongPattern := strings.Repeat("a", bufio.MaxScanTokenSize+1)
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, ".dockerignore"), []byte(tooLongPattern), 0o644))
 
-	excluded, err := dockerfileExcludedByDockerignoreInternal(contextDir, "Dockerfile")
+	excluded, err := dockerfileExcludedByDockerignore(contextDir, "Dockerfile")
 	require.Error(t, err)
 	assert.False(t, excluded)
 	assert.Contains(t, err.Error(), "failed to read .dockerignore")
 }
 
-func TestPrepareBuildContextInternal_StagesDockerfileExcludedByRootedDockerignorePattern(t *testing.T) {
+func TestPrepareBuildContext_StagesDockerfileExcludedByRootedDockerignorePattern(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, ".dockerignore"), []byte("/Dockerfile\n"), 0o644))
 
-	input, _, err := prepareDockerBuildInputInternal(types.BuildRequest{ContextDir: contextDir, Dockerfile: "Dockerfile"})
+	input, _, err := prepareDockerBuildInput(types.BuildRequest{ContextDir: contextDir, Dockerfile: "Dockerfile"})
 	require.NoError(t, err)
 	assert.True(t, input.dockerfileOutsideCtx)
 
-	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContextInternal(input.buildFilesystemInput)
+	buildContextDir, dockerfileForBuild, cleanup, err := prepareBuildContext(input.buildFilesystemInput)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -359,7 +359,7 @@ func TestPrepareBuildContextInternal_StagesDockerfileExcludedByRootedDockerignor
 	assert.Equal(t, "FROM alpine:3.20\n", string(contents))
 }
 
-func TestReadDockerignoreInternal_ReturnsOpenError(t *testing.T) {
+func TestReadDockerignore_ReturnsOpenError(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("permission bits are not enforced on Windows or when running as root")
 	}
@@ -368,29 +368,29 @@ func TestReadDockerignoreInternal_ReturnsOpenError(t *testing.T) {
 	ignorePath := filepath.Join(contextDir, ".dockerignore")
 	require.NoError(t, os.WriteFile(ignorePath, []byte("Dockerfile\n"), 0o000))
 
-	patterns, err := readDockerignoreInternal(contextDir)
+	patterns, err := readDockerignore(contextDir)
 	require.Error(t, err)
 	assert.Nil(t, patterns)
 	assert.Contains(t, err.Error(), "failed to read .dockerignore")
 }
 
-func TestReadDockerignoreInternal_MissingFileHasNoPatterns(t *testing.T) {
-	patterns, err := readDockerignoreInternal(t.TempDir())
+func TestReadDockerignore_MissingFileHasNoPatterns(t *testing.T) {
+	patterns, err := readDockerignore(t.TempDir())
 	require.NoError(t, err)
 	assert.Nil(t, patterns)
 }
 
-func TestPrepareBuildFilesystemInputInternal_DotDotPrefixedDockerfileIsInsideContext(t *testing.T) {
+func TestPrepareBuildFilesystemInput_DotDotPrefixedDockerfileIsInsideContext(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "..Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
 
-	input, err := prepareBuildFilesystemInputInternal(types.BuildRequest{ContextDir: contextDir, Dockerfile: "..Dockerfile"})
+	input, err := prepareBuildFilesystemInput(types.BuildRequest{ContextDir: contextDir, Dockerfile: "..Dockerfile"})
 	require.NoError(t, err)
 	assert.False(t, input.dockerfileOutsideCtx)
 	assert.Equal(t, "..Dockerfile", input.relDockerfile)
 }
 
-func TestParseUlimitsInternal(t *testing.T) {
+func TestParseUlimits(t *testing.T) {
 	testCases := []struct {
 		name    string
 		values  map[string]string
@@ -407,7 +407,7 @@ func TestParseUlimitsInternal(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseUlimitsInternal(tc.values)
+			got, err := parseUlimits(tc.values)
 			if tc.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "invalid ulimit")
@@ -419,9 +419,9 @@ func TestParseUlimitsInternal(t *testing.T) {
 	}
 }
 
-func TestPrepareDockerBuildInputInternal_RejectsInvalidUlimit(t *testing.T) {
-	_, _, err := prepareDockerBuildInputInternal(types.BuildRequest{
-		ContextDir: createBuildContextWithDockerfileInternal(t),
+func TestPrepareDockerBuildInput_RejectsInvalidUlimit(t *testing.T) {
+	_, _, err := prepareDockerBuildInput(types.BuildRequest{
+		ContextDir: createBuildContextWithDockerfile(t),
 		Dockerfile: "Dockerfile",
 		Ulimits:    map[string]string{"nofile": "2048:1024"},
 	})
@@ -429,16 +429,16 @@ func TestPrepareDockerBuildInputInternal_RejectsInvalidUlimit(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid ulimit")
 }
 
-func TestBuildDockerImageOptionsInternal_NormalizesPlatformArchitecture(t *testing.T) {
+func TestBuildDockerImageOptions_NormalizesPlatformArchitecture(t *testing.T) {
 	req := types.BuildRequest{
-		ContextDir: createBuildContextWithDockerfileInternal(t),
+		ContextDir: createBuildContextWithDockerfile(t),
 		Dockerfile: "Dockerfile",
 		Platforms:  []string{"linux/x86_64"},
 	}
-	input, _, err := prepareDockerBuildInputInternal(req)
+	input, _, err := prepareDockerBuildInput(req)
 	require.NoError(t, err)
 
-	buildOpts, err := buildDockerImageOptionsInternal(req, input, "Dockerfile", nil)
+	buildOpts, err := buildDockerImageOptions(req, input, "Dockerfile", nil)
 	require.NoError(t, err)
 	require.Len(t, buildOpts.Platforms, 1)
 	assert.Equal(t, "linux", buildOpts.Platforms[0].OS)

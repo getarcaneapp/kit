@@ -6,17 +6,13 @@ import (
 	"strings"
 
 	ref "github.com/distribution/reference"
-	dockerauthconfig "github.com/moby/moby/api/pkg/authconfig"
+	"github.com/moby/moby/api/pkg/authconfig"
 	dockerregistry "github.com/moby/moby/api/types/registry"
 	kit "go.getarcane.app/kit/pkg"
 	"go.getarcane.app/kit/pkg/registry"
 )
 
-func registryAuthConfigForHostInternal(ctx context.Context, provider RegistryAuthProvider, host string) (dockerregistry.AuthConfig, bool, error) {
-	if provider == nil {
-		return dockerregistry.AuthConfig{}, false, nil
-	}
-
+func registryAuthConfigForHost(ctx context.Context, provider RegistryAuthProvider, host string) (dockerregistry.AuthConfig, bool, error) {
 	authConfigs, err := provider.GetAllRegistryAuthConfigs(ctx)
 	if err != nil {
 		return dockerregistry.AuthConfig{}, false, err
@@ -31,33 +27,28 @@ func registryAuthConfigForHostInternal(ctx context.Context, provider RegistryAut
 	return dockerregistry.AuthConfig{}, false, nil
 }
 
-func registryAuthHeaderForImageInternal(ctx context.Context, provider RegistryAuthProvider, imageRef string) (string, error) {
-	registryHost, err := registryAddressInternal(imageRef)
-	if err != nil {
-		return "", err
-	}
-
-	cfg, ok, err := registryAuthConfigForHostInternal(ctx, provider, registryHost)
-	if err != nil || !ok {
-		return "", err
-	}
-
-	if strings.TrimSpace(cfg.ServerAddress) == "" {
-		cfg.ServerAddress = registryHost
-	}
-
-	encoded, err := dockerauthconfig.Encode(cfg)
-	if err != nil {
-		return "", fmt.Errorf("encode registry auth header: %w", err)
-	}
-	return encoded, nil
-}
-
-func registryAddressInternal(imageRef string) (string, error) {
+func registryAuthHeaderForImage(ctx context.Context, provider RegistryAuthProvider, imageRef string) (string, error) {
 	named, err := ref.ParseNormalizedNamed(imageRef)
 	if err != nil {
 		return "", err
 	}
-	addr := ref.Domain(named)
-	return kit.Ternary(addr == "docker.io", "index.docker.io", addr), nil
+	registryHost := kit.Ternary(ref.Domain(named) == "docker.io", "index.docker.io", ref.Domain(named))
+
+	cfg, ok, err := registryAuthConfigForHost(ctx, provider, registryHost)
+	if err != nil || !ok {
+		return "", err
+	}
+
+	encoded, err := authconfig.Encode(dockerregistry.AuthConfig{
+		Username:      cfg.Username,
+		Password:      cfg.Password,
+		Auth:          cfg.Auth,
+		ServerAddress: kit.Ternary(strings.TrimSpace(cfg.ServerAddress) == "", registryHost, cfg.ServerAddress),
+		IdentityToken: cfg.IdentityToken,
+		RegistryToken: cfg.RegistryToken,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode registry auth header: %w", err)
+	}
+	return encoded, nil
 }

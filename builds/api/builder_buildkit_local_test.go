@@ -11,7 +11,7 @@ import (
 	"go.getarcane.app/builds/types"
 )
 
-func TestDockerfileRequiresDirectBuildkitSessionInternal(t *testing.T) {
+func TestDockerfileRequiresDirectBuildkitSession(t *testing.T) {
 	testCases := []struct {
 		name       string
 		dockerfile string
@@ -34,24 +34,24 @@ func TestDockerfileRequiresDirectBuildkitSessionInternal(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := dockerfileRequiresDirectBuildkitSessionInternal(tc.dockerfile)
+			got, err := dockerfileRequiresDirectBuildkitSession(tc.dockerfile)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
 	}
 
 	t.Run("malformed dockerfile returns error", func(t *testing.T) {
-		_, err := dockerfileRequiresDirectBuildkitSessionInternal("# only a comment\n")
+		_, err := dockerfileRequiresDirectBuildkitSession("# only a comment\n")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse Dockerfile")
 	})
 }
 
-func TestRequiresDirectLocalBuildkitSessionInternal_ReadsRequestedDockerfile(t *testing.T) {
+func TestRequiresDirectLocalBuildkitSession_ReadsRequestedDockerfile(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile.custom"), []byte("FROM alpine:3.20\nRUN --mount=type=cache,target=/tmp/cache echo hi\n"), 0o644))
 
-	required, err := requiresDirectLocalBuildkitSessionInternal(types.BuildRequest{
+	required, err := requiresDirectLocalBuildkitSession(types.BuildRequest{
 		ContextDir: contextDir,
 		Dockerfile: "Dockerfile.custom",
 	})
@@ -59,8 +59,8 @@ func TestRequiresDirectLocalBuildkitSessionInternal_ReadsRequestedDockerfile(t *
 	assert.True(t, required)
 }
 
-func TestRequiresDirectLocalBuildkitSessionInternal_UsesInlineDockerfile(t *testing.T) {
-	required, err := requiresDirectLocalBuildkitSessionInternal(types.BuildRequest{
+func TestRequiresDirectLocalBuildkitSession_UsesInlineDockerfile(t *testing.T) {
+	required, err := requiresDirectLocalBuildkitSession(types.BuildRequest{
 		ContextDir:       t.TempDir(),
 		DockerfileInline: "FROM alpine:3.20\nRUN --mount=type=cache,target=/tmp/cache echo hi\n",
 	})
