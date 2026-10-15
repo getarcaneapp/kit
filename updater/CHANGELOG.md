@@ -1,3 +1,14 @@
+## updater/v0.11.7
+
+### Bug fixes
+
+* bump deps across all modules([bf8bf7f](https://github.com/getarcaneapp/kit/commit/bf8bf7fb40e108ff9b3bb580b4e47b3eae85da69) by @kmendell)
+* let manual container updates bypass the updater opt-out label([d63b704](https://github.com/getarcaneapp/kit/commit/d63b7043b010c4a0e0537b34d87d1a2fb0c4ac18) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.6...updater/v0.11.7
+
 ## updater/v0.11.6
 
 ### Bug fixes
