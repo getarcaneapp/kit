@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hkdf"
@@ -55,7 +56,16 @@ func InitEncryption(cfg *Config) {
 	if err != nil {
 		panic(err.Error())
 	}
-	encryptor, err := New(key, legacyKeysInternal(keyStr)...)
+	var legacy [][]byte
+	for _, decode := range []func(string) ([]byte, error){hex.DecodeString, base64.StdEncoding.DecodeString, base64.RawStdEncoding.DecodeString} {
+		if decoded, decodeErr := decode(keyStr); decodeErr == nil && len(decoded) >= KeySize {
+			legacy = append(legacy, bytes.Clone(decoded[:KeySize]))
+		}
+	}
+	if len(keyStr) >= KeySize {
+		legacy = append(legacy, []byte(keyStr[:KeySize]))
+	}
+	encryptor, err := New(key, legacy...)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -98,13 +108,13 @@ type Encryptor struct {
 // decryption during rotation.
 func New(primary []byte, old ...[]byte) (*Encryptor, error) {
 	keys := make([][]byte, 0, 1+len(old))
-	primaryKey, err := copyAESKeyInternal(primary)
+	primaryKey, err := copyAESKey(primary)
 	if err != nil {
 		return nil, err
 	}
 	keys = append(keys, primaryKey)
 	for i, key := range old {
-		normalized, keyErr := copyAESKeyInternal(key)
+		normalized, keyErr := copyAESKey(key)
 		if keyErr != nil {
 			return nil, &InvalidKeyError{Reason: fmt.Sprintf("old key %d: %v", i, keyErr)}
 		}
@@ -126,19 +136,20 @@ func ParseKey(in string) ([]byte, error) {
 		if err != nil {
 			return nil, &InvalidKeyError{Reason: "hex key is invalid"}
 		}
-		return validateEncodedKeyInternal(decoded)
+		return validateEncodedKey(decoded)
 	}
 	if encoded, ok := strings.CutPrefix(clean, "base64:"); ok {
 		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 		if err != nil {
 			return nil, &InvalidKeyError{Reason: "base64 key is invalid"}
 		}
-		return validateEncodedKeyInternal(decoded)
+		return validateEncodedKey(decoded)
 	}
-	if after, ok := strings.CutPrefix(clean, "raw:"); ok {
-		clean = after
+	clean = strings.TrimPrefix(clean, "raw:")
+	if clean == "" {
+		return nil, &InvalidKeyError{Reason: "key material is empty"}
 	}
-	return derivePassphraseKeyInternal(clean)
+	return hkdf.Key(sha256.New, []byte(clean), nil, keyDerivationContext, KeySize)
 }
 
 // GenerateKey creates a random AES-256 key.
@@ -160,12 +171,12 @@ func LoadKeyFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, &InvalidKeyError{Reason: "key file is not valid hex"}
 	}
-	return copyAESKeyInternal(decoded)
+	return copyAESKey(decoded)
 }
 
 // SaveKeyFile atomically writes a key as hex with 0600 permissions.
 func SaveKeyFile(path string, key []byte) error {
-	normalized, err := copyAESKeyInternal(key)
+	normalized, err := copyAESKey(key)
 	if err != nil {
 		return err
 	}
@@ -183,7 +194,7 @@ func (e *Encryptor) Encrypt(plaintext string) (string, error) {
 	if plaintext == "" {
 		return "", nil
 	}
-	gcm, err := newGCMInternal(e.keys[0])
+	gcm, err := newGCM(e.keys[0])
 	if err != nil {
 		return "", err
 	}
@@ -207,91 +218,42 @@ func (e *Encryptor) Decrypt(ciphertext string) (string, error) {
 	}
 	var lastErr error
 	for _, key := range e.keys {
-		plaintext, decryptErr := decryptWithKeyInternal(key, data)
-		if decryptErr == nil {
-			return plaintext, nil
+		gcm, gcmErr := newGCM(key)
+		if gcmErr != nil {
+			lastErr = gcmErr
+			continue
 		}
-		lastErr = decryptErr
+		if len(data) < gcm.Overhead() {
+			lastErr = &CiphertextError{Reason: "too short"}
+			continue
+		}
+		plaintext, openErr := gcm.Open(nil, nil, data, nil)
+		if openErr == nil {
+			return string(plaintext), nil
+		}
+		lastErr = openErr
 	}
 	return "", &DecryptError{Err: lastErr}
 }
 
-func decryptWithKeyInternal(key, data []byte) (string, error) {
-	gcm, err := newGCMInternal(key)
-	if err != nil {
-		return "", err
-	}
-	if len(data) < gcm.Overhead() {
-		return "", &CiphertextError{Reason: "too short"}
-	}
-	plaintext, err := gcm.Open(nil, nil, data, nil)
-	if err != nil {
-		return "", err
-	}
-	return string(plaintext), nil
-}
-
-func newGCMInternal(key []byte) (cipher.AEAD, error) {
+func newGCM(key []byte) (cipher.AEAD, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, &InvalidKeyError{Reason: err.Error()}
 	}
-	gcm, err := cipher.NewGCMWithRandomNonce(block)
-	if err != nil {
-		return nil, err
-	}
-	return gcm, nil
+	return cipher.NewGCMWithRandomNonce(block)
 }
 
-func validateEncodedKeyInternal(key []byte) ([]byte, error) {
+func validateEncodedKey(key []byte) ([]byte, error) {
 	if len(key) != KeySize {
 		return nil, &InvalidKeyError{Reason: fmt.Sprintf("encoded key must be %d bytes, got %d", KeySize, len(key))}
 	}
-	return copyAESKeyInternal(key)
+	return copyAESKey(key)
 }
 
-func copyAESKeyInternal(key []byte) ([]byte, error) {
+func copyAESKey(key []byte) ([]byte, error) {
 	if len(key) != KeySize {
 		return nil, &InvalidKeyError{Reason: fmt.Sprintf("key must be %d bytes, got %d", KeySize, len(key))}
 	}
-	out := make([]byte, KeySize)
-	copy(out, key)
-	return out, nil
-}
-
-func legacyKeysInternal(in string) [][]byte {
-	clean := strings.TrimSpace(in)
-	var out [][]byte
-	if decoded, err := hex.DecodeString(clean); err == nil && len(decoded) >= KeySize {
-		key := make([]byte, KeySize)
-		copy(key, decoded[:KeySize])
-		out = append(out, key)
-	}
-	if decoded, err := base64.StdEncoding.DecodeString(clean); err == nil && len(decoded) >= KeySize {
-		key := make([]byte, KeySize)
-		copy(key, decoded[:KeySize])
-		out = append(out, key)
-	}
-	if decoded, err := base64.RawStdEncoding.DecodeString(clean); err == nil && len(decoded) >= KeySize {
-		key := make([]byte, KeySize)
-		copy(key, decoded[:KeySize])
-		out = append(out, key)
-	}
-	if len(clean) >= KeySize {
-		key := make([]byte, KeySize)
-		copy(key, clean[:KeySize])
-		out = append(out, key)
-	}
-	return out
-}
-
-func derivePassphraseKeyInternal(secret string) ([]byte, error) {
-	if secret == "" {
-		return nil, &InvalidKeyError{Reason: "key material is empty"}
-	}
-	out, err := hkdf.Key(sha256.New, []byte(secret), nil, keyDerivationContext, KeySize)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+	return bytes.Clone(key), nil
 }
