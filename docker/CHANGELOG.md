@@ -1,3 +1,13 @@
+## docker/v0.1.1
+
+### Bug fixes
+
+* bump deps across all modules([bf8bf7f](https://github.com/getarcaneapp/kit/commit/bf8bf7fb40e108ff9b3bb580b4e47b3eae85da69) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.1.0...docker/v0.1.1
+
 ## docker/v0.1.0
 
 ### New features
