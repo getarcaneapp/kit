@@ -54,7 +54,9 @@ type dockerEventBusState struct {
 // NewDockerEventBus creates an empty Docker event bus.
 func NewDockerEventBus(opts ...Option) *DockerEventBus {
 	b := &DockerEventBus{}
-	b.state.Store(newDockerEventBusStateInternal())
+	b.state.Store(&dockerEventBusState{
+		subscribers: make(map[events.Type][]chan events.Message),
+	})
 	for _, opt := range opts {
 		opt(b)
 	}
@@ -74,20 +76,45 @@ func (b *DockerEventBus) Subscribe(eventType events.Type, opts ...SubscribeOptio
 	}
 
 	for {
-		current := b.loadStateInternal()
+		current := b.loadState()
 		if current.closed {
 			close(ch)
 			return ch, func() {}
 		}
 
-		next := current.withSubscriptionInternal(eventType, ch)
-		if b.state.CompareAndSwap(current, next) {
+		subscribers := maps.Clone(current.subscribers)
+		subscribers[eventType] = append(append([]chan events.Message(nil), subscribers[eventType]...), ch)
+		if b.state.CompareAndSwap(current, &dockerEventBusState{subscribers: subscribers}) {
 			break
 		}
 	}
 
 	return ch, func() {
-		b.unsubscribeInternal(eventType, ch)
+		for {
+			current := b.loadState()
+			subscriptions := current.subscribers[eventType]
+			index := slices.Index(subscriptions, ch)
+			if index < 0 {
+				return
+			}
+
+			subscribers := maps.Clone(current.subscribers)
+			if len(subscriptions) == 1 {
+				delete(subscribers, eventType)
+			} else {
+				next := make([]chan events.Message, 0, len(subscriptions)-1)
+				next = append(next, subscriptions[:index]...)
+				next = append(next, subscriptions[index+1:]...)
+				subscribers[eventType] = next
+			}
+
+			if b.state.CompareAndSwap(current, &dockerEventBusState{closed: current.closed, subscribers: subscribers}) {
+				b.deliveryMu.Lock()
+				close(ch)
+				b.deliveryMu.Unlock()
+				return
+			}
+		}
 	}
 }
 
@@ -133,13 +160,12 @@ func (b *DockerEventBus) Close() {
 	}
 
 	for {
-		current := b.loadStateInternal()
+		current := b.loadState()
 		if current.closed {
 			return
 		}
 
-		closed := &dockerEventBusState{closed: true}
-		if !b.state.CompareAndSwap(current, closed) {
+		if !b.state.CompareAndSwap(current, &dockerEventBusState{closed: true}) {
 			continue
 		}
 
@@ -154,62 +180,18 @@ func (b *DockerEventBus) Close() {
 	}
 }
 
-func newDockerEventBusStateInternal() *dockerEventBusState {
-	return &dockerEventBusState{subscribers: make(map[events.Type][]chan events.Message)}
-}
-
-func (b *DockerEventBus) loadStateInternal() *dockerEventBusState {
+func (b *DockerEventBus) loadState() *dockerEventBusState {
 	for {
 		state := b.state.Load()
 		if state != nil {
 			return state
 		}
 
-		initial := newDockerEventBusStateInternal()
+		initial := &dockerEventBusState{
+			subscribers: make(map[events.Type][]chan events.Message),
+		}
 		if b.state.CompareAndSwap(nil, initial) {
 			return initial
-		}
-	}
-}
-
-func (s *dockerEventBusState) withSubscriptionInternal(eventType events.Type, subscription chan events.Message) *dockerEventBusState {
-	subscribers := maps.Clone(s.subscribers)
-	subscribers[eventType] = append(append([]chan events.Message(nil), subscribers[eventType]...), subscription)
-	return &dockerEventBusState{subscribers: subscribers}
-}
-
-func (s *dockerEventBusState) withoutSubscriptionInternal(eventType events.Type, subscription chan events.Message) (*dockerEventBusState, bool) {
-	current := s.subscribers[eventType]
-	index := slices.Index(current, subscription)
-	if index < 0 {
-		return s, false
-	}
-
-	subscribers := maps.Clone(s.subscribers)
-	if len(current) == 1 {
-		delete(subscribers, eventType)
-	} else {
-		next := make([]chan events.Message, 0, len(current)-1)
-		next = append(next, current[:index]...)
-		next = append(next, current[index+1:]...)
-		subscribers[eventType] = next
-	}
-
-	return &dockerEventBusState{closed: s.closed, subscribers: subscribers}, true
-}
-
-func (b *DockerEventBus) unsubscribeInternal(eventType events.Type, subscription chan events.Message) {
-	for {
-		current := b.loadStateInternal()
-		next, found := current.withoutSubscriptionInternal(eventType, subscription)
-		if !found {
-			return
-		}
-		if b.state.CompareAndSwap(current, next) {
-			b.deliveryMu.Lock()
-			close(subscription)
-			b.deliveryMu.Unlock()
-			return
 		}
 	}
 }

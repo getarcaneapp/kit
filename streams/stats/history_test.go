@@ -77,10 +77,23 @@ func TestStoreRecordPrunesExpiredContainers(t *testing.T) {
 	store := NewStore(WithTTL(10*time.Minute), WithPruneInterval(time.Minute))
 	baseTime := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 
-	store.Record("stale-container", StatsHistorySample{CPUTenths: 111, MemoryTenths: 222, MemoryUsageBytes: 333}, false, baseTime)
+	store.Record(
+		"stale-container",
+		StatsHistorySample{
+			CPUTenths:        111,
+			MemoryTenths:     222,
+			MemoryUsageBytes: 333,
+		},
+		false,
+		baseTime,
+	)
 	store.Record(
 		"fresh-container",
-		StatsHistorySample{CPUTenths: 333, MemoryTenths: 444, MemoryUsageBytes: 555},
+		StatsHistorySample{
+			CPUTenths:        333,
+			MemoryTenths:     444,
+			MemoryUsageBytes: 555,
+		},
 		false,
 		baseTime.Add(9*time.Minute),
 	)

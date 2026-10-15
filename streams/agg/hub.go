@@ -55,7 +55,17 @@ func (h *Hub[T]) Subscribe(ctx context.Context, key string, run func(ctx context
 			subscribers: map[*hubSubscriber[T]]struct{}{},
 		}
 		h.entries[key] = entry
-		go run(runCtx, func(event T) { h.publish(entry, event) })
+		go run(runCtx, func(event T) {
+			h.mu.Lock()
+			entry.last = event
+			entry.hasLast = true
+			subscribers := slices.Collect(maps.Keys(entry.subscribers))
+			h.mu.Unlock()
+
+			for _, subscriber := range subscribers {
+				subscriber.set(event)
+			}
+		})
 	}
 	entry.subscribers[sub] = struct{}{}
 	if entry.hasLast {
@@ -78,23 +88,21 @@ func (h *Hub[T]) Subscribe(ctx context.Context, key string, run func(ctx context
 		case <-ctx.Done():
 			return
 		case <-sub.wake:
-			event, has := sub.take()
+			event, has := func() (T, bool) {
+				sub.mu.Lock()
+				defer sub.mu.Unlock()
+				if !sub.has {
+					var zero T
+					return zero, false
+				}
+				event := sub.latest
+				sub.has = false
+				return event, true
+			}()
 			if has && !deliver(event) {
 				return
 			}
 		}
-	}
-}
-
-func (h *Hub[T]) publish(entry *hubEntry[T], event T) {
-	h.mu.Lock()
-	entry.last = event
-	entry.hasLast = true
-	subscribers := slices.Collect(maps.Keys(entry.subscribers))
-	h.mu.Unlock()
-
-	for _, sub := range subscribers {
-		sub.set(event)
 	}
 }
 
@@ -108,16 +116,4 @@ func (sub *hubSubscriber[T]) set(event T) {
 	case sub.wake <- struct{}{}:
 	default:
 	}
-}
-
-func (sub *hubSubscriber[T]) take() (T, bool) {
-	sub.mu.Lock()
-	defer sub.mu.Unlock()
-	if !sub.has {
-		var zero T
-		return zero, false
-	}
-	event := sub.latest
-	sub.has = false
-	return event, true
 }

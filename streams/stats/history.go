@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dockercontainer "github.com/moby/moby/api/types/container"
+	kit "go.getarcane.app/kit/pkg"
 )
 
 const (
@@ -81,7 +82,7 @@ type historyBuffer struct {
 // NewStore creates a configured Store.
 func NewStore(opts ...Option) *Store {
 	s := &Store{}
-	s.initLockedInternal()
+	s.initLocked()
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -93,11 +94,24 @@ func NewStore(opts ...Option) *Store {
 // CLI's OnlineCPUs multiplier, preserving Arcane's historical 0-100 normalized
 // chart scale.
 func BuildSample(stats dockercontainer.StatsResponse) StatsHistorySample {
-	memoryUsage := calculateMemoryUsageInternal(stats)
 	return StatsHistorySample{
-		CPUTenths:        percentToTenthsInternal(calculateCPUPercentInternal(stats)),
-		MemoryTenths:     percentToTenthsInternal(calculateMemoryPercentInternal(stats)),
-		MemoryUsageBytes: memoryUsage,
+		CPUTenths: uint16(math.Round(func() float64 {
+			cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage) - float64(stats.PreCPUStats.CPUUsage.TotalUsage)
+			systemDelta := float64(stats.CPUStats.SystemUsage) - float64(stats.PreCPUStats.SystemUsage)
+			if systemDelta <= 0 || cpuDelta <= 0 {
+				return 0
+			}
+			return min(max((cpuDelta/systemDelta)*100, 0), 100)
+		}() * 10)),
+		MemoryTenths: uint16(math.Round(func() float64 {
+			limit := stats.MemoryStats.Limit
+			if limit == 0 {
+				return 0
+			}
+			usage := calculateMemoryUsage(stats)
+			return min(max((float64(usage)/float64(limit))*100, 0), 100)
+		}() * 10)),
+		MemoryUsageBytes: calculateMemoryUsage(stats),
 	}
 }
 
@@ -105,9 +119,11 @@ func BuildSample(stats dockercontainer.StatsResponse) StatsHistorySample {
 func (s *Store) Record(containerID string, sample StatsHistorySample, includeHistory bool, recordedAt time.Time) []StatsHistorySample {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.initLockedInternal()
+	s.initLocked()
 
-	s.maybePruneLockedInternal(recordedAt)
+	if s.lastPrune.IsZero() || kit.Ternary(recordedAt.IsZero(), time.Now(), recordedAt).Sub(s.lastPrune) >= s.pruneInterval {
+		s.pruneLocked(recordedAt)
+	}
 
 	buffer := s.histories[containerID]
 	if buffer == nil {
@@ -129,7 +145,7 @@ func (s *Store) Record(containerID string, sample StatsHistorySample, includeHis
 func (s *Store) History(containerID string) []StatsHistorySample {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.initLockedInternal()
+	s.initLocked()
 
 	buffer := s.histories[containerID]
 	if buffer == nil {
@@ -142,7 +158,7 @@ func (s *Store) History(containerID string) []StatsHistorySample {
 func (s *Store) Remove(containerID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.initLockedInternal()
+	s.initLocked()
 	delete(s.histories, containerID)
 }
 
@@ -150,11 +166,12 @@ func (s *Store) Remove(containerID string) {
 func (s *Store) Prune(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.initLockedInternal()
-	s.pruneLockedInternal(now)
+	s.initLocked()
+	s.pruneLocked(now)
 }
 
-func (s *Store) initLockedInternal() {
+func (s *Store) initLocked() {
+	// keep: lazy defaults under s.mu so a zero-value Store works
 	if s.capacity <= 0 {
 		s.capacity = DefaultHistoryCapacity
 	}
@@ -195,19 +212,7 @@ func (b *historyBuffer) snapshot() []StatsHistorySample {
 	return out
 }
 
-func (s *Store) maybePruneLockedInternal(now time.Time) {
-	if now.IsZero() {
-		now = time.Now()
-	}
-
-	if !s.lastPrune.IsZero() && now.Sub(s.lastPrune) < s.pruneInterval {
-		return
-	}
-
-	s.pruneLockedInternal(now)
-}
-
-func (s *Store) pruneLockedInternal(now time.Time) {
+func (s *Store) pruneLocked(now time.Time) {
 	if now.IsZero() {
 		now = time.Now()
 	}
@@ -219,28 +224,7 @@ func (s *Store) pruneLockedInternal(now time.Time) {
 	}
 }
 
-func calculateCPUPercentInternal(stats dockercontainer.StatsResponse) float64 {
-	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage) - float64(stats.PreCPUStats.CPUUsage.TotalUsage)
-	systemDelta := float64(stats.CPUStats.SystemUsage) - float64(stats.PreCPUStats.SystemUsage)
-
-	if systemDelta <= 0 || cpuDelta <= 0 {
-		return 0
-	}
-
-	return min(max((cpuDelta/systemDelta)*100, 0), 100)
-}
-
-func calculateMemoryPercentInternal(stats dockercontainer.StatsResponse) float64 {
-	limit := stats.MemoryStats.Limit
-	if limit == 0 {
-		return 0
-	}
-
-	usage := calculateMemoryUsageInternal(stats)
-	return min(max((float64(usage)/float64(limit))*100, 0), 100)
-}
-
-func calculateMemoryUsageInternal(stats dockercontainer.StatsResponse) uint64 {
+func calculateMemoryUsage(stats dockercontainer.StatsResponse) uint64 {
 	usage := stats.MemoryStats.Usage
 	if totalInactiveFile, ok := stats.MemoryStats.Stats["total_inactive_file"]; ok && totalInactiveFile < usage {
 		return usage - totalInactiveFile
@@ -250,8 +234,4 @@ func calculateMemoryUsageInternal(stats dockercontainer.StatsResponse) uint64 {
 	}
 
 	return usage
-}
-
-func percentToTenthsInternal(value float64) uint16 {
-	return uint16(math.Round(value * 10))
 }

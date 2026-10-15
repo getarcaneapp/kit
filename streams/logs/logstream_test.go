@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestSlogHandlerNormalizesGroupedAttrsInternal(t *testing.T) {
+func TestSlogHandlerNormalizesGroupedAttrs(t *testing.T) {
 	b := New(10)
 	h := NewSlogHandler(slog.DiscardHandler, b)
 	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelInfo, "Incoming request", 0)
@@ -48,7 +48,7 @@ func TestSlogHandlerNormalizesGroupedAttrsInternal(t *testing.T) {
 	}
 }
 
-func TestSlogHandlerNormalizesErrorsInternal(t *testing.T) {
+func TestSlogHandlerNormalizesErrors(t *testing.T) {
 	b := New(10)
 	h := NewSlogHandler(slog.DiscardHandler, b)
 	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelError, "request failed", 0)

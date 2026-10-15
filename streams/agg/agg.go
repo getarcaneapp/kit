@@ -47,8 +47,17 @@ func (e *InvalidConfigError) Error() string {
 // Run drives a JSON-lines aggregated stream. It returns when ctx is canceled or
 // encoding fails.
 func Run[T any](ctx context.Context, cfg Config[T]) error {
-	if err := cfg.validate(); err != nil {
-		return err
+	if cfg.Writer == nil {
+		return &InvalidConfigError{Field: "Writer", Reason: "is required"}
+	}
+	if cfg.Flush == nil {
+		return &InvalidConfigError{Field: "Flush", Reason: "is required"}
+	}
+	if cfg.Buffer < 0 {
+		return &InvalidConfigError{Field: "Buffer", Reason: "must be non-negative"}
+	}
+	if cfg.MakeHeartbeat != nil && cfg.HeartbeatInterval <= 0 {
+		return &InvalidConfigError{Field: "HeartbeatInterval", Reason: "must be positive when MakeHeartbeat is set"}
 	}
 
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -94,22 +103,6 @@ func Run[T any](ctx context.Context, cfg Config[T]) error {
 			cfg.Flush()
 		}
 	}
-}
-
-func (cfg Config[T]) validate() error {
-	if cfg.Writer == nil {
-		return &InvalidConfigError{Field: "Writer", Reason: "is required"}
-	}
-	if cfg.Flush == nil {
-		return &InvalidConfigError{Field: "Flush", Reason: "is required"}
-	}
-	if cfg.Buffer < 0 {
-		return &InvalidConfigError{Field: "Buffer", Reason: "must be non-negative"}
-	}
-	if cfg.MakeHeartbeat != nil && cfg.HeartbeatInterval <= 0 {
-		return &InvalidConfigError{Field: "HeartbeatInterval", Reason: "must be positive when MakeHeartbeat is set"}
-	}
-	return nil
 }
 
 // Send forwards an event to the stream's event channel, giving up when ctx is
@@ -167,7 +160,11 @@ func ReconcilePollersByKey[T any](
 		runPoller: runPoller,
 	}
 	defer set.wg.Wait()
-	defer set.cancelAll()
+	defer func() {
+		for _, activePoller := range set.active {
+			activePoller.cancel()
+		}
+	}()
 
 	reconcile := func() {
 		items, err := listItems(ctx)
@@ -177,7 +174,53 @@ func ReconcilePollersByKey[T any](
 			}
 			return
 		}
-		set.sync(items, keyFunc, versionFunc)
+
+		// sync starts, restarts, and stops pollers so the set matches items exactly.
+		current := make(map[string]struct{}, len(items))
+		for _, item := range items {
+			key := keyFunc(item)
+			if key == "" {
+				continue
+			}
+			version := ""
+			if versionFunc != nil {
+				version = versionFunc(item)
+			}
+			current[key] = struct{}{}
+
+			// ensure keeps a poller running for key, restarting it when version changes.
+			if existing, ok := set.active[key]; ok {
+				if existing.version == version {
+					continue
+				}
+				existing.cancel()
+				select {
+				case <-existing.done:
+				case <-set.ctx.Done():
+					<-existing.done
+				}
+				delete(set.active, key)
+			}
+
+			pollCtx, cancelPoll := context.WithCancel(set.ctx)
+			done := make(chan struct{})
+			set.active[key] = poller{
+				cancel:  cancelPoll,
+				done:    done,
+				version: version,
+			}
+			set.wg.Go(func() {
+				defer close(done)
+				set.runPoller(pollCtx, item)
+			})
+		}
+
+		for id, activePoller := range set.active {
+			if _, ok := current[id]; !ok {
+				activePoller.cancel()
+				delete(set.active, id)
+			}
+		}
 	}
 
 	reconcile()
@@ -207,64 +250,4 @@ type pollerSet[T any] struct {
 	active    map[string]poller
 	wg        sync.WaitGroup
 	runPoller func(ctx context.Context, item T)
-}
-
-// sync starts, restarts, and stops pollers so the set matches items exactly.
-func (s *pollerSet[T]) sync(items []T, keyFunc, versionFunc func(T) string) {
-	current := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		key := keyFunc(item)
-		if key == "" {
-			continue
-		}
-		version := ""
-		if versionFunc != nil {
-			version = versionFunc(item)
-		}
-		current[key] = struct{}{}
-		s.ensure(key, version, item)
-	}
-
-	for id, activePoller := range s.active {
-		if _, ok := current[id]; !ok {
-			s.stop(activePoller, false)
-			delete(s.active, id)
-		}
-	}
-}
-
-// ensure keeps a poller running for key, restarting it when version changes.
-func (s *pollerSet[T]) ensure(key, version string, item T) {
-	if existing, ok := s.active[key]; ok {
-		if existing.version == version {
-			return
-		}
-		s.stop(existing, true)
-		delete(s.active, key)
-	}
-
-	pollCtx, cancelPoll := context.WithCancel(s.ctx)
-	done := make(chan struct{})
-	s.active[key] = poller{cancel: cancelPoll, done: done, version: version}
-	s.wg.Go(func() {
-		defer close(done)
-		s.runPoller(pollCtx, item)
-	})
-}
-
-func (s *pollerSet[T]) stop(activePoller poller, wait bool) {
-	activePoller.cancel()
-	if wait {
-		select {
-		case <-activePoller.done:
-		case <-s.ctx.Done():
-			<-activePoller.done
-		}
-	}
-}
-
-func (s *pollerSet[T]) cancelAll() {
-	for _, activePoller := range s.active {
-		activePoller.cancel()
-	}
 }

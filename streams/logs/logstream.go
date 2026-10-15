@@ -116,21 +116,40 @@ func (b *Broadcaster) Recent() []Entry {
 func (b *Broadcaster) Subscribe() (<-chan Entry, func()) {
 	ch := make(chan Entry, b.subscriberBuffer)
 	for {
-		current := b.loadSubscribersInternal()
-		nextSubscribers := append(append([]chan Entry(nil), current.subscribers...), ch)
-		next := &logSubscriberSnapshot{subscribers: nextSubscribers}
+		current := b.loadSubscribers()
+		next := &logSubscriberSnapshot{
+			subscribers: append(append([]chan Entry(nil), current.subscribers...), ch),
+		}
 		if b.subscribers.CompareAndSwap(current, next) {
 			break
 		}
 	}
 
-	cancel := func() {
-		b.unsubscribeInternal(ch)
+	return ch, func() {
+		for {
+			current := b.loadSubscribers()
+			index := slices.Index(current.subscribers, ch)
+			if index < 0 {
+				return
+			}
+
+			next := &logSubscriberSnapshot{
+				subscribers: append(
+					append(make([]chan Entry, 0, len(current.subscribers)-1), current.subscribers[:index]...),
+					current.subscribers[index+1:]...,
+				),
+			}
+			if b.subscribers.CompareAndSwap(current, next) {
+				b.deliveryMu.Lock()
+				close(ch)
+				b.deliveryMu.Unlock()
+				return
+			}
+		}
 	}
-	return ch, cancel
 }
 
-func (b *Broadcaster) loadSubscribersInternal() *logSubscriberSnapshot {
+func (b *Broadcaster) loadSubscribers() *logSubscriberSnapshot {
 	for {
 		current := b.subscribers.Load()
 		if current != nil {
@@ -140,27 +159,6 @@ func (b *Broadcaster) loadSubscribersInternal() *logSubscriberSnapshot {
 		initial := &logSubscriberSnapshot{}
 		if b.subscribers.CompareAndSwap(nil, initial) {
 			return initial
-		}
-	}
-}
-
-func (b *Broadcaster) unsubscribeInternal(subscription chan Entry) {
-	for {
-		current := b.loadSubscribersInternal()
-		index := slices.Index(current.subscribers, subscription)
-		if index < 0 {
-			return
-		}
-
-		nextSubscribers := make([]chan Entry, 0, len(current.subscribers)-1)
-		nextSubscribers = append(nextSubscribers, current.subscribers[:index]...)
-		nextSubscribers = append(nextSubscribers, current.subscribers[index+1:]...)
-		next := &logSubscriberSnapshot{subscribers: nextSubscribers}
-		if b.subscribers.CompareAndSwap(current, next) {
-			b.deliveryMu.Lock()
-			close(subscription)
-			b.deliveryMu.Unlock()
-			return
 		}
 	}
 }
@@ -191,14 +189,14 @@ func (h *slogHandler) Enabled(ctx context.Context, level slog.Level) bool {
 func (h *slogHandler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := make(map[string]any)
 	for _, bound := range h.attrs {
-		addAttrsToMapInternal(attrs, bound.groups, bound.attrs)
+		addAttrsToMap(attrs, bound.groups, bound.attrs)
 	}
 	recordAttrs := make([]slog.Attr, 0, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) bool {
 		recordAttrs = append(recordAttrs, a)
 		return true
 	})
-	addAttrsToMapInternal(attrs, h.group, recordAttrs)
+	addAttrsToMap(attrs, h.group, recordAttrs)
 	if len(attrs) == 0 {
 		attrs = nil
 	}
@@ -213,44 +211,59 @@ func (h *slogHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (h *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := h.cloneInternal()
-	copiedAttrs := slices.Clone(attrs)
-	next.attrs = append(next.attrs, boundAttrs{
-		groups: slices.Clone(h.group),
-		attrs:  copiedAttrs,
-	})
-	next.base = h.base.WithAttrs(attrs)
-	return next
+	return &slogHandler{
+		base: h.base.WithAttrs(attrs),
+		b:    h.b,
+		attrs: func() []boundAttrs {
+			if len(h.attrs) == 0 {
+				return append([]boundAttrs(nil), boundAttrs{
+					groups: slices.Clone(h.group),
+					attrs:  slices.Clone(attrs),
+				})
+			}
+			copied := make([]boundAttrs, 0, len(h.attrs))
+			for _, bound := range h.attrs {
+				copied = append(copied, boundAttrs{
+					groups: slices.Clone(bound.groups),
+					attrs:  slices.Clone(bound.attrs),
+				})
+			}
+			return append(copied, boundAttrs{
+				groups: slices.Clone(h.group),
+				attrs:  slices.Clone(attrs),
+			})
+		}(),
+		group: slices.Clone(h.group),
+	}
 }
 
 func (h *slogHandler) WithGroup(name string) slog.Handler {
-	next := h.cloneInternal()
-	if name != "" {
-		next.group = append(next.group, name)
+	return &slogHandler{
+		base: h.base.WithGroup(name),
+		b:    h.b,
+		attrs: func() []boundAttrs {
+			if len(h.attrs) == 0 {
+				return nil
+			}
+			copied := make([]boundAttrs, 0, len(h.attrs))
+			for _, bound := range h.attrs {
+				copied = append(copied, boundAttrs{
+					groups: slices.Clone(bound.groups),
+					attrs:  slices.Clone(bound.attrs),
+				})
+			}
+			return copied
+		}(),
+		group: func() []string {
+			if name == "" {
+				return slices.Clone(h.group)
+			}
+			return append(slices.Clone(h.group), name)
+		}(),
 	}
-	next.base = h.base.WithGroup(name)
-	return next
 }
 
-func (h *slogHandler) cloneInternal() *slogHandler {
-	next := &slogHandler{
-		base:  h.base,
-		b:     h.b,
-		group: slices.Clone(h.group),
-	}
-	if len(h.attrs) > 0 {
-		next.attrs = make([]boundAttrs, 0, len(h.attrs))
-		for _, bound := range h.attrs {
-			next.attrs = append(next.attrs, boundAttrs{
-				groups: slices.Clone(bound.groups),
-				attrs:  slices.Clone(bound.attrs),
-			})
-		}
-	}
-	return next
-}
-
-func addAttrsToMapInternal(dst map[string]any, groups []string, attrs []slog.Attr) {
+func addAttrsToMap(dst map[string]any, groups []string, attrs []slog.Attr) {
 	target := dst
 	for _, group := range groups {
 		existing, _ := target[group].(map[string]any)
@@ -264,16 +277,16 @@ func addAttrsToMapInternal(dst map[string]any, groups []string, attrs []slog.Att
 		if attr.Key == "" {
 			continue
 		}
-		target[attr.Key] = normalizeAttrValueInternal(attr.Value)
+		target[attr.Key] = normalizeAttrValue(attr.Value)
 	}
 }
 
-func normalizeAttrValueInternal(value slog.Value) any {
+func normalizeAttrValue(value slog.Value) any {
 	value = value.Resolve()
 
 	switch value.Kind() {
 	case slog.KindAny:
-		return normalizeAnyValueInternal(value.Any())
+		return normalizeAnyValue(value.Any())
 	case slog.KindBool:
 		return value.Bool()
 	case slog.KindDuration:
@@ -281,7 +294,7 @@ func normalizeAttrValueInternal(value slog.Value) any {
 	case slog.KindFloat64:
 		return value.Float64()
 	case slog.KindGroup:
-		return normalizeGroupAttrsInternal(value.Group())
+		return normalizeGroupAttrs(value.Group())
 	case slog.KindInt64:
 		return value.Int64()
 	case slog.KindLogValuer:
@@ -297,20 +310,20 @@ func normalizeAttrValueInternal(value slog.Value) any {
 	}
 }
 
-func normalizeAnyValueInternal(value any) any {
+func normalizeAnyValue(value any) any {
 	switch typed := value.(type) {
 	case error:
 		return typed.Error()
 	case slog.Attr:
-		return map[string]any{typed.Key: normalizeAttrValueInternal(typed.Value)}
+		return map[string]any{typed.Key: normalizeAttrValue(typed.Value)}
 	case []slog.Attr:
-		return normalizeGroupAttrsInternal(typed)
+		return normalizeGroupAttrs(typed)
 	case slog.Value:
-		return normalizeAttrValueInternal(typed)
+		return normalizeAttrValue(typed)
 	case map[string]any:
 		out := make(map[string]any, len(typed))
 		for key, item := range typed {
-			out[key] = normalizeAnyValueInternal(item)
+			out[key] = normalizeAnyValue(item)
 		}
 		return out
 	}
@@ -319,7 +332,7 @@ func normalizeAnyValueInternal(value any) any {
 	if rv.IsValid() && rv.Kind() == reflect.Slice {
 		out := make([]any, rv.Len())
 		for i := range rv.Len() {
-			out[i] = normalizeAnyValueInternal(rv.Index(i).Interface())
+			out[i] = normalizeAnyValue(rv.Index(i).Interface())
 		}
 		return out
 	}
@@ -327,13 +340,13 @@ func normalizeAnyValueInternal(value any) any {
 	return value
 }
 
-func normalizeGroupAttrsInternal(attrs []slog.Attr) map[string]any {
+func normalizeGroupAttrs(attrs []slog.Attr) map[string]any {
 	out := make(map[string]any, len(attrs))
 	for _, attr := range attrs {
 		if attr.Key == "" {
 			continue
 		}
-		out[attr.Key] = normalizeAttrValueInternal(attr.Value)
+		out[attr.Key] = normalizeAttrValue(attr.Value)
 	}
 	return out
 }
