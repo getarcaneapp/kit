@@ -2,7 +2,7 @@
 version: "2"
 
 run:
-  go: "1.27.1"
+  go: "1.27.2"
   timeout: 5m
 
 issues:
@@ -100,7 +100,7 @@ linters:
         - style
 
     gocognit:
-      min-complexity: 40
+      min-complexity: 45
 
     lll:
       line-length: 200

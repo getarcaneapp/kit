@@ -1,9 +1,8 @@
 package acfs
 
 import (
-	"errors"
+	"cmp"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -41,21 +40,7 @@ func LogicalPath(rootPath, absPath string) (string, error) {
 	return kitfs.LogicalPath(filepath.ToSlash(relative)), nil
 }
 
-func relativePathInternal(components []string) string {
-	if len(components) == 0 {
-		return "."
-	}
-	return path.Join(components...)
-}
-
-func relativeComponentsInternal(relativePath string) []string {
-	if relativePath == "." || relativePath == "" {
-		return nil
-	}
-	return strings.Split(relativePath, "/")
-}
-
-func resolvePathInternal(root *os.Root, relativePath string, followFinal bool) (string, error) {
+func resolvePath(root *os.Root, relativePath string, followFinal bool) (string, error) {
 	if relativePath == "." {
 		return ".", nil
 	}
@@ -79,14 +64,13 @@ func resolvePathInternal(root *os.Root, relativePath string, followFinal bool) (
 			continue
 		}
 
-		candidate := relativePathInternal(append(resolved, component))
+		candidate := path.Join(append(resolved, component)...)
 		info, err := root.Lstat(candidate)
 		if err != nil {
 			return "", fmt.Errorf("lstat %q: %w", kitfs.LogicalPath(candidate), err)
 		}
 
-		isFinal := len(pending) == 0
-		if info.Mode()&os.ModeSymlink == 0 || (isFinal && !followFinal) {
+		if info.Mode()&os.ModeSymlink == 0 || (len(pending) == 0 && !followFinal) {
 			resolved = append(resolved, component)
 			continue
 		}
@@ -120,44 +104,21 @@ func resolvePathInternal(root *os.Root, relativePath string, followFinal bool) (
 			resolved = resolved[:0]
 		}
 
-		targetComponents := strings.Split(target, "/")
-		pending = append(targetComponents, pending...)
+		pending = append(strings.Split(target, "/"), pending...)
 	}
 
-	return relativePathInternal(resolved), nil
+	return cmp.Or(path.Join(resolved...), "."), nil
 }
 
-func resolveParentInternal(root *os.Root, relativePath string) (string, string, error) {
-	parent := path.Dir(relativePath)
+func resolveParent(root *os.Root, relativePath string) (string, string, error) {
 	base := path.Base(relativePath)
 	if base == "." || base == "/" || base == "" {
 		return "", "", ErrInvalidPath
 	}
 
-	resolvedParent, err := resolvePathInternal(root, parent, true)
+	resolvedParent, err := resolvePath(root, path.Dir(relativePath), true)
 	if err != nil {
 		return "", "", err
 	}
 	return resolvedParent, base, nil
-}
-
-func resolveForMkdirInternal(root *os.Root, relativePath string) (string, error) {
-	if relativePath == "." {
-		return ".", nil
-	}
-
-	components := strings.Split(relativePath, "/")
-	for index := len(components); index >= 0; index-- {
-		prefix := relativePathInternal(components[:index])
-		resolvedPrefix, err := resolvePathInternal(root, prefix, true)
-		if err == nil {
-			resolvedComponents := relativeComponentsInternal(resolvedPrefix)
-			return relativePathInternal(append(resolvedComponents, components[index:]...)), nil
-		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return "", err
-		}
-	}
-
-	return "", fmt.Errorf("%w: no existing workspace ancestor", ErrInvalidPath)
 }

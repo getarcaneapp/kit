@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 
+	kit "go.getarcane.app/kit/pkg"
+
 	"go.getarcane.app/acfs"
 	"go.getarcane.app/acfs/internal/version"
 	acfstypes "go.getarcane.app/acfs/types"
@@ -36,7 +38,7 @@ type pathFlags struct {
 // Run executes acfs and returns its process exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		printUsage(stderr)
+		_, _ = fmt.Fprintln(stderr, "usage: acfs <list|walk|stat|read|write|mkdir|remove|apply|version> [options]")
 		return exitUsage
 	}
 
@@ -62,12 +64,20 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "version":
 		err = runVersion(args[1:], stdout)
 	default:
-		printUsage(stderr)
+		_, _ = fmt.Fprintln(stderr, "usage: acfs <list|walk|stat|read|write|mkdir|remove|apply|version> [options]")
 		return exitUsage
 	}
 
 	if err != nil {
-		writeErrorInternal(stderr, command, err)
+		applyErr, ok := errors.AsType[*acfstypes.ApplyError](err)
+		_ = encodeJSON(stderr, acfstypes.ErrorResponse{
+			Code:        errorCode(err),
+			Message:     err.Error(),
+			Operation:   command,
+			Path:        kit.FromPtr(applyErr).Path,
+			ChangeIndex: kit.Ternary(ok, new(kit.FromPtr(applyErr).Index), nil),
+			Version:     acfstypes.ProtocolVersion,
+		})
 		return exitFailure
 	}
 	return exitSuccess
@@ -421,11 +431,7 @@ func runVersion(args []string, stdout io.Writer) error {
 	})
 }
 
-func printUsage(stderr io.Writer) {
-	_, _ = fmt.Fprintln(stderr, "usage: acfs <list|walk|stat|read|write|mkdir|remove|apply|version> [options]")
-}
-
-func errorCodeInternal(err error) acfstypes.ErrorCode {
+func errorCode(err error) acfstypes.ErrorCode {
 	switch {
 	case errors.Is(err, acfs.ErrInvalidPath):
 		return acfstypes.ErrorInvalidPath
@@ -454,18 +460,4 @@ func errorCodeInternal(err error) acfstypes.ErrorCode {
 	default:
 		return acfstypes.ErrorInternal
 	}
-}
-
-func writeErrorInternal(destination io.Writer, operation string, err error) {
-	response := acfstypes.ErrorResponse{
-		Version:   acfstypes.ProtocolVersion,
-		Code:      errorCodeInternal(err),
-		Message:   err.Error(),
-		Operation: operation,
-	}
-	if applyErr, ok := errors.AsType[*acfstypes.ApplyError](err); ok {
-		response.ChangeIndex = &applyErr.Index
-		response.Path = applyErr.Path
-	}
-	_ = encodeJSON(destination, response)
 }

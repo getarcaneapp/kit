@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"strings"
 
 	kitfs "go.getarcane.app/kit/pkg/fs"
@@ -34,7 +35,7 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 		return "", fmt.Errorf("%w: temporary pattern must be a single path component", ErrInvalidPath)
 	}
 	prefix, suffix, _ := strings.CutLast(pattern, "*")
-	if err := rejectReservedPathInternal(prefix); err != nil {
+	if err := rejectReservedPath(prefix); err != nil {
 		return "", err
 	}
 
@@ -42,7 +43,7 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 	if err != nil {
 		return "", err
 	}
-	err = rejectReservedPathInternal(relativeDir)
+	err = rejectReservedPath(relativeDir)
 	if err != nil {
 		return "", err
 	}
@@ -53,7 +54,7 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 	}
 	defer func() { _ = root.Close() }()
 
-	resolvedDir, err := resolvePathInternal(root, relativeDir, true)
+	resolvedDir, err := resolvePath(root, relativeDir, true)
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +65,7 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 		if err != nil {
 			return "", fmt.Errorf("generate temporary directory name: %w", err)
 		}
-		candidate := relativePathInternal([]string{resolvedDir, prefix + hex.EncodeToString(randomBytes[:]) + suffix})
+		candidate := path.Join(resolvedDir, prefix+hex.EncodeToString(randomBytes[:])+suffix)
 		err = root.Mkdir(candidate, temporaryDirectoryMode)
 		if err == nil {
 			return kitfs.LogicalPath(candidate), nil

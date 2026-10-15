@@ -29,17 +29,37 @@ func Rename(ctx context.Context, rootPath, sourceLogical, targetLogical string) 
 		return err
 	}
 
+	resolveEndpoint := func(root *os.Root, logicalPath string) (string, error) {
+		relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
+		if err != nil {
+			return "", err
+		}
+		err = rejectReservedPath(relativePath)
+		if err != nil {
+			return "", err
+		}
+		if relativePath == "." {
+			return "", ErrRootRemoval
+		}
+
+		resolvedParent, base, err := resolveParent(root, relativePath)
+		if err != nil {
+			return "", err
+		}
+		return path.Join(resolvedParent, base), nil
+	}
+
 	root, err := os.OpenRoot(rootPath)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
 
-	sourcePath, err := resolveRenameEndpointInternal(root, sourceLogical)
+	sourcePath, err := resolveEndpoint(root, sourceLogical)
 	if err != nil {
 		return err
 	}
-	targetPath, err := resolveRenameEndpointInternal(root, targetLogical)
+	targetPath, err := resolveEndpoint(root, targetLogical)
 	if err != nil {
 		if errors.Is(err, ErrRootRemoval) {
 			return fmt.Errorf("%w: cannot rename onto the workspace root", ErrInvalidPath)
@@ -53,37 +73,10 @@ func Rename(ctx context.Context, rootPath, sourceLogical, targetLogical string) 
 
 	err = root.Rename(sourcePath, targetPath)
 	if err != nil {
-		if isDirectoryNotEmptyInternal(err) {
+		if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
 			return fmt.Errorf("%w: %q", ErrNotEmpty, targetLogical)
 		}
 		return fmt.Errorf("rename %q to %q: %w", sourceLogical, targetLogical, err)
 	}
 	return nil
-}
-
-// isDirectoryNotEmptyInternal reports whether a removal or rename failed
-// because the destination is a non-empty directory. Linux reports ENOTEMPTY,
-// while some filesystems and platforms report EEXIST for the same condition.
-func isDirectoryNotEmptyInternal(err error) bool {
-	return errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST)
-}
-
-func resolveRenameEndpointInternal(root *os.Root, logicalPath string) (string, error) {
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return "", err
-	}
-	err = rejectReservedPathInternal(relativePath)
-	if err != nil {
-		return "", err
-	}
-	if relativePath == "." {
-		return "", ErrRootRemoval
-	}
-
-	resolvedParent, base, err := resolveParentInternal(root, relativePath)
-	if err != nil {
-		return "", err
-	}
-	return path.Join(resolvedParent, base), nil
 }

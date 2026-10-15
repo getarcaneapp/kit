@@ -8,23 +8,16 @@ import (
 	"io"
 	"os"
 
+	kit "go.getarcane.app/kit/pkg"
 	kitfs "go.getarcane.app/kit/pkg/fs"
 )
 
-type contextReadCloserInternal struct {
-	ctx    context.Context
-	reader io.Reader
+type contextReadCloser struct {
+	contextReader
 	closer io.Closer
 }
 
-func (r *contextReadCloserInternal) Read(buffer []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return r.reader.Read(buffer)
-}
-
-func (r *contextReadCloserInternal) Close() error {
+func (r *contextReadCloser) Close() error {
 	return r.closer.Close()
 }
 
@@ -40,7 +33,7 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 	if err != nil {
 		return nil, 0, err
 	}
-	err = rejectReservedPathInternal(relativePath)
+	err = rejectReservedPath(relativePath)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -51,7 +44,7 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 	}
 	defer func() { _ = root.Close() }()
 
-	resolvedPath, err := resolvePathInternal(root, relativePath, true)
+	resolvedPath, err := resolvePath(root, relativePath, true)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -81,35 +74,34 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 		return nil, 0, ErrNotFile
 	}
 
-	size := info.Size()
-	if maxBytes > 0 && maxBytes < size {
-		size = maxBytes
-	}
-	reader := io.LimitReader(file, size)
-
-	return &contextReadCloserInternal{ctx: ctx, reader: reader, closer: file}, size, nil
+	size := kit.Ternary(maxBytes > 0, min(maxBytes, info.Size()), info.Size())
+	return &contextReadCloser{
+		ctx:    ctx,
+		reader: io.LimitReader(file, size),
+		closer: file,
+	}, size, nil
 }
 
-type contextReadSeekCloserInternal struct {
+type contextReadSeekCloser struct {
 	ctx  context.Context
 	file *os.File
 }
 
-func (r *contextReadSeekCloserInternal) Read(buffer []byte) (int, error) {
+func (r *contextReadSeekCloser) Read(buffer []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err
 	}
 	return r.file.Read(buffer)
 }
 
-func (r *contextReadSeekCloserInternal) Seek(offset int64, whence int) (int64, error) {
+func (r *contextReadSeekCloser) Seek(offset int64, whence int) (int64, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err
 	}
 	return r.file.Seek(offset, whence)
 }
 
-func (r *contextReadSeekCloserInternal) Close() error {
+func (r *contextReadSeekCloser) Close() error {
 	return r.file.Close()
 }
 
@@ -125,7 +117,7 @@ func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSee
 	if err != nil {
 		return nil, 0, err
 	}
-	err = rejectReservedPathInternal(relativePath)
+	err = rejectReservedPath(relativePath)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -136,7 +128,7 @@ func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSee
 	}
 	defer func() { _ = root.Close() }()
 
-	resolvedPath, err := resolvePathInternal(root, relativePath, true)
+	resolvedPath, err := resolvePath(root, relativePath, true)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -159,7 +151,7 @@ func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSee
 		return nil, 0, ErrNotFile
 	}
 
-	return &contextReadSeekCloserInternal{ctx: ctx, file: file}, info.Size(), nil
+	return &contextReadSeekCloser{ctx: ctx, file: file}, info.Size(), nil
 }
 
 // ReadFile returns the complete contents of a root-confined regular file,
