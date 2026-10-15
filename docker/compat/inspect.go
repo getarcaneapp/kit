@@ -17,6 +17,7 @@ import (
 	containertypes "github.com/moby/moby/api/types/container"
 	networktypes "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+	kit "go.getarcane.app/kit/pkg"
 )
 
 // WrapDockerAPIClientForInspectCompatibility wraps a client so create, inspect,
@@ -56,7 +57,7 @@ func ContainerInspectWithCompatibility(ctx context.Context, apiClient client.API
 	if options.Size {
 		query.Set("size", "1")
 	}
-	if repaired, raw, ok := repairInternal[containertypes.InspectResponse](ctx, apiClient, err, "/containers/"+strings.TrimSpace(containerID)+"/json", query, repairContainerInspectInternal); ok {
+	if repaired, raw, ok := repair[containertypes.InspectResponse](ctx, apiClient, err, "/containers/"+strings.TrimSpace(containerID)+"/json", query, repairContainerInspect); ok {
 		return client.ContainerInspectResult{Container: repaired, Raw: raw}, nil
 	}
 	return result, err
@@ -73,7 +74,7 @@ func NetworkInspectWithCompatibility(ctx context.Context, apiClient client.APICl
 	if scope := strings.TrimSpace(options.Scope); scope != "" {
 		query.Set("scope", scope)
 	}
-	if repaired, raw, ok := repairInternal[networktypes.Inspect](ctx, apiClient, err, "/networks/"+strings.TrimSpace(networkID), query, repairNetworkInternal); ok {
+	if repaired, raw, ok := repair[networktypes.Inspect](ctx, apiClient, err, "/networks/"+strings.TrimSpace(networkID), query, repairNetwork); ok {
 		return client.NetworkInspectResult{Network: repaired, Raw: raw}, nil
 	}
 	return result, err
@@ -95,26 +96,65 @@ func NetworkListWithCompatibility(ctx context.Context, apiClient client.APIClien
 		changed := false
 		for _, item := range items {
 			if network, ok := item.(map[string]any); ok {
-				changed = repairNetworkInternal(network) || changed
+				changed = repairNetwork(network) || changed
 			}
 		}
 		return changed
 	}
-	if repaired, _, ok := repairInternal[[]networktypes.Summary](ctx, apiClient, err, "/networks", query, repairAll); ok {
+	if repaired, _, ok := repair[[]networktypes.Summary](ctx, apiClient, err, "/networks", query, repairAll); ok {
 		return client.NetworkListResult{Items: repaired}, nil
 	}
 	return result, err
 }
 
-// repairInternal handles a ParseAddr/ParsePrefix decode failure by fetching the
+// repair handles a ParseAddr/ParsePrefix decode failure by fetching the
 // raw daemon JSON, applying repair to its generic form P, and decoding the
 // result as T. It reports false whenever the original error should stand.
-func repairInternal[T, P any](ctx context.Context, apiClient client.APIClient, err error, resource string, query url.Values, repair func(P) bool) (T, []byte, bool) {
+func repair[T, P any](ctx context.Context, apiClient client.APIClient, decodeErr error, resource string, query url.Values, repair func(P) bool) (T, []byte, bool) {
 	var repaired T
-	if err == nil || !strings.Contains(err.Error(), "ParseAddr(") && !strings.Contains(err.Error(), "ParsePrefix(") {
+	if decodeErr == nil || !strings.Contains(decodeErr.Error(), "ParseAddr(") && !strings.Contains(decodeErr.Error(), "ParsePrefix(") {
 		return repaired, nil, false
 	}
-	raw, err := fetchInternal(ctx, apiClient, resource, query)
+	// fetch performs a raw GET through the client's dialer, which keeps the
+	// client's TLS and socket transport without its typed decoding.
+	raw, err := func() ([]byte, error) {
+		dialer := apiClient.Dialer()
+		if dialer == nil {
+			return nil, errors.New("docker api client does not expose a dialer")
+		}
+		version := strings.TrimSpace(strings.TrimPrefix(apiClient.ClientVersion(), "v"))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, (&url.URL{
+			Scheme:   "http",
+			Host:     client.DummyHost,
+			Path:     path.Join("/", kit.Ternary(version == "", "", "/v"+version), resource),
+			RawQuery: query.Encode(),
+		}).String(), http.NoBody)
+		if err != nil {
+			return nil, err
+		}
+		conn, err := dialer(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = conn.Close() }()
+		err = req.Write(conn)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("docker api GET %s failed with %s: %s", resource, resp.Status, strings.TrimSpace(string(body)))
+		}
+		return body, nil
+	}()
 	if err != nil {
 		return repaired, nil, false
 	}
@@ -129,57 +169,17 @@ func repairInternal[T, P any](ctx context.Context, apiClient client.APIClient, e
 	return repaired, normalized, true
 }
 
-// fetchInternal performs a raw GET through the client's dialer, which keeps the
-// client's TLS and socket transport without its typed decoding.
-func fetchInternal(ctx context.Context, apiClient client.APIClient, resource string, query url.Values) ([]byte, error) {
-	dialer := apiClient.Dialer()
-	if dialer == nil {
-		return nil, errors.New("docker api client does not expose a dialer")
-	}
-	versionPrefix := ""
-	if version := strings.TrimSpace(strings.TrimPrefix(apiClient.ClientVersion(), "v")); version != "" {
-		versionPrefix = "/v" + version
-	}
-	reqURL := &url.URL{Scheme: "http", Host: client.DummyHost, Path: path.Join("/", versionPrefix, resource), RawQuery: query.Encode()}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := dialer(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = conn.Close() }()
-	err = req.Write(conn)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("docker api GET %s failed with %s: %s", resource, resp.Status, strings.TrimSpace(string(body)))
-	}
-	return body, nil
-}
-
-// repairContainerInspectInternal strips CIDR suffixes from every address in a
+// repairContainerInspect strips CIDR suffixes from every address in a
 // container inspect payload, filling prefix lengths the suffix carried.
-func repairContainerInspectInternal(payload map[string]any) bool {
+func repairContainerInspect(payload map[string]any) bool {
 	settings, ok := payload["NetworkSettings"].(map[string]any)
 	if !ok {
 		return false
 	}
 	endpoint := func(obj map[string]any) bool {
-		changed := rewriteFieldsInternal(obj, false, "Gateway", "IPv6Gateway")
-		changed = fillPrefixLenInternal(obj, "IPAddress", "IPPrefixLen") || changed
-		return fillPrefixLenInternal(obj, "GlobalIPv6Address", "GlobalIPv6PrefixLen") || changed
+		changed := rewriteFields(obj, false, "Gateway", "IPv6Gateway")
+		changed = fillPrefixLen(obj, "IPAddress", "IPPrefixLen") || changed
+		return fillPrefixLen(obj, "GlobalIPv6Address", "GlobalIPv6PrefixLen") || changed
 	}
 	changed := endpoint(settings)
 	networks, _ := settings["Networks"].(map[string]any)
@@ -190,48 +190,48 @@ func repairContainerInspectInternal(payload map[string]any) bool {
 		}
 		changed = endpoint(network) || changed
 		if ipam, hasIPAM := network["IPAMConfig"].(map[string]any); hasIPAM {
-			changed = rewriteFieldsInternal(ipam, false, "IPv4Address", "IPv6Address", "LinkLocalIPs") || changed
+			changed = rewriteFields(ipam, false, "IPv4Address", "IPv6Address", "LinkLocalIPs") || changed
 		}
 	}
 	return changed
 }
 
-// repairNetworkInternal strips CIDR suffixes from IPAM gateways and auxiliary
+// repairNetwork strips CIDR suffixes from IPAM gateways and auxiliary
 // addresses and canonicalizes container endpoint prefixes in a network payload.
-func repairNetworkInternal(payload map[string]any) bool {
+func repairNetwork(payload map[string]any) bool {
 	changed := false
 	if ipam, ok := payload["IPAM"].(map[string]any); ok {
 		configs, _ := ipam["Config"].([]any)
 		for _, value := range configs {
 			if config, isMap := value.(map[string]any); isMap {
-				changed = rewriteFieldsInternal(config, false, "Gateway", "AuxiliaryAddresses", "AuxAddress") || changed
+				changed = rewriteFields(config, false, "Gateway", "AuxiliaryAddresses", "AuxAddress") || changed
 			}
 		}
 	}
 	containers, _ := payload["Containers"].(map[string]any)
 	for _, value := range containers {
 		if endpoint, ok := value.(map[string]any); ok {
-			changed = rewriteFieldsInternal(endpoint, true, "IPv4Address", "IPv6Address") || changed
+			changed = rewriteFields(endpoint, true, "IPv4Address", "IPv6Address") || changed
 		}
 	}
 	return changed
 }
 
-// rewriteFieldsInternal normalizes the address strings under keys, whether the
+// rewriteFields normalizes the address strings under keys, whether the
 // value is a string, a slice, or a map of strings, and reports any change.
-func rewriteFieldsInternal(obj map[string]any, keepPrefix bool, keys ...string) bool {
+func rewriteFields(obj map[string]any, keepPrefix bool, keys ...string) bool {
 	changed := false
 	for _, key := range keys {
 		switch value := obj[key].(type) {
 		case string:
-			if normalized, ok := normalizeIPInternal(value, keepPrefix); ok {
+			if normalized, ok := normalizeIP(value, keepPrefix); ok {
 				obj[key] = normalized
 				changed = true
 			}
 		case []any:
 			for i, item := range value {
 				if raw, ok := item.(string); ok {
-					if normalized, rewritten := normalizeIPInternal(raw, keepPrefix); rewritten {
+					if normalized, rewritten := normalizeIP(raw, keepPrefix); rewritten {
 						value[i] = normalized
 						changed = true
 					}
@@ -240,7 +240,7 @@ func rewriteFieldsInternal(obj map[string]any, keepPrefix bool, keys ...string) 
 		case map[string]any:
 			for name, item := range value {
 				if raw, ok := item.(string); ok {
-					if normalized, rewritten := normalizeIPInternal(raw, keepPrefix); rewritten {
+					if normalized, rewritten := normalizeIP(raw, keepPrefix); rewritten {
 						value[name] = normalized
 						changed = true
 					}
@@ -251,9 +251,9 @@ func rewriteFieldsInternal(obj map[string]any, keepPrefix bool, keys ...string) 
 	return changed
 }
 
-// fillPrefixLenInternal strips a CIDR suffix from obj[addrKey] and records its
+// fillPrefixLen strips a CIDR suffix from obj[addrKey] and records its
 // length under lenKey when the payload left the length unset.
-func fillPrefixLenInternal(obj map[string]any, addrKey, lenKey string) bool {
+func fillPrefixLen(obj map[string]any, addrKey, lenKey string) bool {
 	raw, ok := obj[addrKey].(string)
 	trimmed := strings.TrimSpace(raw)
 	if !ok || trimmed == "" {
@@ -267,47 +267,41 @@ func fillPrefixLenInternal(obj map[string]any, addrKey, lenKey string) bool {
 	if err != nil {
 		return false
 	}
-	changed := false
-	if addr := prefix.Addr().String(); raw != addr {
-		obj[addrKey] = addr
-		changed = true
-	}
-	missing := false
-	switch current := obj[lenKey].(type) {
-	case nil:
-		missing = true
-	case float64:
-		missing = current == 0
-	case int:
-		missing = current == 0
-	case string:
-		parsed, parseErr := strconv.Atoi(strings.TrimSpace(current))
-		missing = parseErr != nil || parsed == 0
-	}
-	if missing {
+	obj[addrKey] = prefix.Addr().String()
+	if func() bool {
+		switch current := obj[lenKey].(type) {
+		case nil:
+			return true
+		case float64:
+			return current == 0
+		case int:
+			return current == 0
+		case string:
+			parsed, parseErr := strconv.Atoi(strings.TrimSpace(current))
+			return parseErr != nil || parsed == 0
+		}
+		return false
+	}() {
 		obj[lenKey] = prefix.Bits()
-		changed = true
+		return true
 	}
-	return changed
+	return raw != prefix.Addr().String()
 }
 
-// normalizeIPInternal trims raw and either canonicalizes it as a prefix or
+// normalizeIP trims raw and either canonicalizes it as a prefix or
 // reduces it to its bare address, reporting whether the result differs.
-func normalizeIPInternal(raw string, keepPrefix bool) (string, bool) {
+func normalizeIP(raw string, keepPrefix bool) (string, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", false
 	}
-	normalized := trimmed
-	if _, addrErr := netip.ParseAddr(trimmed); addrErr != nil || keepPrefix {
-		prefix, err := netip.ParsePrefix(trimmed)
-		if err != nil {
-			return "", false
-		}
-		normalized = prefix.Addr().String()
-		if keepPrefix {
-			normalized = prefix.String()
-		}
+	if _, addrErr := netip.ParseAddr(trimmed); addrErr == nil && !keepPrefix {
+		return trimmed, trimmed != raw
 	}
+	prefix, err := netip.ParsePrefix(trimmed)
+	if err != nil {
+		return "", false
+	}
+	normalized := kit.Ternary(keepPrefix, prefix.String(), prefix.Addr().String())
 	return normalized, normalized != raw
 }

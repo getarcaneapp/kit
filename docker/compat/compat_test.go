@@ -92,7 +92,11 @@ func TestSanitizeContainerCreateEndpointSettingsForDockerAPI(t *testing.T) {
 	t.Parallel()
 
 	input := map[string]*network.EndpointSettings{
-		"bridge": {MacAddress: mustMAC(t, "02:42:ac:11:00:02"), IPAddress: netip.MustParseAddr("172.17.0.2"), Aliases: []string{"svc", "svc-1"}},
+		"bridge": {
+			Aliases:    []string{"svc", "svc-1"},
+			IPAddress:  netip.MustParseAddr("172.17.0.2"),
+			MacAddress: mustMAC(t, "02:42:ac:11:00:02"),
+		},
 		"custom": {MacAddress: mustMAC(t, "02:42:ac:11:00:03"), IPAddress: netip.MustParseAddr("10.0.0.10")},
 		"nilled": nil,
 	}
@@ -220,7 +224,11 @@ func TestContainerCreateWithCompatibilityForAPIVersion(t *testing.T) {
 	t.Run("propagates network attach error when rollback remove also fails", func(t *testing.T) {
 		t.Parallel()
 		connectErr, removeErr := errors.New("connect-boom"), errors.New("remove-boom")
-		fake := &fakeClient{createResult: client.ContainerCreateResult{ID: "created-container"}, connectErrs: map[string]error{"bnet": connectErr}, removeErr: removeErr}
+		fake := &fakeClient{
+			createResult: client.ContainerCreateResult{ID: "created-container"},
+			connectErrs:  map[string]error{"bnet": connectErr},
+			removeErr:    removeErr,
+		}
 		_, err := ContainerCreateWithCompatibilityForAPIVersion(t.Context(), fake, client.ContainerCreateOptions{
 			HostConfig:       &container.HostConfig{NetworkMode: "anet"},
 			NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{"anet": {}, "bnet": {}}},

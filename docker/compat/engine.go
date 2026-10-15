@@ -23,35 +23,37 @@ type EngineCompatibilityInfo struct {
 // DetectEngineCompatibility derives the engine name from the daemon's version
 // and info responses, checking the platform, components, and OS markers in order.
 func DetectEngineCompatibility(version client.ServerVersionResult, info systemtypes.Info) EngineCompatibilityInfo {
-	engine := EngineCompatibilityInfo{CgroupVersion: strings.TrimSpace(info.CgroupVersion)}
 	candidates := []string{version.Platform.Name}
 	for _, component := range version.Components {
 		candidates = append(candidates, component.Name)
 		candidates = slices.AppendSeq(candidates, maps.Values(component.Details))
 	}
 	candidates = append(candidates, info.ServerVersion, info.OperatingSystem)
-	for _, candidate := range candidates {
-		switch lower := strings.ToLower(candidate); {
-		case strings.Contains(lower, "podman"):
-			engine.Name = "podman"
-			return engine
-		case strings.Contains(lower, "docker"):
-			engine.Name = "docker"
-			return engine
-		}
+	return EngineCompatibilityInfo{
+		Name: func() string {
+			for _, candidate := range candidates {
+				switch lower := strings.ToLower(candidate); {
+				case strings.Contains(lower, "podman"):
+					return "podman"
+				case strings.Contains(lower, "docker"):
+					return "docker"
+				}
+			}
+			return ""
+		}(),
+		CgroupVersion: strings.TrimSpace(info.CgroupVersion),
 	}
-	return engine
 }
 
 // SanitizeRecreateHostConfig removes recreate options the engine rejects:
 // Podman on cgroup v2 refuses MemorySwappiness. It reports whether anything
 // was removed.
 func (e EngineCompatibilityInfo) SanitizeRecreateHostConfig(hostConfig *containertypes.HostConfig) bool {
-	cgroupV2 := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(e.CgroupVersion)), "v") == "2"
-	if hostConfig == nil || !strings.EqualFold(strings.TrimSpace(e.Name), "podman") || !cgroupV2 || hostConfig.MemorySwappiness == nil {
+	if hostConfig == nil || !strings.EqualFold(strings.TrimSpace(e.Name), "podman") ||
+		strings.TrimPrefix(strings.ToLower(strings.TrimSpace(e.CgroupVersion)), "v") != "2" || hostConfig.MemorySwappiness == nil {
 		return false
 	}
-	hostConfig.MemorySwappiness = nil
+	hostConfig.MemorySwappiness = nil // keep: exported contract mutates hostConfig
 	return true
 }
 

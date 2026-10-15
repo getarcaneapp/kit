@@ -40,10 +40,13 @@ func TestSanitizeRecreateHostConfig(t *testing.T) {
 				}
 				return
 			}
-			swappiness := int64(60)
 			input := &containertypes.HostConfig{
-				MemorySwappiness: &swappiness, CPUShares: 1024, PublishAllPorts: true, NetworkMode: "bridge",
-				Annotations: map[string]string{"test": "value"}, MaskedPaths: []string{"/proc/kcore"},
+				NetworkMode:      "bridge",
+				Annotations:      map[string]string{"test": "value"},
+				PublishAllPorts:  true,
+				CPUShares:        1024,
+				MemorySwappiness: new(int64(60)),
+				MaskedPaths:      []string{"/proc/kcore"},
 			}
 			cloned := new(*input)
 			if got := tt.engine.SanitizeRecreateHostConfig(cloned); got != tt.wantSanitized {
@@ -65,15 +68,18 @@ func TestSanitizeRecreateHostConfig(t *testing.T) {
 func TestDetectEngineCompatibility(t *testing.T) {
 	t.Parallel()
 
-	platform := client.ServerVersionResult{}
-	platform.Platform.Name = "Podman Engine"
 	tests := []struct {
 		name    string
 		version client.ServerVersionResult
 		info    systemtypes.Info
 		want    EngineCompatibilityInfo
 	}{
-		{name: "prefers platform name for podman detection", version: platform, info: systemtypes.Info{CgroupVersion: "2"}, want: EngineCompatibilityInfo{Name: "podman", CgroupVersion: "2"}},
+		{
+			name:    "prefers platform name for podman detection",
+			version: client.ServerVersionResult{Platform: client.PlatformInfo{Name: "Podman Engine"}},
+			info:    systemtypes.Info{CgroupVersion: "2"},
+			want:    EngineCompatibilityInfo{Name: "podman", CgroupVersion: "2"},
+		},
 		{
 			name:    "detects podman from component names",
 			version: client.ServerVersionResult{Components: []systemtypes.ComponentVersion{{Name: "Podman Engine"}}},
@@ -86,7 +92,11 @@ func TestDetectEngineCompatibility(t *testing.T) {
 			info:    systemtypes.Info{CgroupVersion: " 1 "},
 			want:    EngineCompatibilityInfo{Name: "docker", CgroupVersion: "1"},
 		},
-		{name: "falls back to docker markers", info: systemtypes.Info{CgroupVersion: "2", ServerVersion: "Docker Engine - Community"}, want: EngineCompatibilityInfo{Name: "docker", CgroupVersion: "2"}},
+		{
+			name: "falls back to docker markers",
+			info: systemtypes.Info{CgroupVersion: "2", ServerVersion: "Docker Engine - Community"},
+			want: EngineCompatibilityInfo{Name: "docker", CgroupVersion: "2"},
+		},
 		{name: "unknown engine", info: systemtypes.Info{CgroupVersion: "2"}, want: EngineCompatibilityInfo{CgroupVersion: "2"}},
 	}
 	for _, tt := range tests {

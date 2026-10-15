@@ -13,6 +13,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+	kit "go.getarcane.app/kit/pkg"
 )
 
 const (
@@ -71,12 +72,11 @@ func SanitizeContainerCreateEndpointSettingsForDockerAPI(endpoints map[string]*n
 	if len(endpoints) == 0 {
 		return nil
 	}
-	keepMAC := IsDockerAPIVersionAtLeast(apiVersion, NetworkScopedMacAddressMinAPIVersion)
 	cloned := make(map[string]*network.EndpointSettings, len(endpoints))
 	for name, endpoint := range endpoints {
 		cloned[name] = endpoint.Copy()
-		if cloned[name] != nil && !keepMAC {
-			cloned[name].MacAddress = nil
+		if cloned[name] != nil && !IsDockerAPIVersionAtLeast(apiVersion, NetworkScopedMacAddressMinAPIVersion) {
+			cloned[name].MacAddress = nil // keep: Copy is the only deep clone of EndpointSettings
 		}
 	}
 	return cloned
@@ -90,31 +90,17 @@ func SanitizeContainerCreateEndpointSettingsForDockerAPI(endpoints map[string]*n
 // when NetworkMode is unset; host, none, container, and unknown named modes
 // leave the request untouched.
 func PrepareContainerCreateOptionsForDockerAPI(options client.ContainerCreateOptions, apiVersion string) (client.ContainerCreateOptions, map[string]*network.EndpointSettings) {
-	if IsDockerAPIVersionAtLeast(apiVersion, MultiEndpointContainerCreateMinAPIVersion) || options.NetworkingConfig == nil || len(options.NetworkingConfig.EndpointsConfig) <= 1 {
+	if IsDockerAPIVersionAtLeast(apiVersion, MultiEndpointContainerCreateMinAPIVersion) || len(kit.FromPtr(options.NetworkingConfig).EndpointsConfig) <= 1 {
 		return options, nil
 	}
 	endpoints := options.NetworkingConfig.EndpointsConfig
 
 	primary := slices.Sorted(maps.Keys(endpoints))[0]
-	if options.HostConfig != nil {
-		if mode := container.NetworkMode(strings.TrimSpace(string(options.HostConfig.NetworkMode))); mode != "" {
-			if _, ok := endpoints[string(mode)]; !ok || mode.IsHost() || mode.IsNone() || mode.IsContainer() {
-				return options, nil
-			}
-			primary = string(mode)
+	if mode := container.NetworkMode(strings.TrimSpace(string(kit.FromPtr(options.HostConfig).NetworkMode))); mode != "" {
+		if _, ok := endpoints[string(mode)]; !ok || mode.IsHost() || mode.IsNone() || mode.IsContainer() {
+			return options, nil
 		}
-	}
-
-	adjusted := options
-	adjusted.HostConfig = &container.HostConfig{}
-	if options.HostConfig != nil {
-		adjusted.HostConfig = new(*options.HostConfig)
-	}
-	if strings.TrimSpace(string(adjusted.HostConfig.NetworkMode)) == "" {
-		adjusted.HostConfig.NetworkMode = container.NetworkMode(primary)
-	}
-	adjusted.NetworkingConfig = &network.NetworkingConfig{
-		EndpointsConfig: map[string]*network.EndpointSettings{primary: endpoints[primary].Copy()},
+		primary = string(mode)
 	}
 
 	extra := make(map[string]*network.EndpointSettings, len(endpoints)-1)
@@ -123,7 +109,21 @@ func PrepareContainerCreateOptionsForDockerAPI(options client.ContainerCreateOpt
 			extra[name] = endpoint.Copy()
 		}
 	}
-	return adjusted, extra
+	return client.ContainerCreateOptions{
+		Config: options.Config,
+		HostConfig: func() *container.HostConfig {
+			hostConfig := kit.FromPtr(options.HostConfig)
+			// keep: HostConfig is too large to rebuild as a literal
+			hostConfig.NetworkMode = kit.Ternary(strings.TrimSpace(string(hostConfig.NetworkMode)) == "", container.NetworkMode(primary), hostConfig.NetworkMode)
+			return &hostConfig
+		}(),
+		NetworkingConfig: &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{primary: endpoints[primary].Copy()},
+		},
+		Platform: options.Platform,
+		Name:     options.Name,
+		Image:    options.Image,
+	}, extra
 }
 
 // ConnectContainerExtraNetworksForDockerAPI attaches, in name order, the

@@ -61,7 +61,7 @@ func TestRepairContainerInspect(t *testing.T) {
 		"NetworkSettings":{"Gateway":"172.18.0.1/16","IPAddress":"172.18.0.20/16","IPPrefixLen":0,
 		"Networks":{"bridge":{"IPAMConfig":{"IPv4Address":"172.18.0.50/16","IPv6Address":"fdd0:0:0:c::10/64","LinkLocalIPs":["169.254.10.10/16","fe80::10/64"]},
 		"Gateway":"172.18.0.1/16","IPAddress":"172.18.0.20/16","IPPrefixLen":0,
-		"IPv6Gateway":"fdd0:0:0:c::1/64","GlobalIPv6Address":"fdd0:0:0:c::10/64","GlobalIPv6PrefixLen":0}}}}`, repairContainerInspectInternal)
+		"IPv6Gateway":"fdd0:0:0:c::1/64","GlobalIPv6Address":"fdd0:0:0:c::10/64","GlobalIPv6PrefixLen":0}}}}`, repairContainerInspect)
 
 	endpoint := inspect.NetworkSettings.Networks["bridge"]
 	if endpoint == nil || endpoint.IPAMConfig == nil {
@@ -85,7 +85,7 @@ func TestRepairContainerInspect(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings, _ := payload["NetworkSettings"].(map[string]any)
-	if !repairContainerInspectInternal(payload) || settings["Gateway"] != "172.18.0.1" || settings["IPAddress"] != "172.18.0.20" || settings["IPPrefixLen"] != 16 {
+	if !repairContainerInspect(payload) || settings["Gateway"] != "172.18.0.1" || settings["IPAddress"] != "172.18.0.20" || settings["IPPrefixLen"] != 16 {
 		t.Errorf("top-level network settings = %v", settings)
 	}
 }
@@ -95,7 +95,7 @@ func TestRepairNetwork(t *testing.T) {
 
 	inspect := repairJSON[networktypes.Inspect](t, `{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge","EnableIPv6":true,
 		"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64","AuxiliaryAddresses":{"router":"fdd0:0:0:c::2/64"}}]},
-		"Containers":{"abc123":{"Name":"app","EndpointID":"ep1","IPv4Address":" 172.18.0.20/16 ","IPv6Address":" fdd0:0:0:c::10/64 "}}}`, repairNetworkInternal)
+		"Containers":{"abc123":{"Name":"app","EndpointID":"ep1","IPv4Address":" 172.18.0.20/16 ","IPv6Address":" fdd0:0:0:c::10/64 "}}}`, repairNetwork)
 
 	if len(inspect.IPAM.Config) != 1 || inspect.IPAM.Config[0].Subnet != netip.MustParsePrefix("fdd0:0:0:c::/64") || inspect.IPAM.Config[0].Gateway != netip.MustParseAddr("fdd0:0:0:c::1") {
 		t.Errorf("IPAM config = %+v", inspect.IPAM.Config)
@@ -127,9 +127,9 @@ func TestNormalizeIP(t *testing.T) {
 		{raw: ""},
 	}
 	for _, tt := range tests {
-		got, changed := normalizeIPInternal(tt.raw, tt.keepPrefix)
+		got, changed := normalizeIP(tt.raw, tt.keepPrefix)
 		if changed != tt.changed || (changed && got != tt.want) {
-			t.Errorf("normalizeIPInternal(%q, %t) = (%q, %t), want (%q, %t)", tt.raw, tt.keepPrefix, got, changed, tt.want, tt.changed)
+			t.Errorf("normalizeIP(%q, %t) = (%q, %t), want (%q, %t)", tt.raw, tt.keepPrefix, got, changed, tt.want, tt.changed)
 		}
 	}
 }
@@ -138,15 +138,15 @@ func TestFillPrefixLen(t *testing.T) {
 	t.Parallel()
 
 	obj := map[string]any{"IPAddress": " 172.18.0.20 ", "IPPrefixLen": 24}
-	if !fillPrefixLenInternal(obj, "IPAddress", "IPPrefixLen") || obj["IPAddress"] != "172.18.0.20" || obj["IPPrefixLen"] != 24 {
+	if !fillPrefixLen(obj, "IPAddress", "IPPrefixLen") || obj["IPAddress"] != "172.18.0.20" || obj["IPPrefixLen"] != 24 {
 		t.Errorf("whitespace trim: %v", obj)
 	}
 	obj = map[string]any{"IPAddress": "172.18.0.20/16", "IPPrefixLen": float64(0)}
-	if !fillPrefixLenInternal(obj, "IPAddress", "IPPrefixLen") || obj["IPAddress"] != "172.18.0.20" || obj["IPPrefixLen"] != 16 {
+	if !fillPrefixLen(obj, "IPAddress", "IPPrefixLen") || obj["IPAddress"] != "172.18.0.20" || obj["IPPrefixLen"] != 16 {
 		t.Errorf("prefix fill: %v", obj)
 	}
 	obj = map[string]any{"IPAddress": "172.18.0.20/16", "IPPrefixLen": 24}
-	if !fillPrefixLenInternal(obj, "IPAddress", "IPPrefixLen") || obj["IPPrefixLen"] != 24 {
+	if !fillPrefixLen(obj, "IPAddress", "IPPrefixLen") || obj["IPPrefixLen"] != 24 {
 		t.Errorf("existing prefix length must be kept: %v", obj)
 	}
 }
