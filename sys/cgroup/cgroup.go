@@ -51,23 +51,88 @@ var (
 // the current process. It returns an error when the process is not running
 // under a cgroup with explicit limits.
 func DetectLimits() (*Limits, error) {
-	limits := &Limits{
-		MemoryLimit: -1,
-		MemoryUsage: -1,
-		CPUQuota:    -1,
-		CPUPeriod:   -1,
-		CPUCount:    -1,
+	info, err := host.Info()
+	guest := err == nil && info.VirtualizationSystem != "" && strings.EqualFold(info.VirtualizationRole, "guest")
+
+	if _, statErr := os.Stat("/sys/fs/cgroup/cgroup.controllers"); statErr == nil {
+		limits := detectCgroupV2Limits()
+		if !guest && !isFiniteLimit(limits.MemoryLimit) && limits.CPUCount < 0 {
+			return nil, errors.New("not running in a cgroup")
+		}
+		return limits, nil
 	}
 
-	if !isInCgroup() {
+	cgroupPath, err := func() (string, error) {
+		file, openErr := os.Open("/proc/self/cgroup")
+		if openErr != nil {
+			return "", openErr
+		}
+		defer func() { _ = file.Close() }()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			parts := strings.SplitN(scanner.Text(), ":", 3)
+			if len(parts) == 3 && (strings.Contains(parts[1], "memory") || strings.Contains(parts[1], "cpu")) {
+				return strings.TrimPrefix(parts[2], "/"), nil
+			}
+		}
+
+		if scanErr := scanner.Err(); scanErr != nil {
+			return "", fmt.Errorf("error scanning cgroup file: %w", scanErr)
+		}
+
+		return "", errors.New("cgroup path not found")
+	}()
+	if err != nil {
+		if !guest {
+			return nil, errors.New("not running in a cgroup")
+		}
+		return &Limits{
+			MemoryLimit: -1,
+			MemoryUsage: -1,
+			CPUQuota:    -1,
+			CPUPeriod:   -1,
+			CPUCount:    -1,
+		}, err
+	}
+
+	quota := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_quota_us")
+	period := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_period_us")
+
+	limits := &Limits{
+		MemoryLimit: func() int64 {
+			memLimit, limitErr := readCgroupV1Int64(filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.limit_in_bytes"))
+			if limitErr != nil || memLimit >= unrestricted {
+				return -1
+			}
+			return memLimit
+		}(),
+		MemoryUsage: func() int64 {
+			memUsage, usageErr := readCgroupV1Int64(filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.usage_in_bytes"))
+			if usageErr != nil {
+				return -1
+			}
+			// memory.usage_in_bytes includes reclaimable page cache; subtract
+			// total_inactive_file (from memory.stat) to match `docker stats`.
+			inactiveFile, statErr := readMemoryStatValue(filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.stat"), "total_inactive_file")
+			if statErr != nil {
+				return memUsage
+			}
+			return max(memUsage-inactiveFile, 0)
+		}(),
+		CPUQuota:  quota,
+		CPUPeriod: period,
+		CPUCount: func() int {
+			if quota <= 0 || period <= 0 {
+				return -1
+			}
+			return max(int((quota+period-1)/period), 1)
+		}(),
+	}
+	if !guest && (cgroupPath == "" || !isFiniteLimit(limits.MemoryLimit) && limits.CPUCount < 0) {
 		return nil, errors.New("not running in a cgroup")
 	}
-
-	if isCgroupV2() {
-		return detectCgroupV2Limits(limits)
-	}
-
-	return detectCgroupV1Limits(limits)
+	return limits, nil
 }
 
 // IsDockerContainer reports whether the current process is running inside a
@@ -98,19 +163,74 @@ func IsDockerContainer() bool {
 // It tries cgroup, mountinfo, and hostname in that order.
 func CurrentContainerID() (string, error) {
 	// Try cgroup first (works on cgroup v1 and cgroupns=host mode)
-	if id, err := getContainerIDFromCgroup(); err == nil {
+	if id, err := func() (string, error) {
+		// tries to extract container ID from /proc/self/cgroup
+		data, err := os.ReadFile("/proc/self/cgroup")
+		if err != nil {
+			return "", err
+		}
+
+		// Try cgroup v1 pattern
+		if matches := cgroupV1ContainerPattern.FindStringSubmatch(string(data)); len(matches) >= 2 {
+			return matches[1], nil
+		}
+
+		// Try cgroup v2 pattern
+		if matches := cgroupV2ContainerPattern.FindStringSubmatch(string(data)); len(matches) >= 2 {
+			return matches[1], nil
+		}
+
+		return "", errors.New("no container ID found in cgroup")
+	}(); err == nil {
 		slog.DebugContext(context.Background(), "CurrentContainerID: found via cgroup", "containerId", id)
 		return id, nil
 	}
 
 	// Try mountinfo (works when cgroup namespace is private)
-	if id, err := getContainerIDFromMountinfo(); err == nil {
+	if id, err := func() (string, error) {
+		// tries to extract container ID from /proc/self/mountinfo
+		// This works even when cgroup namespace is private (cgroupns=private)
+		data, err := os.ReadFile("/proc/self/mountinfo")
+		if err != nil {
+			return "", err
+		}
+
+		for line := range strings.SplitSeq(string(data), "\n") {
+			// Look for Docker container paths in mountinfo
+			_, after, ok := strings.Cut(line, "/docker/containers/")
+			if id, _, _ := strings.Cut(after, "/"); ok && len(id) >= 12 {
+				return id[:min(len(id), 64)], nil
+			}
+		}
+
+		return "", errors.New("no container ID found in mountinfo")
+	}(); err == nil {
 		slog.DebugContext(context.Background(), "CurrentContainerID: found via mountinfo", "containerId", id)
 		return id, nil
 	}
 
 	// Try hostname (Docker often sets hostname to container ID)
-	if id, err := getContainerIDFromHostname(); err == nil {
+	if id, err := func() (string, error) {
+		// tries to use hostname as container ID
+		// Docker often sets the hostname to the container ID (12 or 64 hex chars)
+		hostname, err := os.Hostname()
+		if err != nil {
+			return "", err
+		}
+
+		// Docker often sets hostname to the short container ID (12 chars) or full ID (64 chars)
+		if len(hostname) == 12 || len(hostname) == 64 {
+			// Verify it looks like a hex string
+			for _, c := range hostname {
+				if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+					return "", errors.New("hostname doesn't match container ID pattern")
+				}
+			}
+			return hostname, nil
+		}
+
+		return "", errors.New("hostname doesn't match expected container ID length")
+	}(); err == nil {
 		slog.DebugContext(context.Background(), "CurrentContainerID: found via hostname", "containerId", id)
 		return id, nil
 	}
@@ -140,153 +260,60 @@ func ZFSARCReclaimable() uint64 {
 	return parseARCStats(f)
 }
 
-func isInCgroup() bool {
-	if info, err := host.Info(); err == nil {
-		if info.VirtualizationSystem != "" && strings.EqualFold(info.VirtualizationRole, "guest") {
-			return true
+func detectCgroupV2Limits() *Limits {
+	cpuMax, err := os.ReadFile("/sys/fs/cgroup/cpu.max")
+	parts := strings.Fields(string(cpuMax))
+	quota := func() int64 {
+		if err != nil || len(parts) < 2 || parts[0] == "max" {
+			return -1
 		}
-	}
-
-	return hasExplicitCgroupLimit()
-}
-
-func isCgroupV2() bool {
-	_, err := os.Stat("/sys/fs/cgroup/cgroup.controllers")
-	return err == nil
-}
-
-func hasExplicitCgroupLimit() bool {
-	if isCgroupV2() {
-		if limit, err := readCgroupV2Int64("/sys/fs/cgroup/memory.max"); err == nil && isFiniteLimit(limit) {
-			return true
+		q, quotaErr := strconv.ParseInt(parts[0], 10, 64)
+		if quotaErr != nil {
+			return -1
 		}
-
-		if quota, period := readCgroupV2CPU(); quota > 0 && period > 0 {
-			return true
+		return q
+	}()
+	period := func() int64 {
+		if err != nil || len(parts) < 2 {
+			return -1
 		}
-
-		return false
-	}
-
-	cgroupPath, err := getCgroupV1Path()
-	if err != nil || cgroupPath == "" {
-		return false
-	}
-
-	memLimitPath := filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.limit_in_bytes")
-	if limit, limitErr := readCgroupV1Int64(memLimitPath); limitErr == nil && isFiniteLimit(limit) {
-		return true
-	}
-
-	if quota, quotaErr := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_quota_us"); quotaErr == nil && quota > 0 {
-		if period, periodErr := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_period_us"); periodErr == nil && period > 0 {
-			return true
+		p, periodErr := strconv.ParseInt(parts[1], 10, 64)
+		if periodErr != nil {
+			return -1
 		}
-	}
+		return p
+	}()
 
-	return false
-}
-
-func detectCgroupV2Limits(limits *Limits) (*Limits, error) {
-	if memLimit, err := readCgroupV2Int64("/sys/fs/cgroup/memory.max"); err == nil {
-		if memLimit != unrestricted {
-			limits.MemoryLimit = memLimit
-		}
-	}
-
-	if memUsage, err := readCgroupV2Int64("/sys/fs/cgroup/memory.current"); err == nil {
-		// memory.current includes reclaimable page cache; subtract inactive_file
-		// to match what `docker stats` reports as usage.
-		if inactiveFile, statErr := readMemoryStatValueInternal("/sys/fs/cgroup/memory.stat", "inactive_file"); statErr == nil {
-			memUsage = max(memUsage-inactiveFile, 0)
-		}
-		limits.MemoryUsage = memUsage
-	}
-
-	if cpuMax, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
-		parts := strings.Fields(string(cpuMax))
-		if len(parts) >= 2 {
-			if parts[0] != "max" {
-				if quota, quotaErr := strconv.ParseInt(parts[0], 10, 64); quotaErr == nil {
-					limits.CPUQuota = quota
-				}
+	return &Limits{
+		MemoryLimit: func() int64 {
+			memLimit, limitErr := readCgroupV2Int64("/sys/fs/cgroup/memory.max")
+			if limitErr != nil || memLimit == unrestricted {
+				return -1
 			}
-			if period, periodErr := strconv.ParseInt(parts[1], 10, 64); periodErr == nil {
-				limits.CPUPeriod = period
+			return memLimit
+		}(),
+		MemoryUsage: func() int64 {
+			memUsage, usageErr := readCgroupV2Int64("/sys/fs/cgroup/memory.current")
+			if usageErr != nil {
+				return -1
 			}
-		}
-	}
-
-	if limits.CPUQuota > 0 && limits.CPUPeriod > 0 {
-		limits.CPUCount = max(int((limits.CPUQuota+limits.CPUPeriod-1)/limits.CPUPeriod), 1)
-	}
-
-	return limits, nil
-}
-
-func detectCgroupV1Limits(limits *Limits) (*Limits, error) {
-	cgroupPath, err := getCgroupV1Path()
-	if err != nil {
-		return limits, err
-	}
-
-	memoryLimitPath := filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.limit_in_bytes")
-	if memLimit, limitErr := readCgroupV1Int64(memoryLimitPath); limitErr == nil {
-		if memLimit < unrestricted {
-			limits.MemoryLimit = memLimit
-		}
-	}
-
-	memoryUsagePath := filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.usage_in_bytes")
-	if memUsage, usageErr := readCgroupV1Int64(memoryUsagePath); usageErr == nil {
-		// memory.usage_in_bytes includes reclaimable page cache; subtract
-		// total_inactive_file (from memory.stat) to match `docker stats`.
-		memoryStatPath := filepath.Join(cgroupV1MemoryRoot, cgroupPath, "memory.stat")
-		if inactiveFile, statErr := readMemoryStatValueInternal(memoryStatPath, "total_inactive_file"); statErr == nil {
-			memUsage = max(memUsage-inactiveFile, 0)
-		}
-		limits.MemoryUsage = memUsage
-	}
-
-	if cpuQuota, quotaErr := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_quota_us"); quotaErr == nil {
-		limits.CPUQuota = cpuQuota
-	}
-
-	if cpuPeriod, periodErr := readCgroupV1CPUControllerInt64(cgroupPath, "cpu.cfs_period_us"); periodErr == nil {
-		limits.CPUPeriod = cpuPeriod
-	}
-
-	if limits.CPUQuota > 0 && limits.CPUPeriod > 0 {
-		limits.CPUCount = max(int((limits.CPUQuota+limits.CPUPeriod-1)/limits.CPUPeriod), 1)
-	}
-
-	return limits, nil
-}
-
-func getCgroupV1Path() (string, error) {
-	file, err := os.Open("/proc/self/cgroup")
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = file.Close() }()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) == 3 {
-			if strings.Contains(parts[1], "memory") || strings.Contains(parts[1], "cpu") {
-				return strings.TrimPrefix(parts[2], "/"), nil
+			// memory.current includes reclaimable page cache; subtract inactive_file
+			// to match what `docker stats` reports as usage.
+			inactiveFile, statErr := readMemoryStatValue("/sys/fs/cgroup/memory.stat", "inactive_file")
+			if statErr != nil {
+				return memUsage
 			}
-		}
+			return max(memUsage-inactiveFile, 0)
+		}(),
+		CPUQuota:  quota,
+		CPUPeriod: period,
+		CPUCount: func() int {
+			if quota <= 0 || period <= 0 {
+				return -1
+			}
+			return max(int((quota+period-1)/period), 1)
+		}(),
 	}
-
-	err = scanner.Err()
-	if err != nil {
-		return "", fmt.Errorf("error scanning cgroup file: %w", err)
-	}
-
-	return "", errors.New("cgroup path not found")
 }
 
 func readCgroupV1Int64(path string) (int64, error) {
@@ -303,9 +330,9 @@ func readCgroupV1Int64(path string) (int64, error) {
 	return value, nil
 }
 
-// readMemoryStatValueInternal reads a single "key value" line from a cgroup memory.stat
+// readMemoryStatValue reads a single "key value" line from a cgroup memory.stat
 // file and returns the value for the given key.
-func readMemoryStatValueInternal(path, key string) (int64, error) {
+func readMemoryStatValue(path, key string) (int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -350,128 +377,22 @@ func readCgroupV2Int64(path string) (int64, error) {
 	return value, nil
 }
 
-func readCgroupV2CPU() (int64, int64) {
-	data, err := os.ReadFile("/sys/fs/cgroup/cpu.max")
-	if err != nil {
-		return -1, -1
-	}
-
-	parts := strings.Fields(string(data))
-	if len(parts) < 2 {
-		return -1, -1
-	}
-
-	var quota int64
-	if parts[0] != "max" {
-		if q, parseErr := strconv.ParseInt(parts[0], 10, 64); parseErr == nil {
-			quota = q
-		}
-	}
-
-	period, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return -1, -1
-	}
-
-	return quota, period
-}
-
 func isFiniteLimit(value int64) bool {
 	return value > 0 && value < unrestricted
 }
 
-func readCgroupV1CPUControllerInt64(cgroupPath, filename string) (int64, error) {
-	controllerBases := []string{
+func readCgroupV1CPUControllerInt64(cgroupPath, filename string) int64 {
+	for _, base := range []string{
 		"/sys/fs/cgroup/cpu,cpuacct",
 		"/sys/fs/cgroup/cpu",
 		"/sys/fs/cgroup/cpuacct",
-	}
-
-	var lastErr error
-	for _, base := range controllerBases {
-		value, err := readCgroupV1Int64(filepath.Join(base, cgroupPath, filename))
-		if err == nil {
-			return value, nil
-		}
-		lastErr = err
-	}
-
-	return 0, lastErr
-}
-
-// getContainerIDFromCgroup tries to extract container ID from /proc/self/cgroup
-func getContainerIDFromCgroup() (string, error) {
-	data, err := os.ReadFile("/proc/self/cgroup")
-	if err != nil {
-		return "", err
-	}
-
-	content := string(data)
-
-	// Try cgroup v1 pattern
-	if matches := cgroupV1ContainerPattern.FindStringSubmatch(content); len(matches) >= 2 {
-		return matches[1], nil
-	}
-
-	// Try cgroup v2 pattern
-	if matches := cgroupV2ContainerPattern.FindStringSubmatch(content); len(matches) >= 2 {
-		return matches[1], nil
-	}
-
-	return "", errors.New("no container ID found in cgroup")
-}
-
-// getContainerIDFromMountinfo tries to extract container ID from /proc/self/mountinfo
-// This works even when cgroup namespace is private (cgroupns=private)
-func getContainerIDFromMountinfo() (string, error) {
-	data, err := os.ReadFile("/proc/self/mountinfo")
-	if err != nil {
-		return "", err
-	}
-
-	content := string(data)
-	lines := strings.SplitSeq(content, "\n")
-
-	for line := range lines {
-		// Look for Docker container paths in mountinfo
-		if strings.Contains(line, "/docker/containers/") {
-			parts := strings.Split(line, "/docker/containers/")
-			if len(parts) > 1 {
-				idParts := strings.Split(parts[1], "/")
-				if len(idParts) > 0 && len(idParts[0]) >= 12 {
-					id := idParts[0]
-					if len(id) >= 64 {
-						return id[:64], nil
-					}
-					return id, nil
-				}
-			}
+	} {
+		if value, err := readCgroupV1Int64(filepath.Join(base, cgroupPath, filename)); err == nil {
+			return value
 		}
 	}
 
-	return "", errors.New("no container ID found in mountinfo")
-}
-
-// getContainerIDFromHostname tries to use hostname as container ID
-// Docker often sets the hostname to the container ID (12 or 64 hex chars)
-func getContainerIDFromHostname() (string, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return "", err
-	}
-
-	// Docker often sets hostname to the short container ID (12 chars) or full ID (64 chars)
-	if len(hostname) == 12 || len(hostname) == 64 {
-		// Verify it looks like a hex string
-		for _, c := range hostname {
-			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-				return "", errors.New("hostname doesn't match container ID pattern")
-			}
-		}
-		return hostname, nil
-	}
-
-	return "", errors.New("hostname doesn't match expected container ID length")
+	return -1
 }
 
 // parseARCStats parses the kstat-format arcstats content and returns the

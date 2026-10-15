@@ -24,13 +24,18 @@ func NewCache(ttl time.Duration) *Cache {
 // NewCacheWithDetector returns a cache backed by a custom detector. Useful when
 // callers (e.g. tests) need to control detection behaviour or simulate failures.
 func NewCacheWithDetector(ttl time.Duration, detector func() (*Limits, error)) *Cache {
-	cache := &Cache{ttl: ttl, detector: detector}
-	if ttl > 0 {
-		cache.cache = hot.NewHotCache[struct{}, *Limits](hot.LRU, 1).
-			WithTTL(ttl).
-			Build()
+	return &Cache{
+		cache: func() *hot.HotCache[struct{}, *Limits] {
+			if ttl <= 0 {
+				return nil
+			}
+			return hot.NewHotCache[struct{}, *Limits](hot.LRU, 1).
+				WithTTL(ttl).
+				Build()
+		}(),
+		ttl:      ttl,
+		detector: detector,
 	}
-	return cache
 }
 
 // Get returns the cached cgroup limits, refreshing if the entry is older than the TTL.

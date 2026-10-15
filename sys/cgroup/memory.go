@@ -20,13 +20,14 @@ func DockerHostRoot(containerID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var processPath string
-	for line := range strings.SplitSeq(string(data), "\n") {
-		if path, ok := strings.CutPrefix(line, "0::"); ok {
-			processPath = path
-			break
+	processPath := func() string {
+		for line := range strings.SplitSeq(string(data), "\n") {
+			if path, ok := strings.CutPrefix(line, "0::"); ok {
+				return path
+			}
 		}
-	}
+		return ""
+	}()
 	if !filepath.IsAbs(processPath) || processPath == "/" || filepath.Clean(processPath) != processPath {
 		return "", errors.New("process is not in a descendant cgroup v2 path")
 	}
@@ -82,7 +83,7 @@ func MemoryUsage(root string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("parse cgroup memory.current: %w", err)
 	}
-	cache, err := readMemoryStatValueInternal(filepath.Join(root, "memory.stat"), "file")
+	cache, err := readMemoryStatValue(filepath.Join(root, "memory.stat"), "file")
 	if err != nil {
 		return 0, err
 	}
