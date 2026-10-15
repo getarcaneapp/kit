@@ -14,11 +14,11 @@ type Options struct {
 	// anything.
 	DryRun bool `json:"dryRun,omitempty"`
 	// IgnoreSettingsExclusions lets UpdateContainer update its requested container despite a settings
-	// exclusion. Batch and dependency passes still honor exclusions, and label, Swarm, and immutability checks still apply.
+	// exclusion or updater opt-out label. Batch and dependency passes still honor both, and Swarm and immutability checks still apply.
 	IgnoreSettingsExclusions bool `json:"ignoreSettingsExclusions,omitempty"`
 }
 
-// exclusionPolicy tells containerEligibility whether to consult the SettingsProvider's exclusions.
+// exclusionPolicy tells containerEligibility whether to consult the updater label and the SettingsProvider's exclusions.
 type exclusionPolicy bool
 
 const (

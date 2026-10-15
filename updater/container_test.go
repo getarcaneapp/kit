@@ -494,7 +494,7 @@ func TestUpdateContainerTagSelection(t *testing.T) {
 		{name: "override updates excluded name", excluded: containerName, override: true},
 		{name: "override updates excluded ID", excluded: containerID, override: true},
 		{name: "override previews excluded container", excluded: containerName, override: true, dry: true},
-		{name: "override keeps disabled label", excluded: containerName, override: true, disabled: true, wantSkipped: true},
+		{name: "override updates disabled label", excluded: containerName, override: true, disabled: true},
 		{name: "override keeps digest pin", excluded: containerName, override: true, current: "app@sha256:" + strings.Repeat("a", 64), wantSkipped: true},
 		{name: "override keeps image ID", excluded: containerName, override: true, current: "sha256:" + strings.Repeat("a", 64), wantSkipped: true},
 		{name: "override rejects invalid constraint", excluded: containerName, override: true, constraint: "bad", wantFailure: true},

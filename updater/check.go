@@ -164,20 +164,20 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 }
 
 // containerEligibility reports why a container cannot be updated, or "" when it can; policy decides
-// whether the settings exclusions apply on top of the label, Swarm, and config checks.
+// whether the updater opt-out label and settings exclusions apply on top of the Swarm and config checks.
 func (s *Service) containerEligibility(ctx context.Context, inspect container.InspectResponse, policy exclusionPolicy) (string, error) {
 	if inspect.Config == nil {
 		return "container config unavailable", nil
 	}
 	labels := inspect.Config.Labels
-	if s.config.LabelPolicy.IsUpdateDisabled(labels) {
-		return "updates disabled by label", nil
-	}
 	if s.config.LabelPolicy.IsSwarmTask(labels) && !s.isSelfUpdateCandidate(inspect.ID, labels) {
 		return "swarm service; update at the service level", nil
 	}
 	if policy == ignoreSettingsExclusions {
 		return "", nil
+	}
+	if s.config.LabelPolicy.IsUpdateDisabled(labels) {
+		return "updates disabled by label", nil
 	}
 	excluded, err := s.excludedContainerSet(ctx)
 	if err != nil {
