@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 	"github.com/compose-spec/compose-go/v2/format"
 	compose "github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/go-units"
+	kit "go.getarcane.app/kit/pkg"
 	"go.yaml.in/yaml/v4"
 
 	"go.getarcane.app/docker/convert/types"
@@ -18,57 +20,80 @@ import (
 var serviceNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
 
 func Build(commands []types.RunCommand, opts types.Options) (*types.Document, error) {
-	doc := &types.Document{
-		Services: make(map[string]types.Service),
-		Networks: make(map[string]map[string]any),
-		Volumes:  make(map[string]map[string]any),
-	}
+	services := make(map[string]types.Service)
+	networks := make(map[string]map[string]any)
+	volumes := make(map[string]map[string]any)
+	var order []string
+	var warnings []types.Warning
 
 	if len(opts.ExistingComposeYAML) > 0 {
-		if err := mergeExistingComposeInternal(doc, opts.ExistingComposeYAML); err != nil {
-			return nil, err
+		var existing map[string]any
+		if err := yaml.Unmarshal(opts.ExistingComposeYAML, &existing); err != nil {
+			return nil, types.NewConversionError("parse existing compose YAML: %v", err)
+		}
+
+		if existingServices, ok := existing["services"].(map[string]any); ok {
+			for _, name := range slices.Sorted(maps.Keys(existingServices)) {
+				if svc, isMap := existingServices[name].(map[string]any); isMap {
+					services[name] = svc
+					order = append(order, name)
+				}
+			}
 		}
 	}
 
 	for _, cmd := range commands {
-		name := serviceNameInternal(cmd)
-		name = uniqueServiceNameInternal(name, doc.Services)
-		service, err := mapServiceInternal(cmd, doc)
+		image, _, _ := strings.Cut(cmd.Image[strings.LastIndex(cmd.Image, "/")+1:], ":")
+		image, _, _ = strings.Cut(image, "@")
+		base := cmp.Or(
+			strings.ToLower(strings.Trim(serviceNameSanitizer.ReplaceAllString(strings.TrimSpace(cmp.Or(cmd.Name, image)), "-"), "-_.")),
+			kit.Ternary(cmd.Name == "", "app", ""),
+		)
+		name := base
+		for i := 2; slices.Contains(order, name); i++ {
+			name = fmt.Sprintf("%s-%d", base, i)
+		}
+
+		service, serviceWarnings, err := mapService(cmd, networks, volumes)
 		if err != nil {
 			return nil, err
 		}
-		doc.Services[name] = service
-		doc.ServiceOrder = append(doc.ServiceOrder, name)
+		services[name] = service
+		order = append(order, name)
+		warnings = append(warnings, serviceWarnings...)
 	}
 
-	return doc, nil
+	return &types.Document{
+		Services:     services,
+		ServiceOrder: order,
+		Networks:     networks,
+		Volumes:      volumes,
+		Warnings:     warnings,
+	}, nil
 }
 
-func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Service, error) {
+func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]any) (types.Service, []types.Warning, error) {
 	service := types.Service{"image": cmd.Image}
 	if cmd.Name != "" {
 		service["container_name"] = cmd.Name
 	}
 
+	var warnings []types.Warning
 	for _, flag := range cmd.Flags {
 		switch flag.Name {
-		case "ports":
-			appendStringInternal(service, "ports", flag.Value)
+		case "ports", "environment", "env_file", "labels", "extra_hosts", "dns", "cap_add", "cap_drop", "devices", "group_add", "security_opt", "expose":
+			appendString(service, flag.Name, flag.Value)
 		case "volumes":
-			appendStringInternal(service, "volumes", flag.Value)
-			if err := registerVolumeInternal(doc, flag.Value); err != nil {
-				return nil, err
+			appendString(service, "volumes", flag.Value)
+			if err := registerVolume(volumes, flag.Value); err != nil {
+				return nil, nil, err
 			}
-		case "environment":
-			appendStringInternal(service, "environment", flag.Value)
-		case "env_file":
-			appendStringInternal(service, "env_file", flag.Value)
 		case "network":
 			if flag.Value == "host" || flag.Value == "none" || strings.HasPrefix(flag.Value, "container:") {
 				service["network_mode"] = flag.Value
 			} else {
-				appendStringInternal(service, "networks", flag.Value)
-				doc.Networks[flag.Value] = map[string]any{"external": true}
+				appendString(service, "networks", flag.Value)
+				networks[flag.Value] = map[string]any{"external": true}
 			}
 		case "restart", "working_dir", "user", "platform", "pull_policy", "stop_signal", "stop_grace_period":
 			service[flag.Name] = flag.Value
@@ -79,27 +104,22 @@ func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Servic
 			}
 		case "healthcheck":
 			service["healthcheck"] = map[string]any{"test": flag.Value}
-		case "memory":
-			setResourceLimitInternal(service, "memory", flag.Value)
-		case "cpus":
-			setResourceLimitInternal(service, "cpus", flag.Value)
-		case "labels", "extra_hosts", "dns", "cap_add", "cap_drop", "devices", "group_add", "security_opt", "expose":
-			appendStringInternal(service, flag.Name, flag.Value)
+		case "memory", "cpus":
+			ensureNestedMap(ensureNestedMap(ensureNestedMap(service, "deploy"), "resources"), "limits")[flag.Name] = flag.Value
 		case "ulimits":
-			if err := setUlimitInternal(service, flag.Value); err != nil {
-				return nil, err
+			ulimit, err := units.ParseUlimit(flag.Value)
+			if err != nil {
+				return nil, nil, types.NewConversionError("invalid ulimit %q: %v", flag.Value, err)
 			}
+			ensureNestedMap(service, "ulimits")[ulimit.Name] = map[string]any{"soft": ulimit.Soft, "hard": ulimit.Hard}
 		case "logging.driver":
-			logging := ensureNestedMapInternal(service, "logging")
-			logging["driver"] = flag.Value
+			ensureNestedMap(service, "logging")["driver"] = flag.Value
 		case "logging.options":
 			key, value, ok := strings.Cut(flag.Value, "=")
 			if !ok {
-				return nil, types.NewConversionError("invalid log option %q", flag.Value)
+				return nil, nil, types.NewConversionError("invalid log option %q", flag.Value)
 			}
-			logging := ensureNestedMapInternal(service, "logging")
-			options := ensureNestedMapInternal(logging, "options")
-			options[key] = value
+			ensureNestedMap(ensureNestedMap(service, "logging"), "options")[key] = value
 		case "interactive":
 			service["stdin_open"] = true
 		case "tty", "privileged", "init", "read_only", "oom_kill_disable":
@@ -108,10 +128,10 @@ func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Servic
 			if flag.Value == "all" {
 				service["gpus"] = "all"
 			} else {
-				appendStringInternal(service, "gpus", flag.Value)
+				appendString(service, "gpus", flag.Value)
 			}
 		case "ignored":
-			doc.Warnings = append(doc.Warnings, types.Warning{Message: "ignored unsupported Docker flag " + flag.Value})
+			warnings = append(warnings, types.Warning{Message: "ignored unsupported Docker flag " + flag.Value})
 		}
 	}
 
@@ -119,19 +139,18 @@ func mapServiceInternal(cmd types.RunCommand, doc *types.Document) (types.Servic
 		service["command"] = slices.Clone(cmd.Command)
 	}
 
-	return service, nil
+	return service, warnings, nil
 }
 
-func appendStringInternal(service types.Service, key, value string) {
+func appendString(service types.Service, key, value string) {
 	if value == "" {
 		return
 	}
 	values, _ := service[key].([]string)
-	values = append(values, value)
-	service[key] = values
+	service[key] = append(values, value)
 }
 
-func ensureNestedMapInternal(parent map[string]any, key string) map[string]any {
+func ensureNestedMap(parent map[string]any, key string) map[string]any {
 	if existing, ok := parent[key].(map[string]any); ok {
 		return existing
 	}
@@ -140,24 +159,7 @@ func ensureNestedMapInternal(parent map[string]any, key string) map[string]any {
 	return next
 }
 
-func setResourceLimitInternal(service types.Service, key, value string) {
-	deploy := ensureNestedMapInternal(service, "deploy")
-	resources := ensureNestedMapInternal(deploy, "resources")
-	limits := ensureNestedMapInternal(resources, "limits")
-	limits[key] = value
-}
-
-func setUlimitInternal(service types.Service, value string) error {
-	ulimit, err := units.ParseUlimit(value)
-	if err != nil {
-		return types.NewConversionError("invalid ulimit %q: %v", value, err)
-	}
-	ulimits := ensureNestedMapInternal(service, "ulimits")
-	ulimits[ulimit.Name] = map[string]any{"soft": ulimit.Soft, "hard": ulimit.Hard}
-	return nil
-}
-
-func registerVolumeInternal(doc *types.Document, value string) error {
+func registerVolume(volumes map[string]map[string]any, value string) error {
 	if strings.HasPrefix(value, "type=") {
 		source := value
 		for part := range strings.SplitSeq(value, ",") {
@@ -170,7 +172,7 @@ func registerVolumeInternal(doc *types.Document, value string) error {
 		if source == "" || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") || strings.Contains(source, "$") {
 			return nil
 		}
-		doc.Volumes[source] = map[string]any{"external": true}
+		volumes[source] = map[string]any{"external": true}
 		return nil
 	}
 
@@ -181,87 +183,6 @@ func registerVolumeInternal(doc *types.Document, value string) error {
 	if volume.Type != compose.VolumeTypeVolume || volume.Source == "" || strings.Contains(volume.Source, "$") {
 		return nil
 	}
-	doc.Volumes[volume.Source] = map[string]any{"external": true}
-	return nil
-}
-
-func serviceNameInternal(cmd types.RunCommand) string {
-	if cmd.Name != "" {
-		return sanitizeServiceNameInternal(cmd.Name)
-	}
-	image := cmd.Image
-	if slash := strings.LastIndex(image, "/"); slash >= 0 {
-		image = image[slash+1:]
-	}
-	if before, _, ok := strings.Cut(image, ":"); ok {
-		image = before
-	}
-	if before, _, ok := strings.Cut(image, "@"); ok {
-		image = before
-	}
-	name := sanitizeServiceNameInternal(image)
-	if name == "" {
-		return "app"
-	}
-	return name
-}
-
-func sanitizeServiceNameInternal(name string) string {
-	name = serviceNameSanitizer.ReplaceAllString(strings.TrimSpace(name), "-")
-	name = strings.Trim(name, "-_.")
-	return strings.ToLower(name)
-}
-
-func uniqueServiceNameInternal(name string, services map[string]types.Service) string {
-	if _, ok := services[name]; !ok {
-		return name
-	}
-	for i := 2; ; i++ {
-		candidate := fmt.Sprintf("%s-%d", name, i)
-		if _, ok := services[candidate]; !ok {
-			return candidate
-		}
-	}
-}
-
-func envFileInternal(commands []types.RunCommand) []byte {
-	var lines []string
-	for _, cmd := range commands {
-		for _, flag := range cmd.Flags {
-			if flag.Name == "environment" && strings.Contains(flag.Value, "=") {
-				lines = append(lines, flag.Value)
-			}
-		}
-	}
-	if len(lines) == 0 {
-		return nil
-	}
-	return []byte(strings.Join(lines, "\n") + "\n")
-}
-
-func serviceResultsInternal(doc *types.Document) []types.ServiceResult {
-	results := make([]types.ServiceResult, 0, len(doc.ServiceOrder))
-	for _, name := range doc.ServiceOrder {
-		service := doc.Services[name]
-		image, _ := service["image"].(string)
-		results = append(results, types.ServiceResult{Name: name, Image: image})
-	}
-	return results
-}
-
-func mergeExistingComposeInternal(doc *types.Document, yamlData []byte) error {
-	var existing map[string]any
-	if err := yaml.Unmarshal(yamlData, &existing); err != nil {
-		return types.NewConversionError("parse existing compose YAML: %v", err)
-	}
-
-	if services, ok := existing["services"].(map[string]any); ok {
-		for _, name := range slices.Sorted(maps.Keys(services)) {
-			if svc, isMap := services[name].(map[string]any); isMap {
-				doc.Services[name] = svc
-				doc.ServiceOrder = append(doc.ServiceOrder, name)
-			}
-		}
-	}
+	volumes[volume.Source] = map[string]any{"external": true}
 	return nil
 }

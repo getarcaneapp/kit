@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mattn/go-shellwords"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/docker/convert/types"
 )
@@ -71,24 +72,41 @@ var boolFlags = map[string]string{
 }
 
 func Parse(input string, opts types.ParseOptions) ([]types.RunCommand, error) {
-	normalized := normalizeInputInternal(input)
+	normalized := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(input, "\r\n", "\n"), "\\\n", " "))
 	if normalized == "" {
 		return nil, types.NewParseError("docker command must be a non-empty string")
 	}
 
-	statements, err := splitStatementsInternal(normalized)
-	if err != nil {
-		return nil, types.NewParseError("parse command tokens: %v", err)
+	// Parse tokenizes input line by line. A line that
+	// go-shellwords rejects (for example an unterminated quote) is joined with the
+	// next line and retried, so a newline inside quotes stays part of the argument.
+	var statements [][]string
+	pending := ""
+	var pendingErr error
+	for line := range strings.SplitSeq(normalized, "\n") {
+		if pendingErr != nil {
+			line = pending + "\n" + line
+		}
+		parsed, err := splitLine(line)
+		if err != nil {
+			pending, pendingErr = line, err
+			continue
+		}
+		pending, pendingErr = "", nil
+		statements = append(statements, parsed...)
+	}
+	if pendingErr != nil {
+		return nil, types.NewParseError("parse command tokens: %v", pendingErr)
 	}
 
 	commands := make([]types.RunCommand, 0, len(statements))
 	for _, statement := range statements {
-		tokens, ok := trimCommandPrefixInternal(statement)
+		tokens, ok := trimCommandPrefix(statement)
 		if !ok {
 			return nil, types.NewParseError("expected docker or podman run/create command")
 		}
 
-		cmd, parseErr := parseRunTokensInternal(tokens)
+		cmd, parseErr := parseRunTokens(tokens)
 		if parseErr != nil {
 			return nil, parseErr
 		}
@@ -102,49 +120,14 @@ func Parse(input string, opts types.ParseOptions) ([]types.RunCommand, error) {
 	return commands, nil
 }
 
-func normalizeInputInternal(input string) string {
-	input = strings.ReplaceAll(input, "\r\n", "\n")
-	input = strings.ReplaceAll(input, "\\\n", " ")
-	return strings.TrimSpace(input)
-}
-
-// splitStatementsInternal tokenizes input line by line. A line that
-// go-shellwords rejects (for example an unterminated quote) is joined with the
-// next line and retried, so a newline inside quotes stays part of the argument.
-func splitStatementsInternal(input string) ([][]string, error) {
-	var statements [][]string
-	pending := ""
-	var pendingErr error
-	for line := range strings.SplitSeq(input, "\n") {
-		if pendingErr != nil {
-			line = pending + "\n" + line
-		}
-		parsed, err := splitLineInternal(line)
-		if err != nil {
-			pending, pendingErr = line, err
-			continue
-		}
-		pending, pendingErr = "", nil
-		statements = append(statements, parsed...)
-	}
-	if pendingErr != nil {
-		return nil, pendingErr
-	}
-	return statements, nil
-}
-
-// splitLineInternal splits one logical line on the shell control operators
+// splitLine splits one logical line on the shell control operators
 // "&&", "||", ";", "&" and "|". go-shellwords stops at each operator and
 // reports its rune position; redirections are rejected because a compose
 // service has nowhere to send them.
-func splitLineInternal(line string) ([][]string, error) {
+func splitLine(line string) ([][]string, error) {
 	var statements [][]string
 	for {
-		parser := shellwords.NewParser()
-		parser.ParseEnv = false
-		parser.ParseBacktick = false
-		parser.ParseComment = true
-
+		parser := &shellwords.Parser{ParseComment: true}
 		tokens, err := parser.Parse(line)
 		if err != nil {
 			return nil, err
@@ -168,7 +151,7 @@ func splitLineInternal(line string) ([][]string, error) {
 	}
 }
 
-func trimCommandPrefixInternal(tokens []string) ([]string, bool) {
+func trimCommandPrefix(tokens []string) ([]string, bool) {
 	if len(tokens) < 2 || (tokens[0] != "docker" && tokens[0] != "podman") {
 		return nil, false
 	}
@@ -184,53 +167,62 @@ func trimCommandPrefixInternal(tokens []string) ([]string, bool) {
 	}
 }
 
-func parseRunTokensInternal(tokens []string) (types.RunCommand, error) {
-	var cmd types.RunCommand
+func parseRunTokens(tokens []string) (types.RunCommand, error) {
+	var image, name, entrypoint string
+	var command []string
+	var flags []types.Flag
 	for i := 0; i < len(tokens); i++ {
 		token := tokens[i]
 		if token == "--" {
 			i++
 			if i < len(tokens) {
-				cmd.Image = tokens[i]
-				cmd.Command = append(cmd.Command, tokens[i+1:]...)
+				image = tokens[i]
+				command = append(command, tokens[i+1:]...)
 			}
 			break
 		}
 		if strings.HasPrefix(token, "-") {
-			if flags, ok := parseShortClusterInternal(token); ok {
-				cmd.Flags = append(cmd.Flags, flags...)
+			if !strings.HasPrefix(token, "--") && len(token) > 2 && !strings.ContainsFunc(token[1:], func(r rune) bool {
+				_, ok := boolFlags["-"+string(r)]
+				return !ok
+			}) {
+				for _, r := range token[1:] {
+					flags = append(flags, types.Flag{Name: boolFlags["-"+string(r)], Value: "true"})
+				}
 				continue
 			}
-			flag, value, consumed, err := parseFlagInternal(token, tokens, i)
+			flag, value, consumed, err := parseFlag(token, tokens, i)
 			if err != nil {
-				return cmd, err
+				return types.RunCommand{Name: name, Entrypoint: entrypoint, Flags: flags}, err
 			}
 			if flag != "" {
 				if flag == "name" {
-					cmd.Name = value
+					name = value
 				}
 				if flag == "entrypoint" {
-					cmd.Entrypoint = value
+					entrypoint = value
 				}
-				cmd.Flags = append(cmd.Flags, types.Flag{Name: flag, Value: value})
+				flags = append(flags, types.Flag{Name: flag, Value: value})
 			}
 			i += consumed
 			continue
 		}
 
-		cmd.Image = token
-		cmd.Command = append(cmd.Command, tokens[i+1:]...)
+		image = token
+		command = append(command, tokens[i+1:]...)
 		break
 	}
 
-	if cmd.Image == "" {
-		return cmd, types.NewParseError("no Docker image specified in command")
-	}
-
-	return cmd, nil
+	return types.RunCommand{
+		Image:      image,
+		Name:       name,
+		Command:    command,
+		Entrypoint: entrypoint,
+		Flags:      flags,
+	}, kit.Ternary(image == "", types.NewParseError("no Docker image specified in command"), nil)
 }
 
-func parseFlagInternal(token string, tokens []string, index int) (string, string, int, error) {
+func parseFlag(token string, tokens []string, index int) (string, string, int, error) {
 	if strings.HasPrefix(token, "--") {
 		name, value, hasValue := strings.Cut(token, "=")
 		if mapped, ok := boolFlags[name]; ok {
@@ -264,19 +256,4 @@ func parseFlagInternal(token string, tokens []string, index int) (string, string
 		return mapped, "true", 0, nil
 	}
 	return "ignored", token, 0, nil
-}
-
-func parseShortClusterInternal(token string) ([]types.Flag, bool) {
-	if !strings.HasPrefix(token, "-") || strings.HasPrefix(token, "--") || len(token) <= 2 {
-		return nil, false
-	}
-	var flags []types.Flag
-	for _, r := range token[1:] {
-		mapped, ok := boolFlags["-"+string(r)]
-		if !ok {
-			return nil, false
-		}
-		flags = append(flags, types.Flag{Name: mapped, Value: "true"})
-	}
-	return flags, len(flags) > 0
 }

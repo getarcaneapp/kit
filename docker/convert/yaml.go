@@ -57,23 +57,22 @@ func Marshal(doc *types.Document, opts types.MarshalOptions) ([]byte, error) {
 	if doc == nil {
 		return nil, types.NewConversionError("document cannot be nil")
 	}
-	root := new(yaml.Node{Kind: yaml.MappingNode})
 
-	servicesNode := new(yaml.Node{Kind: yaml.MappingNode})
+	var services []*yaml.Node
 	for _, name := range doc.ServiceOrder {
 		service, ok := doc.Services[name]
 		if !ok {
 			continue
 		}
-		servicesNode.Content = append(servicesNode.Content, scalarNodeInternal(name), serviceNodeInternal(service))
+		services = append(services, scalarNode(name), anyNode(service))
 	}
-	root.Content = append(root.Content, scalarNodeInternal("services"), servicesNode)
+	content := []*yaml.Node{scalarNode("services"), new(yaml.Node{Kind: yaml.MappingNode, Content: services})}
 
 	if len(doc.Networks) > 0 {
-		root.Content = append(root.Content, scalarNodeInternal("networks"), resourceNodeInternal(doc.Networks))
+		content = append(content, scalarNode("networks"), resourceNode(doc.Networks))
 	}
 	if len(doc.Volumes) > 0 {
-		root.Content = append(root.Content, scalarNodeInternal("volumes"), resourceNodeInternal(doc.Volumes))
+		content = append(content, scalarNode("volumes"), resourceNode(doc.Volumes))
 	}
 
 	var b bytes.Buffer
@@ -81,7 +80,7 @@ func Marshal(doc *types.Document, opts types.MarshalOptions) ([]byte, error) {
 	// Two-space indentation matches the golden files and docker compose's own
 	// canonical output style.
 	enc.SetIndent(2)
-	if err := enc.Encode(root); err != nil {
+	if err := enc.Encode(new(yaml.Node{Kind: yaml.MappingNode, Content: content})); err != nil {
 		return nil, fmt.Errorf("marshal compose YAML: %w", err)
 	}
 	if err := enc.Close(); err != nil {
@@ -102,109 +101,64 @@ func Marshal(doc *types.Document, opts types.MarshalOptions) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func serviceNodeInternal(service types.Service) *yaml.Node {
-	node := new(yaml.Node{Kind: yaml.MappingNode})
-	seen := make(map[string]bool, len(service))
-	for _, key := range serviceKeyOrder {
-		value, ok := service[key]
-		if !ok || isZeroValueInternal(value) {
-			continue
-		}
-		node.Content = append(node.Content, scalarNodeInternal(key), anyNodeInternal(value))
-		seen[key] = true
-	}
-
-	var extras []string
-	for key := range service {
-		if !seen[key] {
-			extras = append(extras, key)
-		}
-	}
-	slices.Sort(extras)
-	for _, key := range extras {
-		value := service[key]
-		if isZeroValueInternal(value) {
-			continue
-		}
-		node.Content = append(node.Content, scalarNodeInternal(key), anyNodeInternal(value))
-	}
-	return node
-}
-
-func resourceNodeInternal(resources map[string]map[string]any) *yaml.Node {
-	node := new(yaml.Node{Kind: yaml.MappingNode})
+func resourceNode(resources map[string]map[string]any) *yaml.Node {
+	var content []*yaml.Node
 	for _, name := range slices.Sorted(maps.Keys(resources)) {
-		node.Content = append(node.Content, scalarNodeInternal(name), anyNodeInternal(resources[name]))
+		content = append(content, scalarNode(name), anyNode(resources[name]))
 	}
-	return node
+	return new(yaml.Node{Kind: yaml.MappingNode, Content: content})
 }
 
-func anyNodeInternal(value any) *yaml.Node {
+func anyNode(value any) *yaml.Node {
 	switch v := value.(type) {
 	case string:
-		return scalarNodeInternal(v)
+		return scalarNode(v)
 	case bool:
-		if v {
-			return &yaml.Node{Kind: yaml.ScalarNode, Value: "true"}
-		}
-		return &yaml.Node{Kind: yaml.ScalarNode, Value: "false"}
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: strconv.FormatBool(v)}
 	case int:
 		return &yaml.Node{Kind: yaml.ScalarNode, Value: strconv.Itoa(v)}
 	case int64:
 		return &yaml.Node{Kind: yaml.ScalarNode, Value: strconv.FormatInt(v, 10)}
 	case []string:
-		node := &yaml.Node{Kind: yaml.SequenceNode}
+		var content []*yaml.Node
 		for _, item := range v {
-			node.Content = append(node.Content, scalarNodeInternal(item))
+			content = append(content, scalarNode(item))
 		}
-		return node
+		return &yaml.Node{Kind: yaml.SequenceNode, Content: content}
 	case map[string]any:
-		return orderedMapNodeInternal(v)
+		preferred := []string{"resources", "limits", "memory", "cpus", "soft", "hard", "driver", "options", "test"}
+		var content []*yaml.Node
+		for _, key := range slices.Concat(preferred, slices.DeleteFunc(slices.Sorted(maps.Keys(v)), func(name string) bool { return slices.Contains(preferred, name) })) {
+			item, ok := v[key]
+			if !ok {
+				continue
+			}
+			content = append(content, scalarNode(key), anyNode(item))
+		}
+		return new(yaml.Node{Kind: yaml.MappingNode, Content: content})
 	case types.Service:
-		return serviceNodeInternal(v)
+		var content []*yaml.Node
+		for _, key := range slices.Concat(serviceKeyOrder, slices.DeleteFunc(slices.Sorted(maps.Keys(v)), func(name string) bool { return slices.Contains(serviceKeyOrder, name) })) {
+			if isZeroValue(v[key]) {
+				continue
+			}
+			content = append(content, scalarNode(key), anyNode(v[key]))
+		}
+		return new(yaml.Node{Kind: yaml.MappingNode, Content: content})
 	default:
 		return &yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprintf("%v", v)}
 	}
 }
 
-func orderedMapNodeInternal(values map[string]any) *yaml.Node {
-	node := new(yaml.Node{Kind: yaml.MappingNode})
-	keys := orderedKeysInternal(values)
-	for _, key := range keys {
-		node.Content = append(node.Content, scalarNodeInternal(key), anyNodeInternal(values[key]))
-	}
-	return node
-}
-
-func orderedKeysInternal(values map[string]any) []string {
-	preferred := []string{"resources", "limits", "memory", "cpus", "soft", "hard", "driver", "options", "test"}
-	var keys []string
-	seen := make(map[string]bool, len(values))
-	for _, key := range preferred {
-		if _, ok := values[key]; ok {
-			keys = append(keys, key)
-			seen[key] = true
-		}
-	}
-	var extras []string
-	for key := range values {
-		if !seen[key] {
-			extras = append(extras, key)
-		}
-	}
-	slices.Sort(extras)
-	return append(keys, extras...)
-}
-
-// scalarNodeInternal returns a string node. The encoder quotes it only when
+// scalarNode returns a string node. The encoder quotes it only when
 // the plain form would resolve to another type, such as "0.5" or "30".
-func scalarNodeInternal(value string) *yaml.Node {
+func scalarNode(value string) *yaml.Node {
 	node := &yaml.Node{}
 	node.SetString(value)
 	return node
 }
 
-func isZeroValueInternal(value any) bool {
+func isZeroValue(value any) bool {
 	switch v := value.(type) {
 	case string:
 		return v == ""

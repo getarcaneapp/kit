@@ -2,10 +2,11 @@ package convert
 
 import (
 	"context"
-	"fmt"
+	"strings"
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	compose "github.com/compose-spec/compose-go/v2/types"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/docker/convert/types"
 )
@@ -26,37 +27,41 @@ func Convert(input string, opts types.Options) (*types.Result, error) {
 		return nil, err
 	}
 
-	project, err := loadComposeProjectInternal(yamlData)
-	if err != nil {
-		return nil, types.NewConversionError("validate generated compose: %v", err)
-	}
-
-	return &types.Result{
-		YAML:     yamlData,
-		Project:  project,
-		Services: serviceResultsInternal(doc),
-		EnvFile:  envFileInternal(commands),
-		Warnings: doc.Warnings,
-	}, nil
-}
-
-func loadComposeProjectInternal(yamlData []byte) (*compose.Project, error) {
-	details := compose.ConfigDetails{
+	project, err := loader.LoadWithContext(context.Background(), compose.ConfigDetails{
 		WorkingDir: ".",
 		ConfigFiles: []compose.ConfigFile{
 			{Filename: "compose.yaml", Content: yamlData},
 		},
 		Environment: map[string]string{},
-	}
-
-	project, err := loader.LoadWithContext(context.Background(), details, func(opts *loader.Options) {
-		opts.SetProjectName("converted", true)
-		opts.SkipResolveEnvironment = true
-		opts.SkipConsistencyCheck = true
+	}, func(loaderOpts *loader.Options) {
+		loaderOpts.SetProjectName("converted", true)
+		loaderOpts.SkipResolveEnvironment = true
+		loaderOpts.SkipConsistencyCheck = true
 	})
 	if err != nil {
-		return nil, fmt.Errorf("load compose project: %w", err)
+		return nil, types.NewConversionError("validate generated compose: load compose project: %v", err)
 	}
 
-	return project, nil
+	services := make([]types.ServiceResult, 0, len(doc.ServiceOrder))
+	for _, name := range doc.ServiceOrder {
+		image, _ := doc.Services[name]["image"].(string)
+		services = append(services, types.ServiceResult{Name: name, Image: image})
+	}
+
+	var envLines []string
+	for _, cmd := range commands {
+		for _, flag := range cmd.Flags {
+			if flag.Name == "environment" && strings.Contains(flag.Value, "=") {
+				envLines = append(envLines, flag.Value)
+			}
+		}
+	}
+
+	return &types.Result{
+		YAML:     yamlData,
+		Project:  project,
+		Services: services,
+		EnvFile:  kit.Ternary(len(envLines) == 0, nil, []byte(strings.Join(envLines, "\n")+"\n")),
+		Warnings: doc.Warnings,
+	}, nil
 }

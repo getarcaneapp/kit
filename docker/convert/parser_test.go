@@ -9,9 +9,9 @@ import (
 	converttypes "go.getarcane.app/docker/convert/types"
 )
 
-// summarizeCommandsInternal renders each parsed command as its mapped flags
+// summarizeCommands renders each parsed command as its mapped flags
 // ("name=value") followed by the image and command arguments.
-func summarizeCommandsInternal(commands []converttypes.RunCommand) [][]string {
+func summarizeCommands(commands []converttypes.RunCommand) [][]string {
 	out := make([][]string, 0, len(commands))
 	for _, cmd := range commands {
 		var summary []string
@@ -56,7 +56,7 @@ func TestParseSplitsStatements(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse returned error: %v", err)
 			}
-			got := summarizeCommandsInternal(commands)
+			got := summarizeCommands(commands)
 			if !slices.EqualFunc(got, tt.want, slices.Equal) {
 				t.Fatalf("Parse = %q, want %q", got, tt.want)
 			}

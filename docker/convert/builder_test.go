@@ -10,7 +10,7 @@ import (
 	converttypes "go.getarcane.app/docker/convert/types"
 )
 
-func buildWithFlagInternal(t *testing.T, name, value string) (*converttypes.Document, error) {
+func buildWithFlag(t *testing.T, name, value string) (*converttypes.Document, error) {
 	t.Helper()
 	return convert.Build([]converttypes.RunCommand{{
 		Image: "alpine",
@@ -35,7 +35,7 @@ func TestBuildRegistersOnlyNamedVolumes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.value, func(t *testing.T) {
-			doc, err := buildWithFlagInternal(t, "volumes", tt.value)
+			doc, err := buildWithFlag(t, "volumes", tt.value)
 			if err != nil {
 				t.Fatalf("Build returned error: %v", err)
 			}
@@ -46,7 +46,7 @@ func TestBuildRegistersOnlyNamedVolumes(t *testing.T) {
 	}
 
 	for _, invalid := range []string{"data:/a:ro:extra", "data::/a"} {
-		if _, err := buildWithFlagInternal(t, "volumes", invalid); !errors.Is(err, converttypes.ErrConversion) {
+		if _, err := buildWithFlag(t, "volumes", invalid); !errors.Is(err, converttypes.ErrConversion) {
 			t.Fatalf("Build(%q) error = %v, want ErrConversion", invalid, err)
 		}
 	}
@@ -66,7 +66,7 @@ func TestBuildParsesUlimits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.value, func(t *testing.T) {
-			doc, err := buildWithFlagInternal(t, "ulimits", tt.value)
+			doc, err := buildWithFlag(t, "ulimits", tt.value)
 			if tt.wantErr {
 				if !errors.Is(err, converttypes.ErrConversion) {
 					t.Fatalf("Build error = %v, want ErrConversion", err)
