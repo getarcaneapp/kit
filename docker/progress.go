@@ -20,7 +20,7 @@ type flusher interface{ Flush() }
 // this to put docker-CLI-parity output on the wire.
 func NewLogLineWriter(dst io.Writer) io.WriteCloser {
 	if dst == nil || dst == io.Discard {
-		return nopWriteCloser{io.Discard}
+		return nopWriteCloser{Writer: io.Discard}
 	}
 	return &logLineWriter{dst: dst}
 }

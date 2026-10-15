@@ -14,20 +14,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestVolumeUsageCacheBehaviorInternal(t *testing.T) {
+func TestVolumeUsageCacheBehavior(t *testing.T) {
 	t.Run("deduplicates refresh and honors waiter context", func(t *testing.T) {
-		resetVolumeUsageCacheForTestInternal()
+		resetVolumeUsageCacheForTest()
 
 		started := make(chan struct{})
 		release := make(chan struct{})
 		var startedOnce sync.Once
 		var requests atomic.Int32
-		dockerClient := newVolumeUsageTestClientInternal(t, func(w http.ResponseWriter, r *http.Request) {
+		dockerClient := newVolumeUsageTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			requests.Add(1)
 			startedOnce.Do(func() { close(started) })
 			select {
 			case <-release:
-				writeVolumeUsageResponseInternal(t, w, "shared", 42)
+				writeVolumeUsageResponse(t, w, "shared", 42)
 			case <-r.Context().Done():
 			}
 		})
@@ -59,15 +59,15 @@ func TestVolumeUsageCacheBehaviorInternal(t *testing.T) {
 	})
 
 	t.Run("serves stale data while one refresh runs", func(t *testing.T) {
-		resetVolumeUsageCacheForTestInternal()
+		resetVolumeUsageCacheForTest()
 
 		secondStarted := make(chan struct{})
 		releaseSecond := make(chan struct{})
 		var requests atomic.Int32
-		dockerClient := newVolumeUsageTestClientInternal(t, func(w http.ResponseWriter, r *http.Request) {
+		dockerClient := newVolumeUsageTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			requestNumber := requests.Add(1)
 			if requestNumber == 1 {
-				writeVolumeUsageResponseInternal(t, w, "stale", 10)
+				writeVolumeUsageResponse(t, w, "stale", 10)
 				return
 			}
 			if requestNumber == 2 {
@@ -75,7 +75,7 @@ func TestVolumeUsageCacheBehaviorInternal(t *testing.T) {
 			}
 			select {
 			case <-releaseSecond:
-				writeVolumeUsageResponseInternal(t, w, "fresh", 20)
+				writeVolumeUsageResponse(t, w, "fresh", 20)
 			case <-r.Context().Done():
 			}
 		})
@@ -85,7 +85,7 @@ func TestVolumeUsageCacheBehaviorInternal(t *testing.T) {
 		_, err := GetVolumeUsageData(ctx, dockerClient)
 		require.NoError(t, err)
 
-		key := volumeUsageCacheKeyInternal(dockerClient)
+		key := volumeUsageCacheKey(dockerClient)
 		cached, found := volumeUsageCache.Peek(key)
 		require.True(t, found)
 		volumeUsageCache.SetWithTTL(key, cached, time.Nanosecond)
@@ -114,13 +114,13 @@ func TestVolumeUsageCacheBehaviorInternal(t *testing.T) {
 	})
 
 	t.Run("isolates and invalidates by daemon host", func(t *testing.T) {
-		resetVolumeUsageCacheForTestInternal()
+		resetVolumeUsageCacheForTest()
 
-		clientA := newVolumeUsageTestClientInternal(t, func(w http.ResponseWriter, _ *http.Request) {
-			writeVolumeUsageResponseInternal(t, w, "host-a", 1)
+		clientA := newVolumeUsageTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeVolumeUsageResponse(t, w, "host-a", 1)
 		})
-		clientB := newVolumeUsageTestClientInternal(t, func(w http.ResponseWriter, _ *http.Request) {
-			writeVolumeUsageResponseInternal(t, w, "host-b", 2)
+		clientB := newVolumeUsageTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeVolumeUsageResponse(t, w, "host-b", 2)
 		})
 
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
@@ -130,23 +130,23 @@ func TestVolumeUsageCacheBehaviorInternal(t *testing.T) {
 		_, err = GetVolumeUsageData(ctx, clientB)
 		require.NoError(t, err)
 
-		cachedA, foundA := volumeUsageCache.Peek(volumeUsageCacheKeyInternal(clientA))
-		cachedB, foundB := volumeUsageCache.Peek(volumeUsageCacheKeyInternal(clientB))
+		cachedA, foundA := volumeUsageCache.Peek(volumeUsageCacheKey(clientA))
+		cachedB, foundB := volumeUsageCache.Peek(volumeUsageCacheKey(clientB))
 		require.True(t, foundA)
 		require.True(t, foundB)
 		require.Equal(t, "host-a", cachedA[0].Name)
 		require.Equal(t, "host-b", cachedB[0].Name)
 
 		InvalidateVolumeUsageCache(clientA)
-		_, foundA = volumeUsageCache.Peek(volumeUsageCacheKeyInternal(clientA))
-		cachedB, foundB = volumeUsageCache.Peek(volumeUsageCacheKeyInternal(clientB))
+		_, foundA = volumeUsageCache.Peek(volumeUsageCacheKey(clientA))
+		cachedB, foundB = volumeUsageCache.Peek(volumeUsageCacheKey(clientB))
 		require.False(t, foundA)
 		require.True(t, foundB)
 		require.Equal(t, "host-b", cachedB[0].Name)
 	})
 }
 
-func newVolumeUsageTestClientInternal(t *testing.T, handler http.HandlerFunc) *client.Client {
+func newVolumeUsageTestClient(t *testing.T, handler http.HandlerFunc) *client.Client {
 	t.Helper()
 
 	server := httptest.NewServer(handler)
@@ -161,13 +161,13 @@ func newVolumeUsageTestClientInternal(t *testing.T, handler http.HandlerFunc) *c
 	return dockerClient
 }
 
-func writeVolumeUsageResponseInternal(t *testing.T, w http.ResponseWriter, name string, size int64) {
+func writeVolumeUsageResponse(t *testing.T, w http.ResponseWriter, name string, size int64) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
 	_, err := fmt.Fprintf(w, `{"VolumeUsage":{"Items":[{"Name":%q,"UsageData":{"Size":%d,"RefCount":1}}]}}`, name, size)
 	require.NoError(t, err)
 }
 
-func resetVolumeUsageCacheForTestInternal() {
+func resetVolumeUsageCacheForTest() {
 	volumeUsageCache.Purge()
 }

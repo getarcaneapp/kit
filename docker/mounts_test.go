@@ -30,12 +30,11 @@ func TestMountForDestination(t *testing.T) {
 			wantType:   mounttypes.TypeBind,
 			wantSource: "/host/backups",
 			wantTarget: "/volume",
-			wantRO:     false,
 		},
 		{
 			name: "returns named volume mount",
 			mounts: []containertypes.MountPoint{
-				{Type: mounttypes.TypeVolume, Name: "arcane-backups", Destination: "/backups", RW: false},
+				{Type: mounttypes.TypeVolume, Name: "arcane-backups", Destination: "/backups"},
 			},
 			dest:       "/backups",
 			target:     "/restores",
@@ -53,7 +52,6 @@ func TestMountForDestination(t *testing.T) {
 			wantType:   mounttypes.TypeBind,
 			wantSource: "/host/backups",
 			wantTarget: "/backups",
-			wantRO:     false,
 		},
 		{
 			name: "ignores unsupported mount types",
@@ -83,10 +81,29 @@ func TestMountForDestination(t *testing.T) {
 }
 
 func TestMountForSubpath(t *testing.T) {
-	hostBind := containertypes.MountPoint{Type: mounttypes.TypeBind, Source: "/host/projects-root", Destination: "/app/data", RW: true}
-	namedVolume := containertypes.MountPoint{Type: mounttypes.TypeVolume, Name: "arcane-dev-data", Destination: "/app/data", RW: true}
-	nestedBind := containertypes.MountPoint{Type: mounttypes.TypeBind, Source: "/host/projects-only", Destination: "/app/data/projects", RW: true}
-	readOnlyVolume := containertypes.MountPoint{Type: mounttypes.TypeVolume, Name: "ro-vol", Destination: "/app/data", RW: false}
+	hostBind := containertypes.MountPoint{
+		Type:        mounttypes.TypeBind,
+		Source:      "/host/projects-root",
+		Destination: "/app/data",
+		RW:          true,
+	}
+	namedVolume := containertypes.MountPoint{
+		Type:        mounttypes.TypeVolume,
+		Name:        "arcane-dev-data",
+		Destination: "/app/data",
+		RW:          true,
+	}
+	nestedBind := containertypes.MountPoint{
+		Type:        mounttypes.TypeBind,
+		Source:      "/host/projects-only",
+		Destination: "/app/data/projects",
+		RW:          true,
+	}
+	readOnlyVolume := containertypes.MountPoint{
+		Type:        mounttypes.TypeVolume,
+		Name:        "ro-vol",
+		Destination: "/app/data",
+	}
 	tmpfsMount := containertypes.MountPoint{Type: mounttypes.TypeTmpfs, Destination: "/app/data"}
 
 	t.Run("bind mount with subpath joins host source", func(t *testing.T) {
@@ -169,7 +186,7 @@ func TestPreserveVolumeMounts(t *testing.T) {
 	mountPoints := []containertypes.MountPoint{
 		{Type: mounttypes.TypeVolume, Name: anon, Destination: "/app/data", RW: true},
 		{Type: mounttypes.TypeVolume, Name: "named", Destination: "/data", RW: true},
-		{Type: mounttypes.TypeVolume, Name: "ro", Destination: "/ro", RW: false},
+		{Type: mounttypes.TypeVolume, Name: "ro", Destination: "/ro"},
 		{Type: mounttypes.TypeBind, Source: "/host", Destination: "/bind", RW: true},
 	}
 
@@ -264,7 +281,7 @@ func TestMountForEnclosingPath(t *testing.T) {
 
 func TestNestedMounts(t *testing.T) {
 	mounts := []containertypes.MountPoint{
-		{Type: mounttypes.TypeBind, Source: "/host/deep", Destination: "/app/data/projects/deep", RW: false},
+		{Type: mounttypes.TypeBind, Source: "/host/deep", Destination: "/app/data/projects/deep"},
 		{Type: mounttypes.TypeVolume, Name: "arcane-data", Destination: "/app/data", RW: true},
 		{Type: mounttypes.TypeBind, Source: "/host/projects", Destination: "/app/data/projects", RW: true},
 		{Type: mounttypes.TypeTmpfs, Destination: "/app/data/tmp"},

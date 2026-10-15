@@ -3,16 +3,17 @@ package docker
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"net/url"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	kit "go.getarcane.app/kit/pkg"
 )
 
-const defaultNetworkModeInternal = "bridge"
+const defaultNetworkMode = "bridge"
 
 // IsDefaultNetwork reports whether name is one of Docker's built-in networks.
 func IsDefaultNetwork(name string) bool {
@@ -28,51 +29,38 @@ func IsDefaultNetwork(name string) bool {
 // with the inspected container, preferring user-defined networks over defaults.
 func SelectAutoNetworkMode(inspect *container.InspectResponse) string {
 	if inspect == nil {
-		return defaultNetworkModeInternal
+		return defaultNetworkMode
 	}
 
-	if inspect.HostConfig != nil {
-		networkMode := strings.TrimSpace(string(inspect.HostConfig.NetworkMode))
-		if networkMode != "" && networkMode != "default" && networkMode != defaultNetworkModeInternal &&
-			!container.NetworkMode(networkMode).IsContainer() {
-			return networkMode
-		}
+	networkMode := strings.TrimSpace(string(kit.FromPtr(inspect.HostConfig).NetworkMode))
+	if networkMode != "" && networkMode != "default" && networkMode != defaultNetworkMode &&
+		!container.NetworkMode(networkMode).IsContainer() {
+		return networkMode
 	}
 
-	if inspect.NetworkSettings != nil && len(inspect.NetworkSettings.Networks) > 0 {
-		networkNames := make([]string, 0, len(inspect.NetworkSettings.Networks))
-		for networkName := range inspect.NetworkSettings.Networks {
-			networkName = strings.TrimSpace(networkName)
-			if networkName != "" {
-				networkNames = append(networkNames, networkName)
-			}
-		}
-		sort.Strings(networkNames)
+	networkNames := kit.TrimNonEmpty(slices.Collect(maps.Keys(kit.FromPtr(inspect.NetworkSettings).Networks)))
+	slices.Sort(networkNames)
 
-		for _, networkName := range networkNames {
-			if !IsDefaultNetwork(networkName) {
-				return networkName
-			}
-		}
-
-		for _, networkName := range networkNames {
-			if container.NetworkMode(networkName).IsContainer() {
-				continue
-			}
-			if networkName == "host" || networkName == "none" || networkName == defaultNetworkModeInternal {
-				return networkName
-			}
+	for _, networkName := range networkNames {
+		if !IsDefaultNetwork(networkName) {
+			return networkName
 		}
 	}
 
-	if inspect.HostConfig != nil {
-		networkMode := strings.TrimSpace(string(inspect.HostConfig.NetworkMode))
-		if networkMode != "" && networkMode != "default" && !container.NetworkMode(networkMode).IsContainer() {
-			return networkMode
+	for _, networkName := range networkNames {
+		if container.NetworkMode(networkName).IsContainer() {
+			continue
+		}
+		if networkName == "host" || networkName == "none" || networkName == defaultNetworkMode {
+			return networkName
 		}
 	}
 
-	return defaultNetworkModeInternal
+	if networkMode != "" && networkMode != "default" && !container.NetworkMode(networkMode).IsContainer() {
+		return networkMode
+	}
+
+	return defaultNetworkMode
 }
 
 // SelectDockerHostReachableNetworkMode picks the network for a helper container
@@ -85,11 +73,8 @@ func SelectAutoNetworkMode(inspect *container.InspectResponse) string {
 func SelectDockerHostReachableNetworkMode(ctx context.Context, dockerClient *client.Client, inspect *container.InspectResponse, dockerHost string) string {
 	fallback := SelectAutoNetworkMode(inspect)
 
-	host := ""
-	if parsed, err := url.Parse(strings.TrimSpace(dockerHost)); err == nil {
-		host = parsed.Hostname()
-	}
-	if host == "" || dockerClient == nil || inspect == nil || inspect.NetworkSettings == nil || len(inspect.NetworkSettings.Networks) == 0 {
+	parsed, err := url.Parse(strings.TrimSpace(dockerHost))
+	if err != nil || parsed.Hostname() == "" || dockerClient == nil || inspect == nil || len(kit.FromPtr(inspect.NetworkSettings).Networks) == 0 {
 		return fallback
 	}
 
@@ -101,7 +86,7 @@ func SelectDockerHostReachableNetworkMode(ctx context.Context, dockerClient *cli
 
 	shared := make([]string, 0, 2)
 	for _, c := range list.Items {
-		if c.NetworkSettings == nil || !ContainerAnswersToHostname(&c, host) {
+		if c.NetworkSettings == nil || !ContainerAnswersToHostname(&c, parsed.Hostname()) {
 			continue
 		}
 		for networkName := range c.NetworkSettings.Networks {
@@ -113,8 +98,7 @@ func SelectDockerHostReachableNetworkMode(ctx context.Context, dockerClient *cli
 	if len(shared) == 0 {
 		return fallback
 	}
-	sort.Strings(shared)
-	return shared[0]
+	return slices.Min(shared)
 }
 
 // ContainerAnswersToHostname reports whether the container is
@@ -145,10 +129,7 @@ func BuildNetworkUsageMaps(containers []container.Summary) (map[string]bool, map
 	inUseByID := make(map[string]bool)
 	inUseByName := make(map[string]bool)
 	for _, c := range containers {
-		if c.NetworkSettings == nil || c.NetworkSettings.Networks == nil {
-			continue
-		}
-		for netName, es := range c.NetworkSettings.Networks {
+		for netName, es := range kit.FromPtr(c.NetworkSettings).Networks {
 			if es.NetworkID != "" {
 				inUseByID[es.NetworkID] = true
 			}

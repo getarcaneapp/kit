@@ -1,10 +1,12 @@
 package docker
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -18,8 +20,8 @@ import (
 
 var volumeUsageCache = hot.NewHotCache[string, []volume.Volume](hot.LRU, 16).
 	WithTTL(volumeUsageCacheTTL).
-	WithCopyOnRead(cloneVolumeUsageInternal).
-	WithCopyOnWrite(cloneVolumeUsageInternal).
+	WithCopyOnRead(cloneVolumeUsage).
+	WithCopyOnWrite(cloneVolumeUsage).
 	Build()
 
 const (
@@ -34,7 +36,7 @@ func GetVolumeUsageData(ctx context.Context, dockerClient *client.Client) ([]vol
 		return nil, errors.New("failed to get disk usage: Docker client is nil")
 	}
 
-	key := volumeUsageCacheKeyInternal(dockerClient)
+	key := volumeUsageCacheKey(dockerClient)
 	stale, staleFound := volumeUsageCache.Peek(key)
 	if cached, found, _ := volumeUsageCache.Get(key); found {
 		slog.DebugContext(ctx, "returning cached volume usage data", "volumeCount", len(cached), "dockerHost", key)
@@ -47,7 +49,8 @@ func GetVolumeUsageData(ctx context.Context, dockerClient *client.Client) ([]vol
 		err     error
 	}
 	result := make(chan refreshResult, 1)
-	refreshCtx, cancel := volumeUsageRefreshContextInternal(ctx)
+	deadline, hasDeadline := ctx.Deadline()
+	refreshCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), kit.Ternary(hasDeadline, deadline, time.Now().Add(volumeUsageRefreshFallbackTimeout)))
 	go func() {
 		defer cancel()
 		volumes, found, err := volumeUsageCache.GetWithLoaders(key, func(_ []string) (map[string][]volume.Volume, error) {
@@ -57,7 +60,11 @@ func GetVolumeUsageData(ctx context.Context, dockerClient *client.Client) ([]vol
 			}
 			return map[string][]volume.Volume{key: loaded}, nil
 		})
-		result <- refreshResult{volumes: volumes, found: found, err: err}
+		result <- refreshResult{
+			volumes: volumes,
+			found:   found,
+			err:     err,
+		}
 	}()
 
 	select {
@@ -89,7 +96,7 @@ func GetVolumeUsageDataStaleWhileRevalidate(ctx context.Context, dockerClient *c
 		return mo.None[[]volume.Volume]()
 	}
 
-	key := volumeUsageCacheKeyInternal(dockerClient)
+	key := volumeUsageCacheKey(dockerClient)
 	cached, found := volumeUsageCache.Peek(key)
 	if fresh, freshFound, _ := volumeUsageCache.Get(key); freshFound {
 		slog.DebugContext(ctx, "volume usage cache lookup",
@@ -100,14 +107,14 @@ func GetVolumeUsageDataStaleWhileRevalidate(ctx context.Context, dockerClient *c
 		)
 		return mo.Some(fresh)
 	}
-	cacheState := kit.Ternary(found, "stale", "miss")
 	slog.DebugContext(ctx, "volume usage cache lookup",
 		"dockerHost", key,
-		"cacheState", cacheState,
+		"cacheState", kit.Ternary(found, "stale", "miss"),
 		"volumeCount", len(cached),
 		"refreshRequested", true,
 	)
-	refreshCtx, cancel := volumeUsageRefreshContextInternal(ctx)
+	deadline, hasDeadline := ctx.Deadline()
+	refreshCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), kit.Ternary(hasDeadline, deadline, time.Now().Add(volumeUsageRefreshFallbackTimeout)))
 	go func() {
 		defer cancel()
 		_, _, err := volumeUsageCache.GetWithLoaders(key, func(_ []string) (map[string][]volume.Volume, error) {
@@ -133,27 +140,14 @@ func InvalidateVolumeUsageCache(dockerClient *client.Client) {
 		return
 	}
 
-	key := volumeUsageCacheKeyInternal(dockerClient)
-	volumeUsageCache.Delete(key)
+	volumeUsageCache.Delete(volumeUsageCacheKey(dockerClient))
 }
 
-func volumeUsageCacheKeyInternal(dockerClient *client.Client) string {
-	host := dockerClient.DaemonHost()
-	if host != "" {
-		return host
-	}
-	return fmt.Sprintf("client:%p", dockerClient)
+func volumeUsageCacheKey(dockerClient *client.Client) string {
+	return cmp.Or(dockerClient.DaemonHost(), fmt.Sprintf("client:%p", dockerClient))
 }
 
-func volumeUsageRefreshContextInternal(ctx context.Context) (context.Context, context.CancelFunc) {
-	detached := context.WithoutCancel(ctx)
-	if deadline, ok := ctx.Deadline(); ok {
-		return context.WithDeadline(detached, deadline)
-	}
-	return context.WithTimeout(detached, volumeUsageRefreshFallbackTimeout)
-}
-
-func cloneVolumeUsageInternal(volumes []volume.Volume) []volume.Volume {
+func cloneVolumeUsage(volumes []volume.Volume) []volume.Volume {
 	return append([]volume.Volume(nil), volumes...)
 }
 
@@ -176,11 +170,10 @@ func FetchVolumeUsageData(ctx context.Context, dockerClient *client.Client) ([]v
 func FilterContainersUsingVolume(containers []container.Summary, volumeName string) []string {
 	containerIDs := make([]string, 0)
 	for _, c := range containers {
-		for _, m := range c.Mounts {
-			if m.Type == mount.TypeVolume && m.Name == volumeName {
-				containerIDs = append(containerIDs, c.ID)
-				break
-			}
+		if slices.ContainsFunc(c.Mounts, func(m container.MountPoint) bool {
+			return m.Type == mount.TypeVolume && m.Name == volumeName
+		}) {
+			containerIDs = append(containerIDs, c.ID)
 		}
 	}
 	return containerIDs

@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -35,10 +36,7 @@ func StreamMultiplexedLogs(ctx context.Context, logs io.Reader, logsChan chan<- 
 	var closeOnce sync.Once
 	closeInputs := func() {
 		closeOnce.Do(func() {
-			err := ctx.Err()
-			if err == nil {
-				err = io.ErrClosedPipe
-			}
+			err := cmp.Or(ctx.Err(), io.ErrClosedPipe)
 			_ = stdoutReader.CloseWithError(err)
 			_ = stderrReader.CloseWithError(err)
 			if closer, ok := logs.(io.Closer); ok {
@@ -151,12 +149,8 @@ func ReadLogLines(ctx context.Context, reader io.Reader, logsChan chan<- string,
 		if line != "" {
 			trimmed := strings.TrimRight(line, "\r\n")
 			if trimmed != "" {
-				if prefix != "" {
-					trimmed = prefix + trimmed
-				}
-
 				select {
-				case logsChan <- trimmed:
+				case logsChan <- prefix + trimmed:
 				case <-ctx.Done():
 					return ctx.Err()
 				}

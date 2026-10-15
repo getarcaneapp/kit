@@ -16,14 +16,14 @@ func TestIsExpectedStreamEndError(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{name: "nil", err: nil, want: false},
+		{name: "nil"},
 		{name: "eof", err: io.EOF, want: true},
 		{name: "wrapped eof", err: fmt.Errorf("wrapped: %w", io.EOF), want: true},
 		{name: "net err closed", err: net.ErrClosed, want: true},
 		{name: "closed network connection", err: errors.New("read tcp 127.0.0.1:1234->127.0.0.1:5678: use of closed network connection"), want: true},
 		{name: "broken pipe", err: errors.New("write: broken pipe"), want: true},
 		{name: "connection reset by peer", err: errors.New("read: connection reset by peer"), want: true},
-		{name: "unexpected", err: errors.New("some other error"), want: false},
+		{name: "unexpected", err: errors.New("some other error")},
 	}
 
 	for _, tt := range tests {

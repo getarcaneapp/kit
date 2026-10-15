@@ -14,15 +14,15 @@ import (
 
 func TestStreamContainerLogsNonTTYFollowDemultiplexesStdoutAndStderr(t *testing.T) {
 	var stream bytes.Buffer
-	writeDockerLogFrameInternal(t, &stream, 1, "stdout line\n")
-	writeDockerLogFrameInternal(t, &stream, 2, "stderr line\n")
+	writeDockerLogFrame(t, &stream, 1, "stdout line\n")
+	writeDockerLogFrame(t, &stream, 2, "stderr line\n")
 
 	logsChan := make(chan string, 4)
 
 	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, true, false)
 	require.NoError(t, err)
 
-	require.ElementsMatch(t, []string{"stdout line", "[STDERR] stderr line"}, drainLogLinesInternal(logsChan))
+	require.ElementsMatch(t, []string{"stdout line", "[STDERR] stderr line"}, drainLogLines(logsChan))
 }
 
 func TestStreamContainerLogsTTYFollowStreamsRawOutput(t *testing.T) {
@@ -31,20 +31,20 @@ func TestStreamContainerLogsTTYFollowStreamsRawOutput(t *testing.T) {
 	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader("first line\nsecond line")), logsChan, true, true)
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"first line", "second line"}, drainLogLinesInternal(logsChan))
+	require.Equal(t, []string{"first line", "second line"}, drainLogLines(logsChan))
 }
 
 func TestStreamContainerLogsNonTTYSnapshotDemultiplexesStdoutAndStderr(t *testing.T) {
 	var stream bytes.Buffer
-	writeDockerLogFrameInternal(t, &stream, 1, "stdout snapshot\n")
-	writeDockerLogFrameInternal(t, &stream, 2, "stderr snapshot\n")
+	writeDockerLogFrame(t, &stream, 1, "stdout snapshot\n")
+	writeDockerLogFrame(t, &stream, 2, "stderr snapshot\n")
 
 	logsChan := make(chan string, 4)
 
 	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, false, false)
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"stdout snapshot", "[STDERR] stderr snapshot"}, drainLogLinesInternal(logsChan))
+	require.Equal(t, []string{"stdout snapshot", "[STDERR] stderr snapshot"}, drainLogLines(logsChan))
 }
 
 func TestStreamContainerLogsTTYSnapshotStreamsRawOutput(t *testing.T) {
@@ -53,7 +53,7 @@ func TestStreamContainerLogsTTYSnapshotStreamsRawOutput(t *testing.T) {
 	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader("snapshot line\ntrailing line")), logsChan, false, true)
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"snapshot line", "trailing line"}, drainLogLinesInternal(logsChan))
+	require.Equal(t, []string{"snapshot line", "trailing line"}, drainLogLines(logsChan))
 }
 
 func TestStreamContainerLogsTTYHandlesLongLinesAndPartialEOF(t *testing.T) {
@@ -63,7 +63,7 @@ func TestStreamContainerLogsTTYHandlesLongLinesAndPartialEOF(t *testing.T) {
 	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader(longLine+"\npartial tail")), logsChan, true, true)
 	require.NoError(t, err)
 
-	require.Equal(t, []string{longLine, "partial tail"}, drainLogLinesInternal(logsChan))
+	require.Equal(t, []string{longLine, "partial tail"}, drainLogLines(logsChan))
 }
 
 func TestStreamContainerLogsTTYPythonLikeFollowDoesNotReturnEmptyLogs(t *testing.T) {
@@ -78,7 +78,7 @@ func TestStreamContainerLogsTTYPythonLikeFollowDoesNotReturnEmptyLogs(t *testing
 	)
 	require.NoError(t, err)
 
-	lines := drainLogLinesInternal(logsChan)
+	lines := drainLogLines(logsChan)
 	require.NotEmpty(t, lines)
 	require.Equal(t, []string{
 		"2026-03-22 10:15:00 - INFO - Starting miner",
@@ -88,9 +88,9 @@ func TestStreamContainerLogsTTYPythonLikeFollowDoesNotReturnEmptyLogs(t *testing
 
 func TestStreamMultiplexedLogsContextCancelDoesNotDeadlock(t *testing.T) {
 	var stream bytes.Buffer
-	writeDockerLogFrameInternal(t, &stream, 1, "line 1\n")
-	writeDockerLogFrameInternal(t, &stream, 1, "line 2\n")
-	writeDockerLogFrameInternal(t, &stream, 1, "line 3\n")
+	writeDockerLogFrame(t, &stream, 1, "line 1\n")
+	writeDockerLogFrame(t, &stream, 1, "line 2\n")
+	writeDockerLogFrame(t, &stream, 1, "line 3\n")
 
 	logsChan := make(chan string, 1)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -120,7 +120,10 @@ func TestReadAllLogsContextCancelClosesReader(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	reader := &blockingReadCloserInternal{readStarted: make(chan struct{}), closeCalled: make(chan struct{})}
+	reader := &blockingReadCloser{
+		readStarted: make(chan struct{}),
+		closeCalled: make(chan struct{}),
+	}
 	done := make(chan error, 1)
 	go func() {
 		done <- ReadAllLogs(ctx, reader, logsChan)
@@ -148,7 +151,7 @@ func TestReadAllLogsContextCancelClosesReader(t *testing.T) {
 	}
 }
 
-func drainLogLinesInternal(logsChan chan string) []string {
+func drainLogLines(logsChan chan string) []string {
 	close(logsChan)
 
 	lines := make([]string, 0, len(logsChan))
@@ -159,25 +162,21 @@ func drainLogLinesInternal(logsChan chan string) []string {
 	return lines
 }
 
-func writeDockerLogFrameInternal(t *testing.T, buffer *bytes.Buffer, streamType byte, payload string) {
+func writeDockerLogFrame(t *testing.T, buffer *bytes.Buffer, streamType byte, payload string) {
 	t.Helper()
 
-	header := make([]byte, 8)
-	header[0] = streamType
-	binary.BigEndian.PutUint32(header[4:], uint32(len(payload)))
-
-	_, err := buffer.Write(header)
+	_, err := buffer.Write(binary.BigEndian.AppendUint32([]byte{streamType, 0, 0, 0}, uint32(len(payload))))
 	require.NoError(t, err)
 	_, err = buffer.WriteString(payload)
 	require.NoError(t, err)
 }
 
-type blockingReadCloserInternal struct {
+type blockingReadCloser struct {
 	readStarted chan struct{}
 	closeCalled chan struct{}
 }
 
-func (r *blockingReadCloserInternal) Read(_ []byte) (int, error) {
+func (r *blockingReadCloser) Read(_ []byte) (int, error) {
 	select {
 	case <-r.readStarted:
 	default:
@@ -188,7 +187,7 @@ func (r *blockingReadCloserInternal) Read(_ []byte) (int, error) {
 	return 0, io.EOF
 }
 
-func (r *blockingReadCloserInternal) Close() error {
+func (r *blockingReadCloser) Close() error {
 	select {
 	case <-r.closeCalled:
 	default:

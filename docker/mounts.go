@@ -10,6 +10,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
+	kit "go.getarcane.app/kit/pkg"
 )
 
 // MountForSubpath returns a Mount that exposes a subpath of one of the
@@ -46,10 +47,7 @@ func MountForSubpath(mounts []container.MountPoint, containerPath, target string
 	var best *container.MountPoint
 	for i := range mounts {
 		m := &mounts[i]
-		if m.Destination == "" {
-			continue
-		}
-		if !pathHasPrefixInternal(containerPath, m.Destination) {
+		if m.Destination == "" || !pathHasPrefix(containerPath, m.Destination) {
 			continue
 		}
 		if best == nil || len(m.Destination) > len(best.Destination) {
@@ -61,27 +59,34 @@ func MountForSubpath(mounts []container.MountPoint, containerPath, target string
 	}
 
 	relative := strings.TrimPrefix(strings.TrimPrefix(containerPath, best.Destination), "/")
-	readOnly := !best.RW
 
 	switch best.Type { //nolint:exhaustive // only bind and volume mounts are translatable; the default returns nil for the rest
 	case mount.TypeBind:
 		if strings.TrimSpace(best.Source) == "" {
 			return nil
 		}
-		source := best.Source
-		if relative != "" {
-			source = strings.TrimRight(source, "/") + "/" + relative
+		return &mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   kit.Ternary(relative != "", strings.TrimRight(best.Source, "/")+"/"+relative, best.Source),
+			Target:   target,
+			ReadOnly: !best.RW,
 		}
-		return &mount.Mount{Type: mount.TypeBind, Source: source, Target: target, ReadOnly: readOnly}
 	case mount.TypeVolume:
 		if strings.TrimSpace(best.Name) == "" {
 			return nil
 		}
-		m := &mount.Mount{Type: mount.TypeVolume, Source: best.Name, Target: target, ReadOnly: readOnly}
-		if relative != "" {
-			m.VolumeOptions = &mount.VolumeOptions{Subpath: relative}
+		return &mount.Mount{
+			Type:     mount.TypeVolume,
+			Source:   best.Name,
+			Target:   target,
+			ReadOnly: !best.RW,
+			VolumeOptions: func() *mount.VolumeOptions {
+				if relative == "" {
+					return nil
+				}
+				return &mount.VolumeOptions{Subpath: relative}
+			}(),
 		}
-		return m
 	default:
 		return nil
 	}
@@ -98,7 +103,7 @@ func MountForEnclosingPath(mounts []container.MountPoint, containerPath, target 
 	var best *container.MountPoint
 	for i := range mounts {
 		m := &mounts[i]
-		if m.Destination == "" || !pathHasPrefixInternal(containerPath, m.Destination) {
+		if m.Destination == "" || !pathHasPrefix(containerPath, m.Destination) {
 			continue
 		}
 		if best == nil || len(m.Destination) > len(best.Destination) {
@@ -126,7 +131,7 @@ func NestedMounts(mounts []container.MountPoint, containerPath, target string) [
 	}
 	var nested []mount.Mount
 	for _, m := range mounts {
-		if m.Destination == containerPath || !pathHasPrefixInternal(m.Destination, containerPath) {
+		if m.Destination == containerPath || !pathHasPrefix(m.Destination, containerPath) {
 			continue
 		}
 		relative := strings.TrimPrefix(strings.TrimPrefix(m.Destination, containerPath), "/")
@@ -138,10 +143,10 @@ func NestedMounts(mounts []container.MountPoint, containerPath, target string) [
 	return nested
 }
 
-// pathHasPrefixInternal reports whether containerPath is at or under prefix,
+// pathHasPrefix reports whether containerPath is at or under prefix,
 // treating both as POSIX-style paths. Avoids false positives like
 // "/app/datax" matching "/app/data".
-func pathHasPrefixInternal(containerPath, prefix string) bool {
+func pathHasPrefix(containerPath, prefix string) bool {
 	if containerPath == prefix {
 		return true
 	}
@@ -167,19 +172,27 @@ func MountForDestination(mounts []container.MountPoint, destination, target stri
 			continue
 		}
 
-		readOnly := !m.RW
-
 		switch m.Type {
 		case mount.TypeVolume:
 			if strings.TrimSpace(m.Name) == "" {
 				return nil
 			}
-			return &mount.Mount{Type: mount.TypeVolume, Source: m.Name, Target: target, ReadOnly: readOnly}
+			return &mount.Mount{
+				Type:     mount.TypeVolume,
+				Source:   m.Name,
+				Target:   target,
+				ReadOnly: !m.RW,
+			}
 		case mount.TypeBind:
 			if strings.TrimSpace(m.Source) == "" {
 				return nil
 			}
-			return &mount.Mount{Type: mount.TypeBind, Source: m.Source, Target: target, ReadOnly: readOnly}
+			return &mount.Mount{
+				Type:     mount.TypeBind,
+				Source:   m.Source,
+				Target:   target,
+				ReadOnly: !m.RW,
+			}
 		case mount.TypeTmpfs:
 			return nil
 		case mount.TypeNamedPipe:
@@ -217,7 +230,7 @@ func PreserveVolumeMounts(ctx context.Context, binds []string, mounts []mount.Mo
 		})
 		if mountIndex >= 0 {
 			if mounts[mountIndex].Type == mount.TypeVolume {
-				mounts[mountIndex].Source = volumeName
+				mounts[mountIndex].Source = volumeName // keep: in-place update of the cloned slice preserves every other Mount field
 			}
 			slog.InfoContext(ctx, "Preserving volume via mount", "destination", destination, "volume", volumeName)
 			continue
