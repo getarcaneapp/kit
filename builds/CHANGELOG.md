@@ -1,3 +1,13 @@
+## builds/v0.4.6
+
+### Bug fixes
+
+* convert to keyed literals and inline helpers([b34a3a0](https://github.com/getarcaneapp/kit/commit/b34a3a0d860fbb6a1e405acaa5a14ec410690b33) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.4.5...builds/v0.4.6
+
 ## builds/v0.4.5
 
 ### Bug fixes
