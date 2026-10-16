@@ -1,3 +1,14 @@
+## updater/v0.11.8
+
+### Bug fixes
+
+* build results and plans with keyed literals([c2de58b](https://github.com/getarcaneapp/kit/commit/c2de58b55de32a916d3c90217a41ac24b03700d3) by @kmendell)
+* rename label policy merge test after inlining([508fc1d](https://github.com/getarcaneapp/kit/commit/508fc1d4adf78c0412855d3dae79bf1e4022dc9b) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.7...updater/v0.11.8
+
 ## updater/v0.11.7
 
 ### Bug fixes
