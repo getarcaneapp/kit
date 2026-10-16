@@ -1,3 +1,13 @@
+## docker/v0.1.2
+
+### Bug fixes
+
+* convert to keyed literals and drop Internal names([f4dbf02](https://github.com/getarcaneapp/kit/commit/f4dbf0275260d6343f702e5128feddc1d3c6f0a6) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.1.1...docker/v0.1.2
+
 ## docker/v0.1.1
 
 ### Bug fixes
