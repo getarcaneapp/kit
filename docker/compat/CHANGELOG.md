@@ -1,3 +1,13 @@
+## docker/compat/v0.1.4
+
+### Bug fixes
+
+* convert to keyed literals and drop Internal([d809b69](https://github.com/getarcaneapp/kit/commit/d809b6916f7be173e03c1e8e1c3d849841871ad5) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/compat/v0.1.3...docker/compat/v0.1.4
+
 ## docker/compat/v0.1.3
 
 ### Bug fixes
