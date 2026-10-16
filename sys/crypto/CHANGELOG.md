@@ -1,3 +1,14 @@
+## sys/crypto/v0.3.2
+
+### Bug fixes
+
+* inline single-use helpers and drop Internal([40b12e4](https://github.com/getarcaneapp/kit/commit/40b12e43156dfca168dc6d50cca2ba3125506d3e) by @kmendell)
+* put legacy key decoders one per line([6aff90f](https://github.com/getarcaneapp/kit/commit/6aff90f89dce49dc8fdd4aeb17a32a93ce633963) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/crypto/v0.3.1...sys/crypto/v0.3.2
+
 ## sys/crypto/v0.3.1
 
 ### Bug fixes
