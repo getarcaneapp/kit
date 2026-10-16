@@ -1,3 +1,13 @@
+## sys/cgroup/v0.2.5
+
+### Bug fixes
+
+* build limits and cache with keyed literals([d75061c](https://github.com/getarcaneapp/kit/commit/d75061c5b7ce648b0a420f38cd31c80a623c3234) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.2.4...sys/cgroup/v0.2.5
+
 ## sys/cgroup/v0.2.4
 
 ### New features
