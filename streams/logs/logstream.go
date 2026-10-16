@@ -215,12 +215,6 @@ func (h *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		base: h.base.WithAttrs(attrs),
 		b:    h.b,
 		attrs: func() []boundAttrs {
-			if len(h.attrs) == 0 {
-				return append([]boundAttrs(nil), boundAttrs{
-					groups: slices.Clone(h.group),
-					attrs:  slices.Clone(attrs),
-				})
-			}
 			copied := make([]boundAttrs, 0, len(h.attrs))
 			for _, bound := range h.attrs {
 				copied = append(copied, boundAttrs{

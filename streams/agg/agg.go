@@ -175,7 +175,7 @@ func ReconcilePollersByKey[T any](
 			return
 		}
 
-		// sync starts, restarts, and stops pollers so the set matches items exactly.
+		// Start, restart, and stop pollers so the set matches items exactly.
 		current := make(map[string]struct{}, len(items))
 		for _, item := range items {
 			key := keyFunc(item)
@@ -188,7 +188,7 @@ func ReconcilePollersByKey[T any](
 			}
 			current[key] = struct{}{}
 
-			// ensure keeps a poller running for key, restarting it when version changes.
+			// Keep a poller running for key, restarting it when version changes.
 			if existing, ok := set.active[key]; ok {
 				if existing.version == version {
 					continue
