@@ -1,3 +1,14 @@
+## streams/v0.4.6
+
+### Bug fixes
+
+* convert to keyed literals and drop Internal([9bdba55](https://github.com/getarcaneapp/kit/commit/9bdba55ee93eee49e99c11a3c71880f7e6b3e5b8) by @kmendell)
+* drop stale helper names and a redundant branch([a2d6eb4](https://github.com/getarcaneapp/kit/commit/a2d6eb450a439402d8a8947709a777fcdb9b9126) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/streams/v0.4.5...streams/v0.4.6
+
 ## streams/v0.4.5
 
 ### Bug fixes

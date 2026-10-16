@@ -6,7 +6,7 @@ replace go.getarcane.app/kit => ../
 
 require (
 	github.com/moby/moby/api v1.56.1
-	go.getarcane.app/kit v0.4.1
+	go.getarcane.app/kit v0.4.2
 )
 
 require (
