@@ -1,3 +1,13 @@
+## acfs/v0.6.3
+
+### Bug fixes
+
+* convert to composite literal layout([5cee732](https://github.com/getarcaneapp/kit/commit/5cee7328dc01a756f609a64474dcce6f1a09e26f) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/acfs/v0.6.2...acfs/v0.6.3
+
 ## acfs/v0.6.2
 
 ### New features
