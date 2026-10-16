@@ -57,7 +57,11 @@ func InitEncryption(cfg *Config) {
 		panic(err.Error())
 	}
 	var legacy [][]byte
-	for _, decode := range []func(string) ([]byte, error){hex.DecodeString, base64.StdEncoding.DecodeString, base64.RawStdEncoding.DecodeString} {
+	for _, decode := range []func(string) ([]byte, error){
+		hex.DecodeString,
+		base64.StdEncoding.DecodeString,
+		base64.RawStdEncoding.DecodeString,
+	} {
 		if decoded, decodeErr := decode(keyStr); decodeErr == nil && len(decoded) >= KeySize {
 			legacy = append(legacy, bytes.Clone(decoded[:KeySize]))
 		}
