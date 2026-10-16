@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"cmp"
 	"context"
 	"maps"
 	"slices"
@@ -15,11 +16,11 @@ type memoryPendingStore struct {
 
 // NewMemoryPendingStore returns an in-memory pending update store.
 func NewMemoryPendingStore(records ...ImageUpdateRecord) PendingStore {
-	store := &memoryPendingStore{records: make(map[string]ImageUpdateRecord, len(records))}
+	byKey := make(map[string]ImageUpdateRecord, len(records))
 	for _, record := range records {
-		store.records[memoryPendingStoreKey(record)] = record
+		byKey[strconv.Quote(record.ContainerID)+":"+strconv.Quote(cmp.Or(record.ID, record.ImageRef()))] = record
 	}
-	return store
+	return &memoryPendingStore{records: byKey}
 }
 
 func (s *memoryPendingStore) PendingImageUpdates(ctx context.Context) ([]ImageUpdateRecord, error) {
@@ -47,14 +48,6 @@ func (s *memoryPendingStore) ClearImageUpdateRecord(ctx context.Context, record 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.records, memoryPendingStoreKey(record))
+	delete(s.records, strconv.Quote(record.ContainerID)+":"+strconv.Quote(cmp.Or(record.ID, record.ImageRef())))
 	return nil
-}
-
-func memoryPendingStoreKey(record ImageUpdateRecord) string {
-	key := record.ID
-	if key == "" {
-		key = record.ImageRef()
-	}
-	return strconv.Quote(record.ContainerID) + ":" + strconv.Quote(key)
 }

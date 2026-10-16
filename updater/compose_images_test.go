@@ -51,7 +51,7 @@ func TestPreflightComposeImage(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			service := newService(Config{ProjectUpdater: tt.adapter, SelfContainerID: tt.selfID})
+			service := newServiceForTest(t, Config{ProjectUpdater: tt.adapter, SelfContainerID: tt.selfID})
 			_, err := service.preflightComposeImage(t.Context(), "self", container.InspectResponse{Config: &container.Config{Image: "app:1", Labels: tt.labels}}, tt.newRef)
 			if (err != nil) != tt.wantError {
 				t.Fatalf("error = %v, wantError %v", err, tt.wantError)
@@ -84,7 +84,7 @@ func TestUpdateComposeImage(t *testing.T) {
 					http.NotFound(w, r)
 				}
 			})
-			service := newService(Config{ProjectUpdater: adapter, DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}})
+			service := newServiceForTest(t, Config{ProjectUpdater: adapter, DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}})
 			inspect := container.InspectResponse{
 				Image:  "sha256:same",
 				Config: &container.Config{Image: "app:1", Labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}},

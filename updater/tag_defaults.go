@@ -28,7 +28,12 @@ func (l defaultRegistryTagLister) ListTags(ctx context.Context, imageRef string)
 	}
 	var credential *authn.AuthConfig
 	if ok {
-		credential = &authn.AuthConfig{Username: authConfig.Username, Password: authConfig.Password, IdentityToken: authConfig.IdentityToken, RegistryToken: authConfig.RegistryToken}
+		credential = &authn.AuthConfig{
+			Username:      authConfig.Username,
+			Password:      authConfig.Password,
+			IdentityToken: authConfig.IdentityToken,
+			RegistryToken: authConfig.RegistryToken,
+		}
 	}
 	return registry.FetchTags(ctx, parsed.RegistryHost, parsed.Repository, credential, l.httpClient)
 }

@@ -3,6 +3,8 @@ package updater
 import (
 	"strings"
 	"time"
+
+	kit "go.getarcane.app/kit/pkg"
 )
 
 // Options configures an updater run.
@@ -117,8 +119,8 @@ func (i ImageUpdateRecord) NewImageRef() string {
 	if repo == "" {
 		return ""
 	}
-	if i.IsTagUpdate() && i.LatestVersion != nil && strings.TrimSpace(*i.LatestVersion) != "" {
-		return repo + ":" + strings.TrimSpace(*i.LatestVersion)
+	if i.IsTagUpdate() && strings.TrimSpace(kit.FromPtr(i.LatestVersion)) != "" {
+		return repo + ":" + strings.TrimSpace(kit.FromPtr(i.LatestVersion))
 	}
 	return i.ImageRef()
 }

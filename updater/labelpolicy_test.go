@@ -42,7 +42,10 @@ func TestDefaultLabelPolicy(t *testing.T) {
 // the old all-or-nothing merge silently dropped them.
 func TestMergeLabelPolicyDefaultsFillsPerField(t *testing.T) {
 	custom := func(map[string]string) bool { return true }
-	merged := mergeLabelPolicyDefaults(LabelPolicy{IsUpdateDisabledFunc: custom})
+	merged := newServiceForTest(t, Config{
+		DockerClientProvider: &fakeDockerClientProvider{},
+		LabelPolicy:          LabelPolicy{IsUpdateDisabledFunc: custom},
+	}).config.LabelPolicy
 
 	if !merged.IsUpdateDisabled(nil) {
 		t.Fatal("caller-provided IsUpdateDisabledFunc was replaced")

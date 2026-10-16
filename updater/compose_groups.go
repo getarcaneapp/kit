@@ -3,6 +3,9 @@ package updater
 import (
 	"context"
 	"fmt"
+	"slices"
+
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/internal/deps"
@@ -20,17 +23,11 @@ type composeGroup struct {
 // buildComposeGroups groups planned Compose containers by resolved project, flagging conflicting service targets.
 func (s *Service) buildComposeGroups(ctx context.Context, sorted []deps.ContainerWithDeps, plansByName map[string]*restartPlan) map[string]composeGroup {
 	groups := map[string]composeGroup{}
-	if s.config.ProjectUpdater == nil {
-		return groups
-	}
-
 	for _, candidate := range sorted {
-		plan := plansByName[candidate.Name]
-		if plan == nil || plan.newRef == "" || plan.inspect == nil || plan.inspect.Config == nil || s.config.LabelPolicy.IsSelfUpdateTarget(plan.inspect.Config.Labels) {
-			continue
-		}
-		projectName, serviceName := compose.ProjectLabel(plan.inspect.Config.Labels), compose.ServiceLabel(plan.inspect.Config.Labels)
-		if projectName == "" || serviceName == "" {
+		plan := kit.FromPtr(plansByName[candidate.Name])
+		labels := kit.FromPtr(kit.FromPtr(plan.inspect).Config).Labels
+		projectName, serviceName := compose.ProjectLabel(labels), compose.ServiceLabel(labels)
+		if plan.newRef == "" || kit.FromPtr(plan.inspect).Config == nil || s.config.LabelPolicy.IsSelfUpdateTarget(labels) || projectName == "" || serviceName == "" {
 			continue
 		}
 		project, err := s.config.ProjectUpdater.ProjectByComposeName(ctx, projectName)
@@ -38,21 +35,17 @@ func (s *Service) buildComposeGroups(ctx context.Context, sorted []deps.Containe
 			continue
 		}
 		group := groups[project.ID]
-		group.projectName = projectName
-		if group.images == nil {
-			group.images = map[string]types.ServiceImageChange{}
-		}
 		change := types.ServiceImageChange{ExpectedRef: plan.inspect.Config.Image, TargetRef: plan.newRef}
 		previous, seen := group.images[serviceName]
-		if seen && previous != change {
-			group.err = fmt.Errorf("conflicting targets for compose service %s/%s", projectName, serviceName)
+		images := kit.Ternary(group.images == nil, map[string]types.ServiceImageChange{}, group.images)
+		images[serviceName] = change
+		groups[project.ID] = composeGroup{
+			images:      images,
+			tagChanges:  group.tagChanges || isComposeTagChange(plan.inspect, plan.newRef),
+			err:         kit.Ternary(seen && previous != change, fmt.Errorf("conflicting targets for compose service %s/%s", projectName, serviceName), group.err),
+			projectName: projectName,
+			services:    slices.Concat(group.services, kit.Ternary(seen, nil, []string{serviceName})),
 		}
-		if !seen {
-			group.services = append(group.services, serviceName)
-		}
-		group.images[serviceName] = change
-		group.tagChanges = group.tagChanges || isComposeTagChange(plan.inspect, plan.newRef)
-		groups[project.ID] = group
 	}
 	return groups
 }

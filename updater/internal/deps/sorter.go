@@ -62,25 +62,23 @@ func (s *ContainerSorter) Sort() ([]ContainerWithDeps, error) {
 // ExtractContainerDeps extracts dependency information from a container
 // inspect response, keyed by the caller's display name for the container.
 func ExtractContainerDeps(ctx context.Context, name string, cnt container.Summary, inspect container.InspectResponse) ContainerWithDeps {
+	var links []string
+	for _, link := range kit.FromPtr(inspect.HostConfig).Links {
+		linkName, _, _ := strings.Cut(link, ":")
+		links = append(links, strings.TrimPrefix(linkName, "/"))
+	}
+	deps, hasDeps := kit.FromPtr(inspect.Config).Labels[labels.LabelDependsOn]
 	c := ContainerWithDeps{
 		Container: cnt,
 		Inspect:   inspect,
 		Name:      name,
-	}
-
-	if inspect.HostConfig != nil {
-		for _, link := range inspect.HostConfig.Links {
-			linkName, _, _ := strings.Cut(link, ":")
-			c.Links = append(c.Links, strings.TrimPrefix(linkName, "/"))
-		}
-		if inspect.HostConfig.NetworkMode.IsContainer() {
-			c.NetworkDeps = append(c.NetworkDeps, inspect.HostConfig.NetworkMode.ConnectedContainer())
-		}
-	}
-	if inspect.Config != nil {
-		if deps, ok := inspect.Config.Labels[labels.LabelDependsOn]; ok {
-			c.DependsOn = kit.TrimNonEmpty(strings.Split(deps, ","))
-		}
+		Links:     links,
+		DependsOn: kit.Ternary(hasDeps, kit.TrimNonEmpty(strings.Split(deps, ",")), nil),
+		NetworkDeps: kit.Ternary(
+			kit.FromPtr(inspect.HostConfig).NetworkMode.IsContainer(),
+			[]string{kit.FromPtr(inspect.HostConfig).NetworkMode.ConnectedContainer()},
+			nil,
+		),
 	}
 
 	slog.DebugContext(ctx, "ExtractContainerDeps: extracted dependencies", "container", c.Name, "links", c.Links, "dependsOn", c.DependsOn, "networkDeps", c.NetworkDeps)
@@ -132,6 +130,6 @@ func (s *ContainerSorter) visit(c ContainerWithDeps, path []string) error {
 	}
 
 	s.visited[c.Name] = true
-	s.sorted = append(s.sorted, c)
+	s.sorted = append(s.sorted, c) // keep: sorter accumulates the order across recursive visits
 	return nil
 }

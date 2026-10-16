@@ -81,7 +81,7 @@ func TestApplyPendingSkipsUnchangedPulledImage(t *testing.T) {
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		PendingStore:         store,
 		ImagePuller:          puller,
@@ -130,7 +130,7 @@ func TestApplyPendingForceBypassesUnchangedPulledImageSkip(t *testing.T) {
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		PendingStore:         store,
 		ImagePuller:          puller,
@@ -193,7 +193,7 @@ func TestApplyPendingUsesRecordDigestBeforeResolver(t *testing.T) {
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider:   &fakeDockerClientProvider{client: dockerClient},
 		PendingStore:           store,
 		ImagePuller:            puller,
@@ -250,7 +250,7 @@ func TestApplyPendingReportsUpToDateWhenKnownDigestMatchesAnyLocalRepoDigest(t *
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider:   &fakeDockerClientProvider{client: dockerClient},
 		PendingStore:           store,
 		ImagePuller:            puller,
@@ -315,7 +315,7 @@ func TestApplyPendingRestartsStaleContainersWhenImageAlreadyPulled(t *testing.T)
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		PendingStore:         store,
 		ImagePuller:          puller,
@@ -362,7 +362,7 @@ func TestApplyPendingReusesDockerClientWhileBuildingPlans(t *testing.T) {
 		}
 	})
 	provider := &fakeDockerClientProvider{client: dockerClient}
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: provider,
 		PendingStore:         store,
 		ImagePuller:          &fakePuller{err: errors.New("stop before restart")},
@@ -422,7 +422,7 @@ func TestApplyPendingKeepsPulledRecordWhenRestartFails(t *testing.T) {
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		PendingStore:         store,
 		ImagePuller:          puller,

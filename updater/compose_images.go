@@ -9,6 +9,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"go.getarcane.app/docker/compat"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/updater/internal/compose"
 	"go.getarcane.app/updater/refs"
@@ -42,9 +43,9 @@ func (s *Service) preflightComposeImage(ctx context.Context, containerID string,
 // isComposeTagChange reports whether recreating a Compose container as newRef changes its configured image,
 // which only a ProjectImageUpdater can persist.
 func isComposeTagChange(inspect *container.InspectResponse, newRef string) bool {
-	return inspect != nil && inspect.Config != nil &&
-		refs.NormalizeImageUpdateRef(inspect.Config.Image) != refs.NormalizeImageUpdateRef(newRef) &&
-		(compose.ProjectLabel(inspect.Config.Labels) != "" || compose.ServiceLabel(inspect.Config.Labels) != "")
+	config := kit.FromPtr(kit.FromPtr(inspect).Config)
+	return refs.NormalizeImageUpdateRef(config.Image) != refs.NormalizeImageUpdateRef(newRef) &&
+		(compose.ProjectLabel(config.Labels) != "" || compose.ServiceLabel(config.Labels) != "")
 }
 
 // verifyComposeService checks that a service's running containers run targetRef or, without a target,
@@ -86,7 +87,7 @@ func verifyComposeService(ctx context.Context, dockerClient *client.Client, proj
 		case targetID == "" && currentImageID == oldImageID:
 			return fmt.Errorf("compose service %s/%s still running old image %s after update", projectName, serviceName, oldImageID)
 		case targetID != "" && (current.Config == nil || refs.NormalizeImageUpdateRef(current.Config.Image) != refs.NormalizeImageUpdateRef(targetRef) ||
-			currentImageID != targetID || current.State == nil || !current.State.Running):
+			currentImageID != targetID || !kit.FromPtr(current.State).Running):
 			return fmt.Errorf("compose service %s/%s container %s does not run target %s (%s)", projectName, serviceName, cnt.ID, targetRef, targetID)
 		}
 	}

@@ -28,12 +28,18 @@ func (l *testTagLister) ListTags(ctx context.Context, _ string) ([]string, error
 func TestCheckTagLabelDefaultsAndOverrides(t *testing.T) {
 	values := map[string]string{labels.LabelUpdateStrategy: " tag ", labels.LabelUpdateConstraint: " 3.x ", labels.LabelUpdateTagPattern: ` (?P<version>.*)-alpine `}
 	want := types.Policy{Strategy: "tag", Constraint: "3.x", TagPattern: `(?P<version>.*)-alpine`}
-	merged := mergeLabelPolicyDefaults(LabelPolicy{IsAgentFunc: func(map[string]string) bool { return true }})
+	merged := newServiceForTest(t, Config{
+		DockerClientProvider: &fakeDockerClientProvider{},
+		LabelPolicy:          LabelPolicy{IsAgentFunc: func(map[string]string) bool { return true }},
+	}).config.LabelPolicy
 	if got := merged.TagPolicy(values); got != want {
 		t.Fatalf("TagPolicy = %+v, want %+v", got, want)
 	}
 	override := types.Policy{Strategy: "tag", Constraint: "4.x"}
-	merged = mergeLabelPolicyDefaults(LabelPolicy{TagPolicyFunc: func(map[string]string) types.Policy { return override }})
+	merged = newServiceForTest(t, Config{
+		DockerClientProvider: &fakeDockerClientProvider{},
+		LabelPolicy:          LabelPolicy{TagPolicyFunc: func(map[string]string) types.Policy { return override }},
+	}).config.LabelPolicy
 	if got := merged.TagPolicy(values); got != override {
 		t.Fatalf("override lost: %+v", got)
 	}

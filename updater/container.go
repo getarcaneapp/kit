@@ -81,7 +81,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		return out, nil
 	}
 
-	selection, selectionErr := s.selectImageTag(ctx, normalizedRef, s.config.LabelPolicy.TagPolicy(labels))
+	selection, selectionErr := s.selectImageTag(ctx, "", normalizedRef, s.config.LabelPolicy.TagPolicy(labels))
 	if selectionErr != nil {
 		appendResult(out, failedContainerResult(target.ID, name, selectionErr.Error()))
 		return out, nil
@@ -94,16 +94,17 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	}
 	if opts.DryRun {
 		appendResult(out, ResourceResult{
-			ResourceID: target.ID, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusSkipped,
-			UpdateAvailable: selection.UpdateAvailable, OldImage: imageRef, NewImage: normalizedRef,
+			ResourceID:      target.ID,
+			ResourceName:    name,
+			ResourceType:    ResourceTypeContainer,
+			Status:          StatusSkipped,
+			UpdateAvailable: selection.UpdateAvailable,
+			OldImage:        imageRef,
+			NewImage:        normalizedRef,
 		})
 		return out, nil
 	}
 
-	if s.config.ImagePuller == nil {
-		appendResult(out, failedContainerResult(target.ID, name, ErrImagePullerRequired.Error()))
-		return out, nil
-	}
 	if pullErr := s.config.ImagePuller.PullImage(ctx, normalizedRef, io.Discard); pullErr != nil {
 		appendResult(out, failedContainerResult(target.ID, name, fmt.Sprintf("pull failed: %v", pullErr)))
 		return out, nil
@@ -121,19 +122,25 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	}
 
 	selfUpdate := s.isSelfUpdateCandidate(target.ID, labels)
-	var updateErr error
-	if selfUpdate {
-		updateErr = s.triggerSelfUpdate(ctx, target.ID, name, normalizedRef, labels)
-	} else {
-		updateErr = s.updateComposeOrStandalone(ctx, target, inspect, normalizedRef)
-	}
+	updateErr := func() error {
+		if selfUpdate {
+			return s.triggerSelfUpdate(ctx, target.ID, name, normalizedRef, labels)
+		}
+		return s.updateComposeOrStandalone(ctx, target, inspect, normalizedRef)
+	}()
 	if updateErr != nil {
 		appendResult(out, failedContainerResult(target.ID, name, updateErr.Error()))
 		return out, nil
 	}
 	appendResult(out, ResourceResult{
-		ResourceID: target.ID, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusUpdated,
-		UpdateAvailable: true, UpdateApplied: true, OldImage: inspect.Image, NewImage: normalizedRef,
+		ResourceID:      target.ID,
+		ResourceName:    name,
+		ResourceType:    ResourceTypeContainer,
+		Status:          StatusUpdated,
+		UpdateAvailable: true,
+		UpdateApplied:   true,
+		OldImage:        inspect.Image,
+		NewImage:        normalizedRef,
 	})
 	if !selfUpdate {
 		_ = s.notify(ctx, target.ID, name, imageRef, inspect.Image, normalizedRef)
@@ -146,7 +153,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 // re-pulled old tag leaves its tag update pending. Records are cleared as stored, since stores key by ID.
 func (s *Service) clearPendingRecord(ctx context.Context, containerID, imageRef string) {
 	normalized := refs.NormalizeImageUpdateRef(imageRef)
-	if s.config.PendingStore == nil || normalized == "" {
+	if normalized == "" {
 		return
 	}
 	records, err := s.config.PendingStore.PendingImageUpdates(ctx)
@@ -194,7 +201,7 @@ func (s *Service) updateComposeOrStandalone(ctx context.Context, target containe
 		}
 		return verifyComposeService(ctx, dockerClient, projectName, serviceName, "", newRef)
 	}
-	if projectName != "" && serviceName != "" && s.config.ProjectUpdater != nil {
+	if projectName != "" && serviceName != "" {
 		project, err := s.config.ProjectUpdater.ProjectByComposeName(ctx, projectName)
 		if err == nil {
 			// Never fall back once Compose owns the update, or a standalone recreate could clobber a partial up.
@@ -223,9 +230,7 @@ func (s *Service) updateComposeOrStandalone(ctx context.Context, target containe
 // createStartOrRollback recreates the container as newRef, spelled like its configured image, and
 // recreates it from its old image ID when that fails.
 func (s *Service) createStartOrRollback(ctx context.Context, dockerClient *client.Client, cnt container.Summary, inspect container.InspectResponse, newRef string) error {
-	if inspect.Config != nil {
-		newRef = refs.PreserveConfiguredRef(inspect.Config.Image, newRef)
-	}
+	newRef = kit.Ternary(inspect.Config == nil, newRef, refs.PreserveConfiguredRef(kit.FromPtr(inspect.Config).Image, newRef))
 	name := containerSummaryName(cnt)
 	createdID, err := s.createAndStartStandaloneContainer(ctx, dockerClient, cnt, inspect, newRef)
 	if err == nil {
@@ -233,10 +238,10 @@ func (s *Service) createStartOrRollback(ctx context.Context, dockerClient *clien
 	}
 	s.removeFailedCreatedContainer(ctx, dockerClient, createdID, name)
 
-	rollbackID, rollbackErr := "", errors.New("old image ID unavailable")
-	if strings.TrimSpace(inspect.Image) != "" {
-		rollbackID, rollbackErr = s.createAndStartStandaloneContainer(ctx, dockerClient, cnt, inspect, inspect.Image)
+	if strings.TrimSpace(inspect.Image) == "" {
+		return fmt.Errorf("%w; rollback failed: %w", err, errors.New("old image ID unavailable"))
 	}
+	rollbackID, rollbackErr := s.createAndStartStandaloneContainer(ctx, dockerClient, cnt, inspect, inspect.Image)
 	if rollbackErr != nil {
 		s.removeFailedCreatedContainer(ctx, dockerClient, rollbackID, name)
 		return fmt.Errorf("%w; rollback failed: %w", err, rollbackErr)
@@ -261,7 +266,7 @@ func (s *Service) stopAndRemoveStandaloneContainer(ctx context.Context, dockerCl
 
 	removeCtx, cancelRemove := s.opCtx(ctx)
 	defer cancelRemove()
-	if inspect.HostConfig != nil && inspect.HostConfig.AutoRemove {
+	if kit.FromPtr(inspect.HostConfig).AutoRemove {
 		// The daemon removes --rm containers once stopped; wait so the name is free for the recreate.
 		wait := dockerClient.ContainerWait(removeCtx, cnt.ID, client.ContainerWaitOptions{Condition: container.WaitConditionRemoved})
 		select {
@@ -285,13 +290,29 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 	if err != nil {
 		s.logger.WarnContext(ctx, "could not inspect previous image; keeping its inherited container config", "image", inspect.Image, "error", err)
 	}
+	hostConfig, _, _, err := compat.PrepareRecreateHostConfigForEngine(ctx, dockerClient, inspect.HostConfig)
+	if err != nil {
+		return "", fmt.Errorf("prepare host config: %w", err)
+	}
+	networkMode := kit.FromPtr(hostConfig).NetworkMode
+	if hostConfig != nil {
+		// keep: hostConfig is the compat package's prepared copy; a full HostConfig literal reads worse
+		hostConfig.Binds, hostConfig.Mounts = pinVolumeMounts(hostConfig.Binds, hostConfig.Mounts, inspect.Mounts)
+	}
+	if networkMode.IsContainer() {
+		// keep: hostConfig is the compat package's prepared copy; a full HostConfig literal reads worse
+		hostConfig.PortBindings, hostConfig.PublishAllPorts = nil, false
+	}
+
 	// Drop what the container inherited from its old image so the daemon merges in the new image's
 	// defaults, as on a fresh create; an unknown old image strips nothing.
 	imageConfig := cmp.Or(oldImage.Config, &dockerspec.DockerOCIImageConfig{})
 	portBindings := kit.FromPtr(inspect.HostConfig).PortBindings
+	// keep: by-value copy of the inspected config; a full 25-field container.Config literal reads worse
 	cfg := new(kit.FromPtr(inspect.Config))
 	cfg.Image = imageRef
-	cfg.Hostname = kit.Ternary(cfg.Hostname == inspect.ID[:min(12, len(inspect.ID))], "", cfg.Hostname)
+	cfg.Hostname = kit.Ternary(cfg.Hostname == inspect.ID[:min(12, len(inspect.ID))] || networkMode.IsHost() || networkMode.IsContainer(), "", cfg.Hostname)
+	cfg.Domainname = kit.Ternary(networkMode.IsHost() || networkMode.IsContainer(), "", cfg.Domainname)
 	cfg.Env = slices.DeleteFunc(slices.Clone(cfg.Env), func(env string) bool { return slices.Contains(imageConfig.Env, env) })
 	cfg.Labels = maps.Clone(cfg.Labels)
 	maps.DeleteFunc(cfg.Labels, func(key, value string) bool {
@@ -303,7 +324,7 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 		_, ok := imageConfig.Volumes[target]
 		return ok
 	})
-	cfg.ExposedPorts = maps.Clone(cfg.ExposedPorts)
+	cfg.ExposedPorts = kit.Ternary(networkMode.IsContainer(), nil, maps.Clone(cfg.ExposedPorts))
 	maps.DeleteFunc(cfg.ExposedPorts, func(port network.Port, _ struct{}) bool {
 		_, exposed := imageConfig.ExposedPorts[port.String()]
 		_, bound := portBindings[port]
@@ -323,31 +344,14 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 	cfg.Shell = kit.Ternary(slices.Equal(cfg.Shell, imageConfig.Shell), nil, cfg.Shell)
 	cfg.OnBuild = kit.Ternary(slices.Equal(cfg.OnBuild, imageConfig.OnBuild), nil, cfg.OnBuild)
 	if cfg.Healthcheck != nil && imageConfig.Healthcheck != nil {
-		health, imageHealth := *cfg.Healthcheck, imageConfig.Healthcheck
-		health.Test = kit.Ternary(slices.Equal(health.Test, imageHealth.Test), nil, health.Test)
-		health.Interval = kit.Ternary(health.Interval == imageHealth.Interval, 0, health.Interval)
-		health.Timeout = kit.Ternary(health.Timeout == imageHealth.Timeout, 0, health.Timeout)
-		health.StartPeriod = kit.Ternary(health.StartPeriod == imageHealth.StartPeriod, 0, health.StartPeriod)
-		health.StartInterval = kit.Ternary(health.StartInterval == imageHealth.StartInterval, 0, health.StartInterval)
-		health.Retries = kit.Ternary(health.Retries == imageHealth.Retries, 0, health.Retries)
-		cfg.Healthcheck = &health
-	}
-
-	hostConfig, _, _, err := compat.PrepareRecreateHostConfigForEngine(ctx, dockerClient, inspect.HostConfig)
-	if err != nil {
-		return "", fmt.Errorf("prepare host config: %w", err)
-	}
-	var networkMode container.NetworkMode
-	if hostConfig != nil {
-		networkMode = hostConfig.NetworkMode
-		pinVolumeMounts(hostConfig, inspect.Mounts)
-	}
-	if networkMode.IsHost() || networkMode.IsContainer() {
-		cfg.Hostname, cfg.Domainname = "", ""
-	}
-	if networkMode.IsContainer() {
-		cfg.ExposedPorts = nil
-		hostConfig.PortBindings, hostConfig.PublishAllPorts = nil, false
+		cfg.Healthcheck = new(container.HealthConfig{
+			Test:          kit.Ternary(slices.Equal(cfg.Healthcheck.Test, imageConfig.Healthcheck.Test), nil, cfg.Healthcheck.Test),
+			Interval:      kit.Ternary(cfg.Healthcheck.Interval == imageConfig.Healthcheck.Interval, 0, cfg.Healthcheck.Interval),
+			Timeout:       kit.Ternary(cfg.Healthcheck.Timeout == imageConfig.Healthcheck.Timeout, 0, cfg.Healthcheck.Timeout),
+			StartPeriod:   kit.Ternary(cfg.Healthcheck.StartPeriod == imageConfig.Healthcheck.StartPeriod, 0, cfg.Healthcheck.StartPeriod),
+			StartInterval: kit.Ternary(cfg.Healthcheck.StartInterval == imageConfig.Healthcheck.StartInterval, 0, cfg.Healthcheck.StartInterval),
+			Retries:       kit.Ternary(cfg.Healthcheck.Retries == imageConfig.Healthcheck.Retries, 0, cfg.Healthcheck.Retries),
+		})
 	}
 
 	apiVersion := compat.DetectDockerAPIVersion(ctx, dockerClient)
@@ -373,11 +377,14 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 		}
 	}
 
-	var networkingConfig *network.NetworkingConfig
-	if !networkMode.IsContainer() && inspect.NetworkSettings != nil {
+	networkingConfig := func() *network.NetworkingConfig {
+		if networkMode.IsContainer() {
+			return nil
+		}
 		shortID := inspect.ID[:min(12, len(inspect.ID))]
-		endpoints := make(map[string]*network.EndpointSettings, len(inspect.NetworkSettings.Networks))
-		for networkName, endpoint := range inspect.NetworkSettings.Networks {
+		networks := kit.FromPtr(inspect.NetworkSettings).Networks
+		endpoints := make(map[string]*network.EndpointSettings, len(networks))
+		for networkName, endpoint := range networks {
 			endpoint = cmp.Or(endpoint, &network.EndpointSettings{})
 			// Pre-1.44 inspect lists the old short ID as an alias; carrying it over would accumulate them.
 			endpoints[networkName] = &network.EndpointSettings{
@@ -390,9 +397,10 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 			}
 		}
 		if sanitized := compat.SanitizeContainerCreateEndpointSettingsForDockerAPI(endpoints, apiVersion); len(sanitized) > 0 {
-			networkingConfig = &network.NetworkingConfig{EndpointsConfig: sanitized}
+			return &network.NetworkingConfig{EndpointsConfig: sanitized}
 		}
-	}
+		return nil
+	}()
 
 	createCtx, cancelCreate := s.opCtx(ctx)
 	resp, err := compat.ContainerCreateWithCompatibilityForAPIVersion(createCtx, dockerClient, client.ContainerCreateOptions{
@@ -407,7 +415,7 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 	}
 	_ = s.recordEvent(ctx, "container_create", resp.ID, name, map[string]any{"action": "updater_create", "newImageID": newImage.ID})
 
-	if inspect.State != nil && (inspect.State.Running || inspect.State.Restarting) {
+	if kit.FromPtr(inspect.State).Running || kit.FromPtr(inspect.State).Restarting {
 		startCtx, cancelStart := s.opCtx(ctx)
 		_, err = dockerClient.ContainerStart(startCtx, resp.ID, client.ContainerStartOptions{})
 		cancelStart()
@@ -416,7 +424,7 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 			switch {
 			case inspectErr != nil:
 				return resp.ID, fmt.Errorf("start: %w; inspect after start error: %w", err, inspectErr)
-			case inspected.Container.State == nil || !inspected.Container.State.Running:
+			case !kit.FromPtr(inspected.Container.State).Running:
 				return resp.ID, fmt.Errorf("start: %w", err)
 			}
 			s.logger.WarnContext(ctx, "container start returned error but inspect reports running", "containerId", resp.ID, "containerName", name, "error", err)
@@ -428,31 +436,38 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 
 // pinVolumeMounts reattaches every volume the old container mounted by name, so anonymous and
 // image-declared volumes keep their data instead of being recreated empty.
-func pinVolumeMounts(hostConfig *container.HostConfig, mountPoints []container.MountPoint) {
-	hostConfig.Binds, hostConfig.Mounts = slices.Clone(hostConfig.Binds), slices.Clone(hostConfig.Mounts)
+func pinVolumeMounts(binds []string, mounts []mount.Mount, mountPoints []container.MountPoint) ([]string, []mount.Mount) {
+	binds, mounts = slices.Clone(binds), slices.Clone(mounts)
 	for _, mountPoint := range mountPoints {
 		if mountPoint.Type != mount.TypeVolume || mountPoint.Name == "" {
 			continue
 		}
 		destination := path.Clean(mountPoint.Destination)
-		if i := slices.IndexFunc(hostConfig.Mounts, func(m mount.Mount) bool { return path.Clean(m.Target) == destination }); i >= 0 {
-			if hostConfig.Mounts[i].Type == mount.TypeVolume && hostConfig.Mounts[i].Source == "" {
-				hostConfig.Mounts[i].Source = mountPoint.Name
+		if i := slices.IndexFunc(mounts, func(m mount.Mount) bool { return path.Clean(m.Target) == destination }); i >= 0 {
+			if mounts[i].Type == mount.TypeVolume && mounts[i].Source == "" {
+				// keep: fills the cloned mount's empty source; a mount.Mount literal would drop its options
+				mounts[i].Source = mountPoint.Name
 			}
 			continue
 		}
 		// Short syntax is "/dest" for an anonymous volume, else "source:/dest[:options]".
-		i := slices.IndexFunc(hostConfig.Binds, func(bind string) bool {
+		i := slices.IndexFunc(binds, func(bind string) bool {
 			parts := strings.SplitN(bind, ":", 3)
 			return path.Clean(parts[min(1, len(parts)-1)]) == destination
 		})
 		switch {
 		case i < 0:
-			hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{Type: mount.TypeVolume, Source: mountPoint.Name, Target: mountPoint.Destination, ReadOnly: !mountPoint.RW})
-		case !strings.Contains(hostConfig.Binds[i], ":"):
-			hostConfig.Binds[i] = mountPoint.Name + ":" + hostConfig.Binds[i]
+			mounts = append(mounts, mount.Mount{
+				Type:     mount.TypeVolume,
+				Source:   mountPoint.Name,
+				Target:   mountPoint.Destination,
+				ReadOnly: !mountPoint.RW,
+			})
+		case !strings.Contains(binds[i], ":"):
+			binds[i] = mountPoint.Name + ":" + binds[i]
 		}
 	}
+	return binds, mounts
 }
 
 func (s *Service) removeFailedCreatedContainer(ctx context.Context, dockerClient *client.Client, containerID, containerName string) {
@@ -471,7 +486,7 @@ func (s *Service) removeFailedCreatedContainer(ctx context.Context, dockerClient
 
 // pinNetworkContainer rewrites a container:<id> network mode to the owner's name, which survives its recreate.
 func pinNetworkContainer(inspect *container.InspectResponse, containers []container.Summary) {
-	if inspect.HostConfig == nil || !inspect.HostConfig.NetworkMode.IsContainer() {
+	if !kit.FromPtr(inspect.HostConfig).NetworkMode.IsContainer() {
 		return
 	}
 	ref := inspect.HostConfig.NetworkMode.ConnectedContainer()
@@ -479,6 +494,7 @@ func pinNetworkContainer(inspect *container.InspectResponse, containers []contai
 		return
 	}
 	if i := slices.IndexFunc(containers, func(c container.Summary) bool { return strings.HasPrefix(c.ID, ref) }); i >= 0 {
+		// keep: HostConfig is the inspected container's own; a full HostConfig literal reads worse
 		inspect.HostConfig.NetworkMode = container.NetworkMode("container:" + containerSummaryName(containers[i]))
 	}
 }
@@ -486,9 +502,8 @@ func pinNetworkContainer(inspect *container.InspectResponse, containers []contai
 // containerSummaryName returns the container's own name, skipping legacy link aliases such as
 // "web/db", or its short ID when it has none.
 func containerSummaryName(cnt container.Summary) string {
-	name := ""
 	if i := slices.IndexFunc(cnt.Names, func(n string) bool { return !strings.Contains(strings.TrimPrefix(n, "/"), "/") }); i >= 0 {
-		name = strings.TrimPrefix(cnt.Names[i], "/")
+		return cmp.Or(strings.TrimPrefix(cnt.Names[i], "/"), cnt.ID[:min(12, len(cnt.ID))])
 	}
-	return cmp.Or(name, cnt.ID[:min(12, len(cnt.ID))])
+	return cnt.ID[:min(12, len(cnt.ID))]
 }

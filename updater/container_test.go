@@ -131,7 +131,7 @@ func TestUpdateStandaloneContainerRollsBackAndRemovesDanglingCreateOnStartFailur
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		EventRecorder:        recorder,
 	})
@@ -269,7 +269,7 @@ func TestUpdateStandaloneContainerRemovesCreatedContainerWhenExtraNetworkConnect
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		OperationTimeout:     10 * time.Millisecond,
 	})
@@ -340,7 +340,7 @@ func TestUpdateStandaloneContainerTreatsAmbiguousStartErrorAsSuccessWhenInspectR
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 	})
 
@@ -407,7 +407,7 @@ func TestUpdateStandaloneContainerRollsBackAmbiguousStartErrorWhenInspectNotRunn
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 	})
 

@@ -39,34 +39,6 @@ func DefaultLabelPolicy() LabelPolicy {
 	}
 }
 
-// mergeLabelPolicyDefaults fills every nil func in policy from DefaultLabelPolicy, field by field, so
-// overriding one behavior keeps the defaults for the rest.
-func mergeLabelPolicyDefaults(policy LabelPolicy) LabelPolicy {
-	defaults := DefaultLabelPolicy()
-	if policy.TagPolicyFunc == nil {
-		policy.TagPolicyFunc = defaults.TagPolicyFunc
-	}
-	if policy.IsUpdateDisabledFunc == nil {
-		policy.IsUpdateDisabledFunc = defaults.IsUpdateDisabledFunc
-	}
-	if policy.IsSelfUpdateTargetFunc == nil {
-		policy.IsSelfUpdateTargetFunc = defaults.IsSelfUpdateTargetFunc
-	}
-	if policy.IsAgentFunc == nil {
-		policy.IsAgentFunc = defaults.IsAgentFunc
-	}
-	if policy.IsServerFunc == nil {
-		policy.IsServerFunc = defaults.IsServerFunc
-	}
-	if policy.IsSwarmTaskFunc == nil {
-		policy.IsSwarmTaskFunc = defaults.IsSwarmTaskFunc
-	}
-	if policy.StopSignalFunc == nil {
-		policy.StopSignalFunc = defaults.StopSignalFunc
-	}
-	return policy
-}
-
 // IsUpdateDisabled reports whether labels opt the container out of updates.
 func (p LabelPolicy) IsUpdateDisabled(containerLabels map[string]string) bool {
 	return p.IsUpdateDisabledFunc != nil && p.IsUpdateDisabledFunc(containerLabels)

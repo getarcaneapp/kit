@@ -71,7 +71,7 @@ func TestRestartContainersUsingOldImagesRestartsDependenciesInWatchtowerOrder(t 
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 	})
 
@@ -133,7 +133,7 @@ func TestRestartContainersUsingOldImagesLogsCycleFallback(t *testing.T) {
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		Logger:               slog.New(logs),
 	})
@@ -210,7 +210,7 @@ func TestRestartContainersUsingOldImagesRoutesLegacyArcaneServerThroughSelfUpdat
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		ProjectUpdater:       projectUpdater,
 		SelfUpdater:          selfUpdater,
@@ -292,7 +292,7 @@ func TestRestartContainersUsingOldImagesSelfContainerIDFiresAfterStandalone(t *t
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		SelfUpdater:          selfUpdater,
 		SelfContainerID:      "self-id",
@@ -374,7 +374,7 @@ func TestRestartContainersUsingOldImagesVerifiesComposeServiceAfterProjectError(
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		ProjectUpdater:       projectUpdater,
 	})
@@ -413,7 +413,7 @@ func TestRestartContainersUsingOldImagesOperationTimeoutCancelsSlowStop(t *testi
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		}
 	})
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		OperationTimeout:     10 * time.Millisecond,
 	})

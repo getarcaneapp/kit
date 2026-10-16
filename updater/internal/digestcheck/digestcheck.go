@@ -13,6 +13,7 @@ import (
 
 	"github.com/moby/moby/client"
 	"github.com/samber/hot"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/updater/digest"
 	"go.getarcane.app/updater/refs"
@@ -66,88 +67,74 @@ func RepoDigests(repoDigests []string, imageRef string) []string {
 
 // CheckImageNeedsUpdate compares local and remote digests for an image.
 func (c *Checker) CheckImageNeedsUpdate(ctx context.Context, imageRef string) CheckResult {
-	result := CheckResult{}
 	if pinnedDigest, ok := digest.FromReferenceSuffix(imageRef); ok {
-		result.LocalDigest = pinnedDigest
-		result.RemoteDigest = pinnedDigest
-		return result
+		return CheckResult{LocalDigest: pinnedDigest, RemoteDigest: pinnedDigest}
 	}
 	if c == nil || c.dockerClient == nil {
-		result.Error = errors.New("docker client unavailable")
-		return result
+		return CheckResult{Error: errors.New("docker client unavailable")}
 	}
 
 	slog.DebugContext(ctx, "CheckImageNeedsUpdate: checking image", "imageRef", imageRef, "normalizedRef", refs.NormalizeImageUpdateRef(imageRef))
 
 	inspect, err := c.dockerClient.ImageInspect(ctx, imageRef)
 	if err != nil {
-		result.NeedsUpdate = true
-		result.Error = fmt.Errorf("image not found locally: %w", err)
-		return result
+		return CheckResult{NeedsUpdate: true, Error: fmt.Errorf("image not found locally: %w", err)}
 	}
 	localDigests := RepoDigests(inspect.RepoDigests, imageRef)
 	if len(localDigests) == 0 && inspect.ID != "" {
 		localDigests = []string{inspect.ID}
 	}
 	if len(localDigests) == 0 {
-		result.NeedsUpdate = true
-		result.Error = errors.New("no digest available for image")
-		return result
+		return CheckResult{NeedsUpdate: true, Error: errors.New("no digest available for image")}
 	}
-	result.LocalDigest = localDigests[0]
 
 	if c.digestResolver == nil {
-		result.Error = errors.New("remote digest resolver unavailable")
-		return result
+		return CheckResult{LocalDigest: localDigests[0], Error: errors.New("remote digest resolver unavailable")}
 	}
 
 	remoteDigest, err := c.digestResolver.ImageDigest(ctx, imageRef)
 	if err != nil {
-		result.Error = err
-		return result
+		return CheckResult{LocalDigest: localDigests[0], Error: err}
 	}
 
-	result.RemoteDigest = remoteDigest
-	result.CheckedViaAPI = true
-	result.NeedsUpdate = !slices.Contains(localDigests, remoteDigest)
-	return result
+	return CheckResult{
+		NeedsUpdate:   !slices.Contains(localDigests, remoteDigest),
+		LocalDigest:   localDigests[0],
+		RemoteDigest:  remoteDigest,
+		CheckedViaAPI: true,
+	}
 }
 
 // CheckImageMatchesKnownDigest reports whether the local image already carries
 // a digest resolved earlier, avoiding a registry round-trip.
 func (c *Checker) CheckImageMatchesKnownDigest(ctx context.Context, imageRef, knownDigest string) CheckResult {
-	result := CheckResult{}
-
 	normalizedDigest, err := digest.Normalize(knownDigest)
 	if err != nil {
-		result.Error = err
-		return result
+		return CheckResult{Error: err}
 	}
-	result.RemoteDigest = normalizedDigest
 
 	if c == nil || c.dockerClient == nil {
-		result.Error = errors.New("docker client unavailable")
-		return result
+		return CheckResult{RemoteDigest: normalizedDigest, Error: errors.New("docker client unavailable")}
 	}
 
 	inspect, err := c.dockerClient.ImageInspect(ctx, imageRef)
 	if err != nil {
-		result.NeedsUpdate = true
-		result.Error = err
-		return result
+		return CheckResult{
+			NeedsUpdate:  true,
+			RemoteDigest: normalizedDigest,
+			Error:        err,
+		}
 	}
 
 	localDigests := RepoDigests(inspect.RepoDigests, imageRef)
 	if len(localDigests) == 0 {
 		localDigests = []string{strings.TrimSpace(inspect.ID)}
 	}
-	result.LocalDigest = localDigests[0]
-	if slices.Contains(localDigests, normalizedDigest) {
-		result.LocalDigest = normalizedDigest
-		return result
+	return CheckResult{
+		NeedsUpdate:  !slices.Contains(localDigests, normalizedDigest),
+		LocalDigest:  kit.Ternary(slices.Contains(localDigests, normalizedDigest), normalizedDigest, localDigests[0]),
+		RemoteDigest: normalizedDigest,
 	}
-	result.NeedsUpdate = true
-	return result
 }
 
 // CompareWithPulled compares the current container image ID with a freshly pulled image.

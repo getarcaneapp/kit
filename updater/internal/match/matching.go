@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/updater/digest"
 	"go.getarcane.app/updater/internal/compose"
@@ -26,19 +27,10 @@ func ResolveContainerImageMatch(c container.Summary, inspect *container.InspectR
 	if nr, ok := oldIDToNewRef[c.ImageID]; ok && c.ImageID != "" {
 		return nr, c.ImageID
 	}
-	if inspect != nil && inspect.Image != "" {
-		if nr, ok := oldIDToNewRef[inspect.Image]; ok {
-			return nr, inspect.Image
-		}
+	if nr, ok := oldIDToNewRef[kit.FromPtr(inspect).Image]; ok && kit.FromPtr(inspect).Image != "" {
+		return nr, inspect.Image
 	}
-	candidates := []string{c.Image}
-	if inspect != nil {
-		if inspect.Config != nil {
-			candidates = append(candidates, inspect.Config.Image)
-		}
-		candidates = append(candidates, inspect.Image)
-	}
-	for _, imageRef := range candidates {
+	for _, imageRef := range []string{c.Image, kit.FromPtr(kit.FromPtr(inspect).Config).Image, kit.FromPtr(inspect).Image} {
 		if refs.IsImageIDLikeReference(imageRef) {
 			continue
 		}
@@ -63,8 +55,5 @@ func ShouldInspectUnmatchedContainerForImageMatch(c container.Summary) bool {
 
 // CurrentContainerImageID returns the best available image ID for a container.
 func CurrentContainerImageID(c container.Summary, inspect *container.InspectResponse) string {
-	if inspect == nil {
-		return strings.TrimSpace(c.ImageID)
-	}
-	return cmp.Or(strings.TrimSpace(c.ImageID), strings.TrimSpace(inspect.Image))
+	return cmp.Or(strings.TrimSpace(c.ImageID), strings.TrimSpace(kit.FromPtr(inspect).Image))
 }

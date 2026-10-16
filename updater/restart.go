@@ -49,14 +49,15 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNe
 	updatedNorm := refs.NormalizeImageUpdateRefMapKeys(oldRefToNewRef)
 	targetImageIDs := digestcheck.NewRefIDCache(digestcheck.NewChecker(dockerClient, nil))
 	policy := s.config.LabelPolicy
-	scan := &restartScan{plansByName: map[string]*restartPlan{}, markedForRestart: map[string]bool{}}
+	plansByName, markedForRestart := map[string]*restartPlan{}, map[string]bool{}
+	var containers []deps.ContainerWithDeps
 	for _, summary := range listResult.Items {
 		if isExcluded(excluded, summary.ID, summary.Names...) || policy.IsUpdateDisabled(summary.Labels) ||
 			(policy.IsSwarmTask(summary.Labels) && !policy.IsSelfUpdateTarget(summary.Labels)) {
 			continue
 		}
 		name := containerSummaryName(summary)
-		scan.containers = append(scan.containers, deps.ContainerWithDeps{Container: summary, Name: name})
+		containers = append(containers, deps.ContainerWithDeps{Container: summary, Name: name})
 
 		// Inspect only when the summary alone cannot settle the match.
 		var inspected *container.InspectResponse
@@ -71,17 +72,22 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNe
 		if newRef != "" && currentImageID != "" && slices.Contains(targetImageIDs.IDsForRef(ctx, newRef), currentImageID) {
 			newRef = ""
 		}
-		scan.plansByName[name] = &restartPlan{cnt: summary, inspect: inspected, newRef: newRef, match: matchValue}
+		plansByName[name] = &restartPlan{
+			cnt:     summary,
+			inspect: inspected,
+			newRef:  newRef,
+			match:   matchValue,
+		}
 		if newRef != "" {
-			scan.markedForRestart[name] = true
+			markedForRestart[name] = true
 		}
 	}
 
-	if len(scan.markedForRestart) == 0 {
+	if len(markedForRestart) == 0 {
 		return nil, nil
 	}
-	for i, scanned := range scan.containers {
-		plan := scan.plansByName[scanned.Name]
+	for i, scanned := range containers {
+		plan := plansByName[scanned.Name]
 		if plan.inspect == nil {
 			inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, scanned.Container.ID, client.ContainerInspectOptions{})
 			if inspectErr != nil {
@@ -90,7 +96,12 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNe
 			plan.inspect = &inspectResult.Container
 		}
 		pinNetworkContainer(plan.inspect, listResult.Items)
-		scan.containers[i] = deps.ExtractContainerDeps(ctx, scanned.Name, scanned.Container, *plan.inspect)
+		containers[i] = deps.ExtractContainerDeps(ctx, scanned.Name, scanned.Container, *plan.inspect)
+	}
+	scan := &restartScan{
+		plansByName:      plansByName,
+		markedForRestart: markedForRestart,
+		containers:       containers,
 	}
 	propagateImplicitRestarts(scan)
 	return s.executeRestartPlans(ctx, dockerClient, s.sortRestartCandidates(ctx, scan), scan.plansByName)
@@ -108,11 +119,13 @@ func propagateImplicitRestarts(scan *restartScan) {
 			if !ok || plan.newRef != "" {
 				continue
 			}
-			configImage := ""
-			if plan.inspect != nil && plan.inspect.Config != nil {
-				configImage = plan.inspect.Config.Image
+			scan.plansByName[name] = &restartPlan{
+				cnt:      plan.cnt,
+				inspect:  plan.inspect,
+				newRef:   cmp.Or(kit.FromPtr(kit.FromPtr(plan.inspect).Config).Image, plan.cnt.Image),
+				match:    "dependency_restart",
+				implicit: true,
 			}
-			plan.newRef, plan.match, plan.implicit = cmp.Or(configImage, plan.cnt.Image), "dependency_restart", true
 		}
 	}
 }
@@ -128,8 +141,8 @@ func (s *Service) sortRestartCandidates(ctx context.Context, scan *restartScan) 
 	}
 	rank := func(candidate deps.ContainerWithDeps) int {
 		labels := candidate.Container.Labels
-		if plan := scan.plansByName[candidate.Name]; plan != nil && plan.inspect != nil && plan.inspect.Config != nil {
-			labels = plan.inspect.Config.Labels
+		if config := kit.FromPtr(kit.FromPtr(scan.plansByName[candidate.Name]).inspect).Config; config != nil {
+			labels = config.Labels
 		}
 		return kit.Ternary(s.config.LabelPolicy.IsAgent(labels), 1, kit.Ternary(s.config.LabelPolicy.IsServer(labels), 2, 0))
 	}
@@ -160,10 +173,8 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 			}
 			plan.inspect = new(inspectResult.Container)
 		}
-		res := standaloneRestartResult(candidate, plan)
 		if plan.newRef == "" {
-			res.Status, res.Error = StatusSkipped, "no matching updated image"
-			results = append(results, res)
+			results = append(results, standaloneRestartResult(candidate.Name, plan, StatusSkipped, "no matching updated image"))
 			continue
 		}
 
@@ -178,14 +189,14 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 				break
 			}
 		}
-		selfUpdate := s.isSelfUpdateCandidate(plan.cnt.ID, labels)
+		res := standaloneRestartResult(candidate.Name, plan, StatusChecked, "")
 		switch {
-		case selfUpdate:
+		case s.isSelfUpdateCandidate(plan.cnt.ID, labels):
 			selfUpdateIndexes = append(selfUpdateIndexes, len(results))
 		case isComposeTagChange(plan.inspect, plan.newRef) && projectID == "":
-			res.Status, res.Error = StatusFailed, "compose tag update project could not be resolved"
+			res = standaloneRestartResult(candidate.Name, plan, StatusFailed, "compose tag update project could not be resolved")
 		case projectID != "" && compose.ServiceLabel(labels) != "":
-			res = s.applyComposeServiceUpdate(ctx, dockerClient, res, plan, projectID, composeGroups[projectID], projectErrs)
+			res = s.applyComposeServiceUpdate(ctx, dockerClient, candidate.Name, plan, projectID, composeGroups[projectID], projectErrs)
 		default:
 			standaloneIndexes[candidate.Name] = len(results)
 			standalone = append(standalone, candidate)
@@ -203,16 +214,15 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 
 	// Self-updates arrive sorted agents first, so the server hosting this process goes last.
 	for _, index := range selfUpdateIndexes {
-		res := results[index]
-		plan := plansByName[res.ResourceName]
+		name := results[index].ResourceName
+		plan := plansByName[name]
 		endContainerStatus := s.BeginContainerUpdate(plan.cnt.ID)
-		if err := s.triggerSelfUpdate(ctx, plan.cnt.ID, res.ResourceName, plan.newRef, labelsFromInspect(*plan.inspect)); err != nil {
-			res.Status, res.Error = StatusFailed, err.Error()
+		if err := s.triggerSelfUpdate(ctx, plan.cnt.ID, name, plan.newRef, labelsFromInspect(*plan.inspect)); err != nil {
+			results[index] = standaloneRestartResult(name, plan, StatusFailed, err.Error())
 		} else {
-			res.Status, res.UpdateAvailable, res.UpdateApplied = StatusUpdated, true, true
+			results[index] = standaloneRestartResult(name, plan, StatusUpdated, "")
 		}
 		endContainerStatus()
-		results[index] = res
 	}
 	return results, nil
 }
@@ -237,29 +247,26 @@ func (s *Service) updateStandaloneRestartCandidates(
 	results := make(map[string]ResourceResult, len(candidates))
 	for _, candidate := range slices.Backward(candidates) {
 		plan := plansByName[candidate.Name]
-		result := standaloneRestartResult(candidate, plan)
 		if err := s.stopAndRemoveStandaloneContainer(ctx, dockerClient, plan.cnt, *plan.inspect); err != nil {
-			result.Status, result.Error = StatusFailed, err.Error()
+			results[candidate.Name] = standaloneRestartResult(candidate.Name, plan, StatusFailed, err.Error())
+		} else {
+			results[candidate.Name] = standaloneRestartResult(candidate.Name, plan, StatusChecked, "")
 		}
-		results[candidate.Name] = result
 	}
 
 	for _, candidate := range candidates {
-		plan, result := plansByName[candidate.Name], results[candidate.Name]
-		if result.Status == StatusFailed {
+		plan := plansByName[candidate.Name]
+		if results[candidate.Name].Status == StatusFailed {
 			continue
 		}
 		if err := s.createStartOrRollback(ctx, dockerClient, plan.cnt, *plan.inspect, plan.newRef); err != nil {
-			result.Status, result.Error = StatusFailed, err.Error()
-			results[candidate.Name] = result
+			results[candidate.Name] = standaloneRestartResult(candidate.Name, plan, StatusFailed, err.Error())
 			continue
 		}
-		result.Status = kit.Ternary(plan.implicit, StatusRestarted, StatusUpdated)
-		result.UpdateAvailable, result.UpdateApplied = !plan.implicit, true
 		if !plan.implicit {
 			_ = s.notify(ctx, plan.cnt.ID, candidate.Name, plan.newRef, plan.match, refs.NormalizeImageUpdateRef(plan.newRef))
 		}
-		results[candidate.Name] = result
+		results[candidate.Name] = standaloneRestartResult(candidate.Name, plan, kit.Ternary(plan.implicit, StatusRestarted, StatusUpdated), "")
 	}
 	return results
 }
@@ -268,7 +275,7 @@ func (s *Service) updateStandaloneRestartCandidates(
 func (s *Service) applyComposeServiceUpdate(
 	ctx context.Context,
 	dockerClient *client.Client,
-	res ResourceResult,
+	name string,
 	plan *restartPlan,
 	projectID string,
 	group composeGroup,
@@ -294,39 +301,37 @@ func (s *Service) applyComposeServiceUpdate(
 
 	labels := labelsFromInspect(*plan.inspect)
 	projectName, serviceName := compose.ProjectLabel(labels), compose.ServiceLabel(labels)
-	oldImageID, targetRef := match.CurrentContainerImageID(plan.cnt, plan.inspect), ""
-	if group.tagChanges {
-		if projectErr != nil {
-			res.Status, res.Error = StatusFailed, projectErr.Error()
-			return res
-		}
-		oldImageID, targetRef = "", plan.newRef
+	if group.tagChanges && projectErr != nil {
+		return standaloneRestartResult(name, plan, StatusFailed, projectErr.Error())
 	}
-	if verifyErr := verifyComposeService(ctx, dockerClient, projectName, serviceName, oldImageID, targetRef); verifyErr != nil {
-		res.Status = StatusFailed
-		res.Error = fmt.Sprintf("service update verification failed: %v", verifyErr)
-		if projectErr != nil {
-			res.Error = fmt.Sprintf("project-level update failed: %v; service update verification failed: %v", projectErr, verifyErr)
-		}
-		return res
+	verifyErr := verifyComposeService(ctx, dockerClient, projectName, serviceName,
+		kit.Ternary(group.tagChanges, "", match.CurrentContainerImageID(plan.cnt, plan.inspect)),
+		kit.Ternary(group.tagChanges, plan.newRef, ""),
+	)
+	if verifyErr != nil {
+		return standaloneRestartResult(name, plan, StatusFailed, kit.Ternary(projectErr != nil,
+			fmt.Sprintf("project-level update failed: %v; service update verification failed: %v", projectErr, verifyErr),
+			fmt.Sprintf("service update verification failed: %v", verifyErr),
+		))
 	}
 
 	if projectErr != nil {
 		s.logger.WarnContext(ctx, "service updated despite project-level compose error", "projectId", projectID, "projectName", projectName, "serviceName", serviceName, "error", projectErr)
 	}
-	res.Status = kit.Ternary(plan.implicit, StatusRestarted, StatusUpdated)
-	res.UpdateAvailable, res.UpdateApplied = !plan.implicit, true
-	_ = s.notify(ctx, plan.cnt.ID, res.ResourceName, plan.newRef, plan.match, refs.NormalizeImageUpdateRef(plan.newRef))
-	return res
+	_ = s.notify(ctx, plan.cnt.ID, name, plan.newRef, plan.match, refs.NormalizeImageUpdateRef(plan.newRef))
+	return standaloneRestartResult(name, plan, kit.Ternary(plan.implicit, StatusRestarted, StatusUpdated), "")
 }
 
-func standaloneRestartResult(candidate deps.ContainerWithDeps, plan *restartPlan) ResourceResult {
+func standaloneRestartResult(name string, plan *restartPlan, status ResourceStatus, message string) ResourceResult {
 	return ResourceResult{
-		ResourceID:   plan.cnt.ID,
-		ResourceName: candidate.Name,
-		ResourceType: ResourceTypeContainer,
-		Status:       StatusChecked,
-		OldImage:     plan.match,
-		NewImage:     refs.NormalizeImageUpdateRef(plan.newRef),
+		ResourceID:      plan.cnt.ID,
+		ResourceName:    name,
+		ResourceType:    ResourceTypeContainer,
+		Status:          status,
+		UpdateAvailable: status == StatusUpdated,
+		UpdateApplied:   status == StatusUpdated || status == StatusRestarted,
+		OldImage:        plan.match,
+		NewImage:        refs.NormalizeImageUpdateRef(plan.newRef),
+		Error:           message,
 	}
 }

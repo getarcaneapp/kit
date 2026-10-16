@@ -34,17 +34,24 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		return err
 	}
 	proxy := dockerProxyContainerName(dockerClient.DaemonHost())
-	scan := &restartScan{plansByName: map[string]*restartPlan{}, markedForRestart: map[string]bool{}}
+	plansByName, markedForRestart := map[string]*restartPlan{}, map[string]bool{}
+	var containers []deps.ContainerWithDeps
 	states := make([]targetedRecord, 0, len(records))
 	for _, record := range records {
 		if !record.NeedsUpdate() {
 			continue
 		}
-		state, collectErr := s.collectTargetRecord(ctx, dockerClient, listed.Items, proxy, record, scan, out)
+		state, planned, collectErr := s.collectTargetRecord(ctx, dockerClient, listed.Items, proxy, record, plansByName, markedForRestart, out)
 		if collectErr != nil {
 			return collectErr
 		}
 		states = append(states, state)
+		containers = append(containers, planned...)
+	}
+	scan := &restartScan{
+		plansByName:      plansByName,
+		markedForRestart: markedForRestart,
+		containers:       containers,
 	}
 	// All Compose conflicts and adapter capabilities must be checked before pulls.
 	for _, group := range s.buildComposeGroups(ctx, s.sortRestartCandidates(ctx, scan), scan.plansByName) {
@@ -55,6 +62,7 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 
 	results := s.pullTargetPlans(ctx, dockerClient, scan, opts)
 	if !opts.DryRun && len(scan.markedForRestart) > 0 {
+		var implicit []deps.ContainerWithDeps
 		for _, cnt := range listed.Items {
 			name := containerSummaryName(cnt)
 			if _, planned := scan.plansByName[name]; planned || cnt.State != container.StateRunning || name == proxy {
@@ -69,7 +77,12 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 			}
 			pinNetworkContainer(&inspected.Container, listed.Items)
 			scan.plansByName[name] = &restartPlan{cnt: cnt, inspect: &inspected.Container}
-			scan.containers = append(scan.containers, deps.ExtractContainerDeps(ctx, name, cnt, inspected.Container))
+			implicit = append(implicit, deps.ExtractContainerDeps(ctx, name, cnt, inspected.Container))
+		}
+		scan = &restartScan{
+			plansByName:      scan.plansByName,
+			markedForRestart: scan.markedForRestart,
+			containers:       append(scan.containers, implicit...),
 		}
 		propagateImplicitRestarts(scan)
 		restarted, restartErr := s.executeRestartPlans(ctx, dockerClient, s.sortRestartCandidates(ctx, scan), scan.plansByName)
@@ -103,10 +116,13 @@ func (s *Service) collectTargetRecord(
 	containers []container.Summary,
 	proxy string,
 	record ImageUpdateRecord,
-	scan *restartScan,
+	plansByName map[string]*restartPlan,
+	markedForRestart map[string]bool,
 	out *Result,
-) (targetedRecord, error) {
-	state := targetedRecord{record: record}
+) (targetedRecord, []deps.ContainerWithDeps, error) {
+	var targets []string
+	var planned []deps.ContainerWithDeps
+	failed := false
 	for _, cnt := range containers {
 		if cnt.State != container.StateRunning || (record.ContainerID != "" && record.ContainerID != cnt.ID) {
 			continue
@@ -115,7 +131,7 @@ func (s *Service) collectTargetRecord(
 		inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
 		if inspectErr != nil {
 			// An unscoped record cannot safely be cleared after an incomplete scan.
-			state.failed = true
+			failed = true
 			s.appendRecordedResult(ctx, out, failedContainerResult(cnt.ID, name, inspectErr.Error()))
 			continue
 		}
@@ -124,14 +140,14 @@ func (s *Service) collectTargetRecord(
 			continue
 		}
 		if proxy != "" && name == proxy {
-			state.failed = true
+			failed = true
 			s.appendRecordedResult(ctx, out, skippedContainerResult(cnt.ID, proxy, "Docker proxy excluded from pending updates"))
 			continue
 		}
-		state.targets = append(state.targets, cnt.ID)
+		targets = append(targets, cnt.ID)
 		plan, reason, planErr := s.targetRecordPlan(ctx, cnt, inspect, record)
 		if planErr != nil || reason != "" {
-			state.failed = true
+			failed = true
 			if reason != "" {
 				s.appendRecordedResult(ctx, out, skippedContainerResult(cnt.ID, name, reason))
 			} else {
@@ -139,22 +155,25 @@ func (s *Service) collectTargetRecord(
 			}
 			continue
 		}
-		if previous := scan.plansByName[name]; previous != nil {
+		if previous := plansByName[name]; previous != nil {
 			if previous.newRef != plan.newRef {
-				return state, fmt.Errorf("conflicting image targets for container %s", cnt.ID)
+				return targetedRecord{}, nil, fmt.Errorf("conflicting image targets for container %s", cnt.ID)
 			}
 			continue
 		}
 		pinNetworkContainer(plan.inspect, containers)
-		scan.plansByName[name] = plan
-		scan.containers = append(scan.containers, deps.ExtractContainerDeps(ctx, name, cnt, *plan.inspect))
-		scan.markedForRestart[name] = true
+		plansByName[name] = plan
+		planned = append(planned, deps.ExtractContainerDeps(ctx, name, cnt, *plan.inspect))
+		markedForRestart[name] = true
 	}
-	if len(state.targets) == 0 {
-		state.failed = true
+	if len(targets) == 0 {
 		s.appendRecordedResult(ctx, out, skippedContainerResult(record.ContainerID, record.ImageRef(), "pending update has no matching container"))
 	}
-	return state, nil
+	return targetedRecord{
+		record:  record,
+		targets: targets,
+		failed:  failed || len(targets) == 0,
+	}, planned, nil
 }
 
 // targetRecordPlan validates that record still applies to the container under its current policy.
@@ -198,7 +217,12 @@ func (s *Service) targetRecordPlan(ctx context.Context, cnt container.Summary, i
 	if _, err = s.preflightComposeImage(ctx, cnt.ID, inspect, newRef); err != nil {
 		return nil, "", err
 	}
-	return &restartPlan{cnt: cnt, inspect: &inspect, newRef: newRef, match: oldRef}, "", nil
+	return &restartPlan{
+		cnt:     cnt,
+		inspect: &inspect,
+		newRef:  newRef,
+		match:   oldRef,
+	}, "", nil
 }
 
 // pullTargetPlans pulls each planned target once, in scan order for deterministic outcomes, and unplans
@@ -208,37 +232,39 @@ func (s *Service) pullTargetPlans(ctx context.Context, dockerClient *client.Clie
 	var results []ResourceResult
 	for _, candidate := range scan.containers {
 		plan := scan.plansByName[candidate.Name]
-		result := standaloneRestartResult(candidate, plan)
 		if opts.DryRun {
-			result.Status, result.UpdateAvailable = StatusSkipped, true
-			results = append(results, result)
+			results = append(results, ResourceResult{
+				ResourceID:      plan.cnt.ID,
+				ResourceName:    candidate.Name,
+				ResourceType:    ResourceTypeContainer,
+				Status:          StatusSkipped,
+				UpdateAvailable: true,
+				OldImage:        plan.match,
+				NewImage:        refs.NormalizeImageUpdateRef(plan.newRef),
+			})
 			delete(scan.markedForRestart, candidate.Name)
 			continue
 		}
 		err, seen := pulled[plan.newRef]
 		if !seen {
-			err = ErrImagePullerRequired
-			if s.config.ImagePuller != nil {
-				err = s.config.ImagePuller.PullImage(ctx, plan.newRef, io.Discard)
-			}
+			err = s.config.ImagePuller.PullImage(ctx, plan.newRef, io.Discard)
 			pulled[plan.newRef] = err
 		}
 		if err != nil {
-			result.Status, result.Error = StatusFailed, fmt.Sprintf("pull target image: %v", err)
+			results = append(results, standaloneRestartResult(candidate.Name, plan, StatusFailed, fmt.Sprintf("pull target image: %v", err)))
 		} else {
 			image, inspectErr := dockerClient.ImageInspect(ctx, plan.newRef)
 			switch {
 			case inspectErr != nil:
-				result.Status, result.Error = StatusFailed, fmt.Sprintf("inspect pulled image: %v", inspectErr)
+				results = append(results, standaloneRestartResult(candidate.Name, plan, StatusFailed, fmt.Sprintf("inspect pulled image: %v", inspectErr)))
 			case image.ID == "":
-				result.Status, result.Error = StatusFailed, "pulled image has no image ID"
+				results = append(results, standaloneRestartResult(candidate.Name, plan, StatusFailed, "pulled image has no image ID"))
 			case !opts.Force && image.ID == plan.inspect.Image && refs.NormalizeImageUpdateRef(plan.inspect.Config.Image) == plan.newRef:
-				result.Status = StatusUpToDate
+				results = append(results, standaloneRestartResult(candidate.Name, plan, StatusUpToDate, ""))
 			default:
 				continue
 			}
 		}
-		results = append(results, result)
 		delete(scan.markedForRestart, candidate.Name)
 		plan.newRef = ""
 	}

@@ -1,14 +1,15 @@
 package updater
 
 import (
+	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"go.getarcane.app/docker/compat"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/updater/digest"
 	"go.getarcane.app/updater/internal/digestcheck"
@@ -20,89 +21,111 @@ import (
 // CheckImageUpdate discovers an image update without pulling or changing state.
 // CurrentDigest should describe the image in use, not a separately cached tag.
 func (s *Service) CheckImageUpdate(ctx context.Context, request types.CheckRequest) (types.CheckResult, error) {
-	result, err := s.selectImageTag(ctx, request.ImageRef, request.Policy)
+	result, err := s.selectImageTag(ctx, "", request.ImageRef, request.Policy)
 	if err != nil || result.Reason != "" || result.UpdateAvailable {
 		return result, err
 	}
-	result.UpdateType = string(UpdateTypeDigest)
-	if request.CurrentDigest != "" {
-		if s.config.RegistryDigestResolver == nil {
-			return result, errors.New("remote digest resolver unavailable")
+	digestResult := func(currentDigest, targetDigest string, updateAvailable bool) types.CheckResult {
+		return types.CheckResult{
+			CurrentRef:      result.CurrentRef,
+			TargetRef:       result.TargetRef,
+			CurrentVersion:  result.CurrentVersion,
+			TargetVersion:   result.TargetVersion,
+			CurrentDigest:   currentDigest,
+			TargetDigest:    targetDigest,
+			UpdateType:      string(UpdateTypeDigest),
+			UpdateAvailable: updateAvailable,
 		}
-		result.CurrentDigest, err = digest.Normalize(request.CurrentDigest)
-		if err != nil {
-			return result, err
+	}
+	if request.CurrentDigest != "" {
+		currentDigest, normalizeErr := digest.Normalize(request.CurrentDigest)
+		if normalizeErr != nil {
+			return digestResult(currentDigest, "", false), normalizeErr
 		}
 		remote, resolveErr := s.config.RegistryDigestResolver.ImageDigest(ctx, result.CurrentRef)
 		if resolveErr != nil {
-			return result, resolveErr
+			return digestResult(currentDigest, "", false), resolveErr
 		}
-		result.TargetDigest, err = digest.Normalize(remote)
-		if err != nil {
-			return result, err
+		targetDigest, targetErr := digest.Normalize(remote)
+		if targetErr != nil {
+			return digestResult(currentDigest, targetDigest, false), targetErr
 		}
-		result.UpdateAvailable = result.CurrentDigest != result.TargetDigest
-		return result, nil
+		return digestResult(currentDigest, targetDigest, currentDigest != targetDigest), nil
 	}
 	dockerClient, err := s.dockerClient(ctx)
 	if err != nil {
-		return result, err
+		return digestResult("", "", false), err
 	}
 	check := digestcheck.NewChecker(dockerClient, s.config.RegistryDigestResolver).CheckImageNeedsUpdate(ctx, result.CurrentRef)
-	result.CurrentDigest, result.TargetDigest = check.LocalDigest, check.RemoteDigest
-	if check.Error != nil {
-		return result, check.Error
-	}
-	result.UpdateAvailable = check.NeedsUpdate
-	return result, nil
+	return digestResult(check.LocalDigest, check.RemoteDigest, check.Error == nil && check.NeedsUpdate), check.Error
 }
 
-func (s *Service) selectImageTag(ctx context.Context, imageRef string, policy types.Policy) (types.CheckResult, error) {
-	result := types.CheckResult{CurrentRef: imageRef, TargetRef: imageRef}
+func (s *Service) selectImageTag(ctx context.Context, containerID, imageRef string, policy types.Policy) (types.CheckResult, error) {
 	if err := ctx.Err(); err != nil {
-		return result, err
+		return types.CheckResult{
+			ContainerID: containerID,
+			CurrentRef:  imageRef,
+			TargetRef:   imageRef,
+		}, err
 	}
 	if refs.IsDigestPinnedReference(imageRef) || refs.IsImageIDLikeReference(imageRef) {
-		result.Reason = "immutable image reference"
-		return result, nil
+		return types.CheckResult{
+			ContainerID: containerID,
+			CurrentRef:  imageRef,
+			TargetRef:   imageRef,
+			Reason:      "immutable image reference",
+		}, nil
 	}
 	parsed, err := refs.NormalizeReference(imageRef)
 	if err != nil {
-		return result, err
+		return types.CheckResult{
+			ContainerID: containerID,
+			CurrentRef:  imageRef,
+			TargetRef:   imageRef,
+		}, err
 	}
-	result.CurrentRef, result.TargetRef = parsed.NormalizedRef, parsed.NormalizedRef
+	unchanged := types.CheckResult{
+		ContainerID: containerID,
+		CurrentRef:  parsed.NormalizedRef,
+		TargetRef:   parsed.NormalizedRef,
+	}
 	policy, err = tagpolicy.Resolve(imageRef, policy)
 	if err != nil {
-		return result, err
+		return unchanged, err
 	}
 	if policy.Strategy == "digest" {
-		return result, nil
-	}
-	if s.config.RegistryTagLister == nil {
-		return result, errors.New("registry tag lister unavailable")
+		return unchanged, nil
 	}
 	tags, err := s.config.RegistryTagLister.ListTags(ctx, parsed.NormalizedRef)
 	if err != nil {
-		return result, fmt.Errorf("list image tags: %w", err)
+		return unchanged, fmt.Errorf("list image tags: %w", err)
 	}
 	selected, err := tagpolicy.Select(parsed.Tag, tags, policy)
 	if err != nil {
-		return result, err
+		return unchanged, err
 	}
-	result.CurrentVersion, err = tagpolicy.Version(parsed.Tag, policy)
+	currentVersion, err := tagpolicy.Version(parsed.Tag, policy)
 	if err != nil {
-		return result, err
+		return unchanged, err
 	}
-	result.TargetVersion, err = tagpolicy.Version(selected, policy)
+	targetVersion, err := tagpolicy.Version(selected, policy)
 	if err != nil {
-		return result, err
+		return types.CheckResult{
+			ContainerID:    containerID,
+			CurrentRef:     parsed.NormalizedRef,
+			TargetRef:      parsed.NormalizedRef,
+			CurrentVersion: currentVersion,
+		}, err
 	}
-	result.TargetRef = parsed.RegistryHost + "/" + parsed.Repository + ":" + selected
-	if selected != parsed.Tag {
-		result.UpdateType = string(UpdateTypeTag)
-		result.UpdateAvailable = true
-	}
-	return result, nil
+	return types.CheckResult{
+		ContainerID:     containerID,
+		CurrentRef:      parsed.NormalizedRef,
+		TargetRef:       parsed.RegistryHost + "/" + parsed.Repository + ":" + selected,
+		CurrentVersion:  currentVersion,
+		TargetVersion:   targetVersion,
+		UpdateType:      kit.Ternary(selected != parsed.Tag, string(UpdateTypeTag), ""),
+		UpdateAvailable: selected != parsed.Tag,
+	}, nil
 }
 
 // CheckContainerUpdate inspects one container and returns its current policy's
@@ -117,20 +140,11 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 		return types.CheckResult{}, err
 	}
 	inspect := inspected.Container
-	result := types.CheckResult{ContainerID: inspect.ID}
-	if result.ContainerID == "" {
-		result.ContainerID = containerID
-	}
 	reason, err := s.containerEligibility(ctx, inspect, enforceSettingsExclusions)
-	if err != nil {
-		return result, err
+	if err != nil || reason != "" {
+		return types.CheckResult{ContainerID: cmp.Or(inspect.ID, containerID), Reason: reason}, err
 	}
-	if reason != "" {
-		result.Reason = reason
-		return result, nil
-	}
-	result, err = s.selectImageTag(ctx, inspect.Config.Image, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
-	result.ContainerID = inspect.ID
+	result, err := s.selectImageTag(ctx, inspect.ID, inspect.Config.Image, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
 	if err != nil || result.Reason != "" || result.UpdateAvailable {
 		return result, err
 	}
@@ -139,28 +153,34 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 	if err != nil {
 		return result, err
 	}
-	if s.config.RegistryDigestResolver == nil {
-		return result, errors.New("remote digest resolver unavailable")
-	}
 	remote, err := s.config.RegistryDigestResolver.ImageDigest(ctx, result.CurrentRef)
 	if err != nil {
 		return result, err
 	}
-	result.TargetDigest, err = digest.Normalize(remote)
+	targetDigest, err := digest.Normalize(remote)
 	if err != nil {
 		return result, err
 	}
 	localDigests := digestcheck.RepoDigests(image.RepoDigests, result.CurrentRef)
-	result.UpdateType = string(UpdateTypeDigest)
-	result.UpdateAvailable = !slices.Contains(localDigests, result.TargetDigest)
-	result.CurrentDigest = image.ID
-	switch {
-	case !result.UpdateAvailable:
-		result.CurrentDigest = result.TargetDigest
-	case len(localDigests) > 0:
-		result.CurrentDigest = localDigests[0]
-	}
-	return result, nil
+	return types.CheckResult{
+		ContainerID:    result.ContainerID,
+		CurrentRef:     result.CurrentRef,
+		TargetRef:      result.TargetRef,
+		CurrentVersion: result.CurrentVersion,
+		TargetVersion:  result.TargetVersion,
+		CurrentDigest: func() string {
+			switch {
+			case slices.Contains(localDigests, targetDigest):
+				return targetDigest
+			case len(localDigests) > 0:
+				return localDigests[0]
+			}
+			return image.ID
+		}(),
+		TargetDigest:    targetDigest,
+		UpdateType:      string(UpdateTypeDigest),
+		UpdateAvailable: !slices.Contains(localDigests, targetDigest),
+	}, nil
 }
 
 // containerEligibility reports why a container cannot be updated, or "" when it can; policy decides

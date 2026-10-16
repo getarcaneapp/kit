@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	kit "go.getarcane.app/kit/pkg"
 )
 
 func newTimedResult() (*Result, func(*error)) {
@@ -13,26 +14,24 @@ func newTimedResult() (*Result, func(*error)) {
 		StartTime: time.Now().UTC(),
 	}
 	return out, func(err *error) {
-		out.EndTime = time.Now().UTC()
-		out.Success = (err == nil || *err == nil) && out.Failed == 0
+		// keep: callers already hold out; a full 9-field Result literal to finish two fields reads worse
+		out.EndTime, out.Success = time.Now().UTC(), (err == nil || *err == nil) && out.Failed == 0
 	}
 }
 
 // appendResult counts item into out and appends it: every item counts as checked, and up-to-date ones as skipped too.
 func appendResult(out *Result, item ResourceResult) {
-	out.Checked++
-	switch item.Status {
-	case StatusUpdated:
-		out.Updated++
-	case StatusRestarted:
-		out.Restarted++
-	case StatusSkipped, StatusUpToDate:
-		out.Skipped++
-	case StatusFailed:
-		out.Failed++
-	case StatusChecked, StatusUpdateAvailable:
+	*out = Result{
+		Success:   out.Success,
+		Checked:   out.Checked + 1,
+		Updated:   out.Updated + kit.Ternary(item.Status == StatusUpdated, 1, 0),
+		Restarted: out.Restarted + kit.Ternary(item.Status == StatusRestarted, 1, 0),
+		Skipped:   out.Skipped + kit.Ternary(item.Status == StatusSkipped || item.Status == StatusUpToDate, 1, 0),
+		Failed:    out.Failed + kit.Ternary(item.Status == StatusFailed, 1, 0),
+		StartTime: out.StartTime,
+		EndTime:   out.EndTime,
+		Items:     append(out.Items, item),
 	}
-	out.Items = append(out.Items, item)
 }
 
 // appendRecordedResult appends item to out and reports it to the RunRecorder.
@@ -44,15 +43,27 @@ func (s *Service) appendRecordedResult(ctx context.Context, out *Result, item Re
 }
 
 func failedContainerResult(id, name, message string) ResourceResult {
-	return ResourceResult{ResourceID: id, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusFailed, Error: message}
+	return ResourceResult{
+		ResourceID:   id,
+		ResourceName: name,
+		ResourceType: ResourceTypeContainer,
+		Status:       StatusFailed,
+		Error:        message,
+	}
 }
 
 func skippedContainerResult(id, name, message string) ResourceResult {
-	return ResourceResult{ResourceID: id, ResourceName: name, ResourceType: ResourceTypeContainer, Status: StatusSkipped, Error: message}
+	return ResourceResult{
+		ResourceID:   id,
+		ResourceName: name,
+		ResourceType: ResourceTypeContainer,
+		Status:       StatusSkipped,
+		Error:        message,
+	}
 }
 
 func labelsFromInspect(inspect container.InspectResponse) map[string]string {
-	if inspect.Config == nil || len(inspect.Config.Labels) == 0 {
+	if len(kit.FromPtr(inspect.Config).Labels) == 0 {
 		return nil
 	}
 	return inspect.Config.Labels

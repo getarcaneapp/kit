@@ -111,7 +111,7 @@ func TestApplyPendingTargetedSharedImage(t *testing.T) {
 			dockerClient := newDockerClientForHandler(t, fixture.handler(t))
 			store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", tt.secondTarget))
 			puller := &fakePuller{}
-			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
+			service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
 			result, err := service.ApplyPending(t.Context(), Options{DryRun: tt.dryRun})
 			if err != nil || result.Failed != 0 {
 				t.Fatalf("ApplyPending = %#v, %v", result, err)
@@ -170,7 +170,7 @@ func TestApplyPendingTargetedRetainsRejected(t *testing.T) {
 			if tt.pullError {
 				puller.err = errors.New("registry unavailable")
 			}
-			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
+			service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
 			result, err := service.ApplyPending(t.Context(), Options{Force: true})
 			if err != nil {
 				t.Fatal(err)
@@ -237,7 +237,7 @@ func TestApplyPendingTargetedComposeGroups(t *testing.T) {
 			adapter := &targetedComposeAdapter{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}, fixture: fixture, fail: tt.fail}
 			store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.3.0"))
 			puller := &fakePuller{}
-			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, ProjectUpdater: adapter})
+			service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, ProjectUpdater: adapter})
 			result, err := service.ApplyPending(t.Context(), Options{})
 			pending, storeErr := store.PendingImageUpdates(t.Context())
 			if storeErr != nil {
@@ -276,7 +276,7 @@ func TestApplyPendingTargetedScopedClearing(t *testing.T) {
 	dockerClient := newDockerClientForHandler(t, fixture.handler(t))
 	store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.2.0"), targetedPending("missing", "1.2.0"))
 	puller := &fakePuller{}
-	service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
+	service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
 	result, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -319,7 +319,7 @@ func TestApplyPendingTargetedFailedComposeDependencyRetained(t *testing.T) {
 	dockerClient := newDockerClientForHandler(t, fixture.handler(t))
 	adapter := &targetedComposeAdapter{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}, fixture: fixture}
 	store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.3.0"))
-	service := newService(Config{
+	service := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
 		PendingStore:         store,
 		ImagePuller:          selectiveTargetPuller{failedRef: "docker.io/library/app:1.3.0"},
@@ -380,7 +380,7 @@ func TestApplyPendingTargetedExcludedContainers(t *testing.T) {
 			}()
 			store := NewMemoryPendingStore(targetedPending(name, "1.2.0"))
 			puller := &fakePuller{}
-			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, Settings: settings})
+			service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, Settings: settings})
 			result, err := service.ApplyPending(t.Context(), Options{Force: true, IgnoreSettingsExclusions: true})
 			if err != nil {
 				t.Fatal(err)
@@ -404,7 +404,7 @@ func TestApplyPendingTargetedSatisfiedDependencyCleared(t *testing.T) {
 	fixture.containers[1].Config.Labels[labels.LabelDependsOn] = "one"
 	dockerClient := newDockerClientForHandler(t, fixture.handler(t))
 	store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.3.0"))
-	service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: &fakePuller{}})
+	service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: &fakePuller{}})
 	result, err := service.ApplyPending(t.Context(), Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -437,7 +437,7 @@ func TestApplyPendingAutomaticTagPolicy(t *testing.T) {
 			dockerClient := newDockerClientForHandler(t, fixture.handler(t))
 			store := NewMemoryPendingStore(targetedPending("one", "1.2.0"))
 			puller := &fakePuller{}
-			service := newService(Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
+			service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller})
 			result, err := service.ApplyPending(t.Context(), Options{})
 			if err != nil {
 				t.Fatal(err)

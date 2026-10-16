@@ -4,11 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/authn"
+	kit "go.getarcane.app/kit/pkg"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -62,12 +64,13 @@ func fakeRegistry(t *testing.T, realm string, checkToken func(*http.Request), ha
 }
 
 func manifestResponse(r *http.Request, body, digest string) *http.Response {
-	resp := tagsResponse(r, http.StatusOK, body)
-	if r.Method == http.MethodHead {
-		resp.Body = http.NoBody
+	resp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Body:          kit.Ternary[io.ReadCloser](r.Method == http.MethodHead, http.NoBody, io.NopCloser(strings.NewReader(body))),
+		ContentLength: int64(len(body)),
+		Header:        http.Header{"Content-Type": {"application/vnd.docker.distribution.manifest.v2+json"}},
+		Request:       r,
 	}
-	resp.ContentLength = int64(len(body))
-	resp.Header.Set("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
 	if digest != "" {
 		resp.Header.Set("Docker-Content-Digest", digest)
 	}
@@ -178,7 +181,7 @@ func TestFetchRegistryRateLimitUsesHead(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if limit.Limit == nil || *limit.Limit != 100 || limit.Remaining == nil || *limit.Remaining != 90 || limit.WindowSeconds == nil || *limit.WindowSeconds != 21600 {
+		if kit.FromPtr(limit.Limit) != 100 || kit.FromPtr(limit.Remaining) != 90 || kit.FromPtr(limit.WindowSeconds) != 21600 {
 			t.Fatalf("rate limit = %+v", limit)
 		}
 	}

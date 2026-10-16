@@ -108,13 +108,22 @@ func (p defaultImagePuller) PullImage(ctx context.Context, imageRef string, prog
 	if err != nil {
 		return fmt.Errorf("registry auth: %w", err)
 	}
-	var pullOptions client.ImagePullOptions
-	if ok {
-		if pullOptions.RegistryAuth, err = dockerauthconfig.Encode(authConfig); err != nil {
-			return fmt.Errorf("registry auth: encode registry auth: %w", err)
+	pullOptions, err := func() (client.ImagePullOptions, error) {
+		if !ok {
+			return client.ImagePullOptions{}, nil
 		}
-		// Retry anonymously when the registry rejects the credentials.
-		pullOptions.PrivilegeFunc = func(context.Context) (string, error) { return "", nil }
+		registryAuth, encodeErr := dockerauthconfig.Encode(authConfig)
+		if encodeErr != nil {
+			return client.ImagePullOptions{}, fmt.Errorf("registry auth: encode registry auth: %w", encodeErr)
+		}
+		return client.ImagePullOptions{
+			RegistryAuth: registryAuth,
+			// Retry anonymously when the registry rejects the credentials.
+			PrivilegeFunc: func(context.Context) (string, error) { return "", nil },
+		}, nil
+	}()
+	if err != nil {
+		return err
 	}
 	resp, err := dockerClient.ImagePull(ctx, imageRef, pullOptions)
 	if err != nil {
@@ -152,7 +161,12 @@ func (r defaultRegistryDigestResolver) ImageDigest(ctx context.Context, imageRef
 	}
 	var credential *authn.AuthConfig
 	if ok {
-		credential = &authn.AuthConfig{Username: authConfig.Username, Password: authConfig.Password, IdentityToken: authConfig.IdentityToken, RegistryToken: authConfig.RegistryToken}
+		credential = &authn.AuthConfig{
+			Username:      authConfig.Username,
+			Password:      authConfig.Password,
+			IdentityToken: authConfig.IdentityToken,
+			RegistryToken: authConfig.RegistryToken,
+		}
 	}
 	return registry.FetchDigest(ctx, parsed.RegistryHost, parsed.Repository, parsed.Tag, credential, r.httpClient)
 }

@@ -21,9 +21,6 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 	out, finish := newTimedResult()
 	defer finish(&err)
 
-	if s.config.PendingStore == nil {
-		return nil, ErrPendingStoreRequired
-	}
 	records, err := s.config.PendingStore.PendingImageUpdates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query pending image updates: %w", err)
@@ -57,7 +54,12 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 		}
 		if _, used := usedImages[oldNorm]; used {
 			oldIDs, _ := digestChecker.GetImageIDsForRef(ctx, oldRef)
-			plans = append(plans, updatePlan{record: record, oldRef: oldRef, newRef: record.NewImageRef(), oldIDs: match.AppendImageUpdateRecordIDToOldIDs(oldIDs, record.ID)})
+			plans = append(plans, updatePlan{
+				record: record,
+				oldRef: oldRef,
+				newRef: record.NewImageRef(),
+				oldIDs: match.AppendImageUpdateRecordIDToOldIDs(oldIDs, record.ID),
+			})
 		}
 	}
 	if len(plans) == 0 {
@@ -71,16 +73,19 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 	oldRefToNewRef := map[string]string{}
 	for i := range plans {
 		plan := &plans[i]
-		item := ResourceResult{
-			ResourceID: plan.oldRef, ResourceType: ResourceTypeImage, ResourceName: plan.oldRef,
-			Status: StatusSkipped, OldImage: plan.oldRef, NewImage: plan.newRef,
-		}
-		if !opts.DryRun {
-			item.Status, item.Error = s.applyUpdatePlan(ctx, digestChecker, plan, opts.Force)
-			item.UpdateApplied, item.UpdateAvailable = item.Status == StatusUpdated, item.Status == StatusUpdated
-		}
-		s.appendRecordedResult(ctx, out, item)
-		if item.Status == StatusUpdated {
+		status, message := s.applyUpdatePlan(ctx, digestChecker, plan, opts)
+		s.appendRecordedResult(ctx, out, ResourceResult{
+			ResourceID:      plan.oldRef,
+			ResourceName:    plan.oldRef,
+			ResourceType:    ResourceTypeImage,
+			Status:          status,
+			UpdateAvailable: status == StatusUpdated,
+			UpdateApplied:   status == StatusUpdated,
+			OldImage:        plan.oldRef,
+			NewImage:        plan.newRef,
+			Error:           message,
+		})
+		if status == StatusUpdated {
 			for _, oldID := range plan.oldIDs {
 				oldIDToNewRef[oldID] = plan.newRef
 			}
@@ -119,43 +124,37 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 
 // applyUpdatePlan pulls a plan's new reference unless it is already current, then reports whether any old
 // image ID is still stale. It marks plan.pulled once the target image is present.
-func (s *Service) applyUpdatePlan(ctx context.Context, digestChecker *digestcheck.Checker, plan *updatePlan, force bool) (ResourceStatus, string) {
-	upToDate := false
-	if !force {
+func (s *Service) applyUpdatePlan(ctx context.Context, digestChecker *digestcheck.Checker, plan *updatePlan, opts Options) (ResourceStatus, string) {
+	if opts.DryRun {
+		return StatusSkipped, ""
+	}
+	upToDate := !opts.Force && func() bool {
 		imageRef := refs.NormalizeImageUpdateRef(plan.newRef)
 		if knownDigest := strings.TrimSpace(kit.FromPtr(plan.record.LatestDigest)); plan.record.IsDigestUpdate() && knownDigest != "" {
 			check := digestChecker.CheckImageMatchesKnownDigest(ctx, imageRef, knownDigest)
-			upToDate = check.Error == nil && !check.NeedsUpdate
-		} else {
-			check := digestChecker.CheckImageNeedsUpdate(ctx, imageRef)
-			upToDate = check.CheckedViaAPI && check.Error == nil && !check.NeedsUpdate
+			return check.Error == nil && !check.NeedsUpdate
 		}
-	}
-	upToDateMessage := kit.Ternary(upToDate, "image already up to date", "image digest unchanged after pull")
+		check := digestChecker.CheckImageNeedsUpdate(ctx, imageRef)
+		return check.CheckedViaAPI && check.Error == nil && !check.NeedsUpdate
+	}()
 	if !upToDate {
-		if s.config.ImagePuller == nil {
-			return StatusFailed, ErrImagePullerRequired.Error()
-		}
 		if err := s.config.ImagePuller.PullImage(ctx, plan.newRef, io.Discard); err != nil {
 			return StatusFailed, fmt.Sprintf("pull failed: %v", err)
 		}
 	}
 	plan.pulled = true
 
-	if targetIDs, targetErr := digestChecker.GetImageIDsForRef(ctx, plan.newRef); targetErr == nil && !force {
+	if targetIDs, targetErr := digestChecker.GetImageIDsForRef(ctx, plan.newRef); targetErr == nil && !opts.Force {
 		matched := slices.ContainsFunc(plan.oldIDs, func(id string) bool { return slices.Contains(targetIDs, id) })
 		plan.oldIDs = slices.DeleteFunc(plan.oldIDs, func(id string) bool { return id == "" || slices.Contains(targetIDs, id) })
 		if len(plan.oldIDs) == 0 && matched {
-			return StatusUpToDate, upToDateMessage
+			return StatusUpToDate, kit.Ternary(upToDate, "image already up to date", "image digest unchanged after pull")
 		}
 	}
 	return StatusUpdated, ""
 }
 
 func (s *Service) dockerClient(ctx context.Context) (*client.Client, error) {
-	if s.config.DockerClientProvider == nil {
-		return nil, fmt.Errorf("docker connect: %w", ErrDockerClientProviderRequired)
-	}
 	dockerClient, err := s.config.DockerClientProvider.DockerClient(ctx)
 	if err == nil && dockerClient == nil {
 		err = ErrNilDockerClient

@@ -18,6 +18,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+	kit "go.getarcane.app/kit/pkg"
 	kitregistry "go.getarcane.app/kit/pkg/registry"
 )
 
@@ -83,8 +84,11 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 	}
 
 	// HEAD reads the rate-limit headers without counting as a pull.
-	manifestURL := url.URL{Scheme: repo.Scheme(), Host: repo.RegistryStr(), Path: "/v2/" + repo.RepositoryStr() + "/manifests/" + ref.TagStr()}
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodHead, manifestURL.String(), http.NoBody)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodHead, (&url.URL{
+		Scheme: repo.Scheme(),
+		Host:   repo.RegistryStr(),
+		Path:   "/v2/" + repo.RepositoryStr() + "/manifests/" + ref.TagStr(),
+	}).String(), http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -104,25 +108,19 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 		return nil, err
 	}
 
-	info := &RateLimitInfo{}
-	if limit, window := parseRateLimitHeader(resp.Header.Get("Ratelimit-Limit")); limit != nil {
-		info.Limit = limit
-		info.WindowSeconds = window
-		info.Source = registryRateLimitHeaderSource
-	}
-	if remaining, window := parseRateLimitHeader(resp.Header.Get("Ratelimit-Remaining")); remaining != nil {
-		info.Remaining = remaining
-		info.WindowSeconds = cmp.Or(info.WindowSeconds, window)
-		info.Source = registryRateLimitHeaderSource
-	}
-	if used, usedErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Docker-Ratelimit-Used"))); usedErr == nil {
-		info.Used = &used
-		info.Source = cmp.Or(info.Source, "docker")
-	}
-	if info.Limit == nil && info.Remaining == nil && info.Used == nil {
+	limit, limitWindow := parseRateLimitHeader(resp.Header.Get("Ratelimit-Limit"))
+	remaining, remainingWindow := parseRateLimitHeader(resp.Header.Get("Ratelimit-Remaining"))
+	used, usedErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Docker-Ratelimit-Used")))
+	if limit == nil && remaining == nil && usedErr != nil {
 		return nil, errors.New("no registry rate limit headers found")
 	}
-	return info, nil
+	return &RateLimitInfo{
+		Limit:         limit,
+		Remaining:     remaining,
+		Used:          kit.Ternary(usedErr == nil, &used, nil),
+		WindowSeconds: cmp.Or(limitWindow, remainingWindow),
+		Source:        cmp.Or(kit.Ternary(limit != nil || remaining != nil, registryRateLimitHeaderSource, ""), kit.Ternary(usedErr == nil, "docker", "")),
+	}, nil
 }
 
 // FetchDigest fetches the manifest digest for a registry image reference.
@@ -169,14 +167,11 @@ func parseRepository(registryHost, repository string) (name.Repository, error) {
 }
 
 func baseTransport(httpClient *http.Client) http.RoundTripper {
-	if httpClient != nil && httpClient.Transport != nil {
-		return httpClient.Transport
-	}
-	return http.DefaultTransport
+	return cmp.Or(kit.FromPtr(httpClient).Transport, http.DefaultTransport)
 }
 
 func authenticator(credential *authn.AuthConfig) authn.Authenticator {
-	if credential == nil || *credential == (authn.AuthConfig{}) {
+	if kit.FromPtr(credential) == (authn.AuthConfig{}) {
 		return authn.Anonymous
 	}
 	return authn.FromConfig(*credential)

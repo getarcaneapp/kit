@@ -16,15 +16,15 @@ import (
 // Resolve validates policy and picks its strategy: digest unless a constraint or tag pattern is set,
 // while auto follows stable complete semantic versions and uses digests for other tags.
 func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
-	if refs.IsDigestPinnedReference(imageRef) || refs.IsImageIDLikeReference(imageRef) {
-		policy.Strategy = "digest"
-		return policy, nil
-	}
 	strategy := strings.TrimSpace(policy.Strategy)
+	if refs.IsDigestPinnedReference(imageRef) || refs.IsImageIDLikeReference(imageRef) || strategy == "digest" {
+		return types.Policy{
+			Strategy:   "digest",
+			Constraint: policy.Constraint,
+			TagPattern: policy.TagPattern,
+		}, nil
+	}
 	switch strategy {
-	case "digest":
-		policy.Strategy = "digest"
-		return policy, nil
 	case "", "auto", "tag":
 	default:
 		return policy, fmt.Errorf("unknown update strategy %q", policy.Strategy)
@@ -33,24 +33,20 @@ func Resolve(imageRef string, policy types.Policy) (types.Policy, error) {
 	if err != nil {
 		return policy, err
 	}
-	hasRules := policy.Constraint != "" || policy.TagPattern != ""
-	if strategy == "" && !hasRules {
-		policy.Strategy = "digest"
-		return policy, nil
+	version, parseErr := parse(parsed.Tag, nil)
+	if policy.Constraint == "" && policy.TagPattern == "" && (strategy == "" || (strategy == "auto" && (parseErr != nil || version.Prerelease() != ""))) {
+		return types.Policy{
+			Strategy:   "digest",
+			Constraint: policy.Constraint,
+			TagPattern: policy.TagPattern,
+		}, nil //nolint:nilerr // Non-version tags intentionally select digest updates in auto mode.
 	}
-	if strategy == "auto" && !hasRules {
-		version, parseErr := parse(parsed.Tag, nil)
-		if parseErr != nil || version.Prerelease() != "" {
-			policy.Strategy = "digest"
-			return policy, nil //nolint:nilerr // Non-version tags intentionally select digest updates in auto mode.
-		}
-	}
-	policy.Strategy = "tag"
 	_, err = Select(parsed.Tag, nil, policy)
-	if err != nil {
-		return policy, err
-	}
-	return policy, nil
+	return types.Policy{
+		Strategy:   "tag",
+		Constraint: policy.Constraint,
+		TagPattern: policy.TagPattern,
+	}, err
 }
 
 // Select returns the highest eligible newer tag, or current when none qualifies.
