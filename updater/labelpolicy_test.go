@@ -40,7 +40,7 @@ func TestDefaultLabelPolicy(t *testing.T) {
 
 // A caller that overrides one behavior must keep the defaults for the rest;
 // the old all-or-nothing merge silently dropped them.
-func TestMergeLabelPolicyDefaultsFillsPerField(t *testing.T) {
+func TestNewFillsLabelPolicyPerField(t *testing.T) {
 	custom := func(map[string]string) bool { return true }
 	merged := newServiceForTest(t, Config{
 		DockerClientProvider: &fakeDockerClientProvider{},
