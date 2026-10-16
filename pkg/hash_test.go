@@ -70,10 +70,23 @@ func TestFingerprint(t *testing.T) {
 	}
 	now := time.Unix(1700000000, 0)
 	name := "edge"
-	base := env{ID: "a", Enabled: true, LastSeen: &now, Tags: []string{"x", "y"}, Cert: &cert{CommonName: &name, ExpiresAt: &now}, Labels: map[string]string{"k": "v", "a": "b"}}
+	base := env{
+		ID:       "a",
+		Enabled:  true,
+		LastSeen: &now,
+		Tags:     []string{"x", "y"},
+		Cert:     &cert{CommonName: &name, ExpiresAt: &now},
+		Labels:   map[string]string{"k": "v", "a": "b"},
+	}
 
-	same := base
-	same.Labels = map[string]string{"a": "b", "k": "v"}
+	same := env{
+		ID:       base.ID,
+		Enabled:  base.Enabled,
+		LastSeen: base.LastSeen,
+		Tags:     base.Tags,
+		Cert:     base.Cert,
+		Labels:   map[string]string{"a": "b", "k": "v"},
+	}
 	if Fingerprint([]env{base}) != Fingerprint([]env{same}) {
 		t.Error("equal values with different map insertion order must hash the same")
 	}
@@ -96,8 +109,18 @@ func TestFingerprint(t *testing.T) {
 		}
 	}
 
-	hidden := base
-	hidden.Cert = &cert{CommonName: &name, ExpiresAt: &now, secret: "ignored"}
+	hidden := env{
+		ID:       base.ID,
+		Enabled:  base.Enabled,
+		LastSeen: base.LastSeen,
+		Tags:     base.Tags,
+		Cert: &cert{
+			CommonName: &name,
+			ExpiresAt:  &now,
+			secret:     "ignored",
+		},
+		Labels: base.Labels,
+	}
 	if Fingerprint([]env{base}) != Fingerprint([]env{hidden}) {
 		t.Error("unexported fields must not affect the fingerprint")
 	}

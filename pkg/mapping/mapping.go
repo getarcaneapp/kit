@@ -11,25 +11,25 @@ import (
 )
 
 var typeConverters = []copier.TypeConverter{
-	converterInternal(func(raw string) (netip.Prefix, error) {
+	converter(func(raw string) (netip.Prefix, error) {
 		if raw = strings.TrimSpace(raw); raw == "" {
 			return netip.Prefix{}, nil
 		}
 		return netip.ParsePrefix(raw)
 	}),
-	converterInternal(func(raw string) (netip.Addr, error) {
+	converter(func(raw string) (netip.Addr, error) {
 		if raw = strings.TrimSpace(raw); raw == "" {
 			return netip.Addr{}, nil
 		}
 		return netip.ParseAddr(raw)
 	}),
-	converterInternal(func(prefix netip.Prefix) (string, error) {
+	converter(func(prefix netip.Prefix) (string, error) {
 		if !prefix.IsValid() {
 			return "", nil
 		}
 		return prefix.String(), nil
 	}),
-	converterInternal(func(addr netip.Addr) (string, error) {
+	converter(func(addr netip.Addr) (string, error) {
 		if !addr.IsValid() {
 			return "", nil
 		}
@@ -60,8 +60,8 @@ func MapSlice[S, D any](source []S) ([]D, error) {
 	return dest, nil
 }
 
-// converterInternal adapts a typed conversion into a copier converter.
-func converterInternal[S, D any](convert func(S) (D, error)) copier.TypeConverter {
+// converter adapts a typed conversion into a copier converter.
+func converter[S, D any](convert func(S) (D, error)) copier.TypeConverter {
 	var src S
 	var dst D
 	return copier.TypeConverter{

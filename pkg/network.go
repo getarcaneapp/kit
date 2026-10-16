@@ -38,8 +38,7 @@ func CompareSubnets(a, b string) int {
 	prefixB, errB := netip.ParsePrefix(b)
 	switch {
 	case errA == nil && errB == nil:
-		prefixA, prefixB = prefixA.Masked(), prefixB.Masked()
-		return cmp.Or(prefixA.Addr().Compare(prefixB.Addr()), cmp.Compare(prefixA.Bits(), prefixB.Bits()))
+		return cmp.Or(prefixA.Masked().Addr().Compare(prefixB.Masked().Addr()), cmp.Compare(prefixA.Bits(), prefixB.Bits()))
 	case errA == nil:
 		return -1
 	case errB == nil:

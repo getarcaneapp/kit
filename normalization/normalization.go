@@ -26,11 +26,11 @@ func Normalize(value any) error {
 	if v.IsNil() {
 		return errors.New("normalization requires a non-nil pointer")
 	}
-	p, err := planInternal(v.Type())
+	p, err := planFor(v.Type())
 	if err != nil {
 		return err
 	}
-	return normalizeValueInternal(v, p, make(map[any]bool))
+	return normalizeValue(v, p, make(map[any]bool))
 }
 
 // Text optionally trims surrounding Unicode whitespace, then applies NFC.
@@ -45,7 +45,7 @@ func Text(value string, trim, nfc bool) string {
 	return value
 }
 
-func normalizeValueInternal(v reflect.Value, p *plan, seen map[any]bool) error {
+func normalizeValue(v reflect.Value, p *plan, seen map[any]bool) error {
 	if !v.IsValid() {
 		return nil
 	}
@@ -59,19 +59,31 @@ func normalizeValueInternal(v reflect.Value, p *plan, seen map[any]bool) error {
 		}
 		seen[key] = true
 		defer delete(seen, key)
-		return normalizeValueInternal(v.Elem(), p.element, seen)
+		return normalizeValue(v.Elem(), p.element, seen)
 	}
 
 	switch {
 	case v.Kind() == reflect.Struct:
 		for _, f := range p.fields {
-			if err := normalizeFieldInternal(v.Field(f.index), f, seen); err != nil {
+			field := v.Field(f.index)
+			if !f.trim && !f.nfc {
+				if err := normalizeValue(field, f.plan, seen); err != nil {
+					return fmt.Errorf("%s: %w", f.name, err)
+				}
+				continue
+			}
+			if !field.CanSet() {
+				continue
+			}
+			normalized, err := normalizedString(field, f)
+			if err != nil {
 				return fmt.Errorf("%s: %w", f.name, err)
 			}
+			field.Set(normalized)
 		}
 	case v.Kind() == reflect.Slice || v.Kind() == reflect.Array:
 		for i := range v.Len() {
-			if err := normalizeValueInternal(v.Index(i), p.element, seen); err != nil {
+			if err := normalizeValue(v.Index(i), p.element, seen); err != nil {
 				return fmt.Errorf("[%d]: %w", i, err)
 			}
 		}
@@ -79,27 +91,12 @@ func normalizeValueInternal(v reflect.Value, p *plan, seen map[any]bool) error {
 	return nil
 }
 
-func normalizeFieldInternal(value reflect.Value, field fieldPlan, seen map[any]bool) error {
-	if !field.trim && !field.nfc {
-		return normalizeValueInternal(value, field.plan, seen)
-	}
-	if !value.CanSet() {
-		return nil
-	}
-	normalized, err := normalizedStringInternal(value, field)
-	if err != nil {
-		return err
-	}
-	value.Set(normalized)
-	return nil
-}
-
-func normalizedStringInternal(value reflect.Value, field fieldPlan) (reflect.Value, error) {
+func normalizedString(value reflect.Value, field fieldPlan) (reflect.Value, error) {
 	if value.Kind() == reflect.Pointer {
 		if value.IsNil() {
 			return value, nil
 		}
-		normalized, err := normalizedStringInternal(value.Elem(), field)
+		normalized, err := normalizedString(value.Elem(), field)
 		if err != nil {
 			return reflect.Value{}, err
 		}

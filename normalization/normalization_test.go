@@ -22,11 +22,11 @@ type sample struct {
 
 func TestText(t *testing.T) {
 	for _, test := range []struct{ name, input, want string }{
-		{"composition", " e\u0301 ", "é"},
-		{"unicode whitespace", "\u2003É\u00a0", "É"},
-		{"internal whitespace", " A  B\tC ", "A  B\tC"},
-		{"compatibility", " ① ", "①"},
-		{"invisible", "\u200bA\u200b", "\u200bA\u200b"},
+		{name: "composition", input: " e\u0301 ", want: "é"},
+		{name: "unicode whitespace", input: "\u2003É\u00a0", want: "É"},
+		{name: "internal whitespace", input: " A  B\tC ", want: "A  B\tC"},
+		{name: "compatibility", input: " ① ", want: "①"},
+		{name: "invisible", input: "\u200bA\u200b", want: "\u200bA\u200b"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := Text(test.input, true, true); got != test.want {
@@ -41,12 +41,17 @@ func TestText(t *testing.T) {
 
 func TestNormalize(t *testing.T) {
 	optional := " e\u0301 "
-	input := sample{
-		Name: optional, Unicode: optional, Trim: optional, Optional: &optional,
-		Secret: " e\u0301 ", Map: map[string]string{" e\u0301 ": " e\u0301 "},
-		Children: []sample{{Name: " child "}}, Next: &sample{Name: " next "},
+	var input sample
+	input = sample{
+		Name:     optional,
+		Unicode:  optional,
+		Trim:     optional,
+		Optional: &optional,
+		Secret:   " e\u0301 ",
+		Map:      map[string]string{" e\u0301 ": " e\u0301 "},
+		Children: []sample{{Name: " child "}},
+		Next:     &sample{Name: " next ", Next: &input},
 	}
-	input.Next.Next = &input
 	if err := Normalize(&input); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +149,10 @@ func TestNormalizeJSON(t *testing.T) {
 
 func TestNormalizeJSONUnchanged(t *testing.T) {
 	for _, test := range []struct{ name, input string }{
-		{"omitted", `{}`}, {"empty", `{"optional":""}`}, {"wrong type", `{"name":42}`}, {"null", `null`},
+		{name: "omitted", input: `{}`},
+		{name: "empty", input: `{"optional":""}`},
+		{name: "wrong type", input: `{"name":42}`},
+		{name: "null", input: `null`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := NormalizeJSON([]byte(test.input), reflect.TypeFor[sample]())
@@ -247,7 +255,12 @@ func TestNormalizeReplacesAliasedStringPointers(t *testing.T) {
 	text := " e\u0301 "
 	pointer := &text
 	var nilPointer *string
-	original := row{Name: text, Optional: pointer, Nested: &pointer, InnerNil: &nilPointer}
+	original := row{
+		Name:     text,
+		Optional: pointer,
+		Nested:   &pointer,
+		InnerNil: &nilPointer,
+	}
 	normalized := original
 	if err := Normalize(&normalized); err != nil {
 		t.Fatal(err)

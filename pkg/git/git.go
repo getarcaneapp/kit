@@ -5,6 +5,7 @@ package git
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -28,7 +29,7 @@ func IsSupportedRepositoryURL(raw string) bool {
 
 	switch strings.ToLower(parsed.Scheme) {
 	case "git", "ssh", "http", "https":
-		return parsed.Host != "" && hasRepositoryPath(parsed.Path)
+		return parsed.Host != "" && !slices.Contains([]string{"", "/"}, strings.TrimSpace(parsed.Path))
 	default:
 		return false
 	}
@@ -51,7 +52,9 @@ func RequiresRemoteProbe(raw string) bool {
 
 	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https":
-		return parsed.Host != "" && hasRepositoryPath(parsed.Path) && !strings.HasSuffix(strings.ToLower(strings.TrimRight(parsed.Path, "/")), ".git")
+		return parsed.Host != "" &&
+			!slices.Contains([]string{"", "/"}, strings.TrimSpace(parsed.Path)) &&
+			!strings.HasSuffix(strings.ToLower(strings.TrimRight(parsed.Path, "/")), ".git")
 	default:
 		return false
 	}
@@ -74,11 +77,7 @@ func NormalizeForMatch(raw string) string {
 		return strings.TrimSuffix(trimmed, ".git")
 	}
 
+	// keep: edits one field of a parsed URL; rebuilding would copy all 11 url.URL fields
 	parsed.Path = strings.TrimSuffix(strings.TrimRight(parsed.Path, "/"), ".git")
 	return parsed.String()
-}
-
-func hasRepositoryPath(rawPath string) bool {
-	trimmedPath := strings.TrimSpace(rawPath)
-	return trimmedPath != "" && trimmedPath != "/"
 }

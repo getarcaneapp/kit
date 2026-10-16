@@ -64,15 +64,15 @@ func FormatMode(mode os.FileMode) string {
 		char byte
 		pos  int
 	}{
-		{0o400, 'r', 1},
-		{0o200, 'w', 2},
-		{0o100, 'x', 3},
-		{0o040, 'r', 4},
-		{0o020, 'w', 5},
-		{0o010, 'x', 6},
-		{0o004, 'r', 7},
-		{0o002, 'w', 8},
-		{0o001, 'x', 9},
+		{bit: 0o400, char: 'r', pos: 1},
+		{bit: 0o200, char: 'w', pos: 2},
+		{bit: 0o100, char: 'x', pos: 3},
+		{bit: 0o040, char: 'r', pos: 4},
+		{bit: 0o020, char: 'w', pos: 5},
+		{bit: 0o010, char: 'x', pos: 6},
+		{bit: 0o004, char: 'r', pos: 7},
+		{bit: 0o002, char: 'w', pos: 8},
+		{bit: 0o001, char: 'x', pos: 9},
 	}
 	for _, permission := range permissions {
 		if mode&permission.bit != 0 {

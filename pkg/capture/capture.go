@@ -35,16 +35,8 @@ func (c *Capture) Write(p []byte) (int, error) {
 	defer c.mu.Unlock()
 
 	remaining := c.maxBytes - c.buf.Len()
-	if remaining > 0 {
-		if len(p) <= remaining {
-			_, _ = c.buf.Write(p)
-		} else {
-			_, _ = c.buf.Write(p[:remaining])
-			c.truncated = true
-		}
-	} else {
-		c.truncated = true
-	}
+	_, _ = c.buf.Write(p[:min(len(p), remaining)])
+	c.truncated = c.truncated || remaining <= 0 || len(p) > remaining
 
 	return len(p), nil
 }

@@ -3,10 +3,10 @@
 package registry
 
 import (
-	"maps"
 	"net/url"
-	"slices"
 	"strings"
+
+	kit "go.getarcane.app/kit/pkg"
 )
 
 // DefaultDomain is the canonical Docker Hub registry domain.
@@ -15,10 +15,11 @@ const DefaultDomain = "docker.io"
 // Normalize canonicalizes a registry host or URL for equality checks; every
 // Docker Hub alias collapses to "docker.io".
 func Normalize(rawURL string) string {
-	registryHost := strings.ToLower(stripScheme(rawURL))
-	if slash := strings.Index(registryHost, "/"); slash != -1 {
-		registryHost = registryHost[:slash]
+	registryHost := strings.TrimSpace(rawURL)
+	if parsed, err := url.Parse(registryHost); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		registryHost = parsed.Host + parsed.EscapedPath() + kit.Ternary(parsed.RawQuery != "", "?"+parsed.RawQuery, "")
 	}
+	registryHost, _, _ = strings.Cut(strings.ToLower(registryHost), "/")
 	switch registryHost {
 	case DefaultDomain, "registry-1.docker.io", "index.docker.io":
 		return DefaultDomain
@@ -31,35 +32,12 @@ func Normalize(rawURL string) string {
 // probed with for rawURL. Docker Hub expands to all of its aliases; an
 // unrecognizable host yields nil.
 func LookupKeys(rawURL string) []string {
-	normalizedHost := Normalize(rawURL)
-	if normalizedHost == "" {
+	switch normalizedHost := Normalize(rawURL); normalizedHost {
+	case "":
 		return nil
+	case DefaultDomain:
+		return []string{DefaultDomain, "index.docker.io", "registry-1.docker.io"}
+	default:
+		return []string{normalizedHost}
 	}
-
-	keys := map[string]struct{}{
-		normalizedHost: {},
-	}
-	if normalizedHost == DefaultDomain {
-		keys["registry-1.docker.io"] = struct{}{}
-		keys["index.docker.io"] = struct{}{}
-	}
-
-	return slices.Sorted(maps.Keys(keys))
-}
-
-func stripScheme(rawURL string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return strings.TrimSuffix(rawURL, "/")
-	}
-
-	result := parsed.Host
-	if path := parsed.EscapedPath(); path != "" {
-		result += path
-	}
-	if parsed.RawQuery != "" {
-		result += "?" + parsed.RawQuery
-	}
-	return strings.TrimSuffix(result, "/")
 }

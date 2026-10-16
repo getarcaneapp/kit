@@ -26,9 +26,9 @@ func TestNormalizeRelativePath(t *testing.T) {
 		}
 	}
 	for _, test := range []struct{ input, want string }{
-		{"folder/file.txt", "folder/file.txt"},
-		{" ./a//b/../c/ ", "a/c"},
-		{"folder/", "folder"},
+		{input: "folder/file.txt", want: "folder/file.txt"},
+		{input: " ./a//b/../c/ ", want: "a/c"},
+		{input: "folder/", want: "folder"},
 	} {
 		if got, err := NormalizeRelativePath(test.input); err != nil || got != test.want {
 			t.Errorf("NormalizeRelativePath(%q) = %q, %v; want %q", test.input, got, err, test.want)
@@ -64,12 +64,12 @@ func TestSanitizeBrowsePath(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct{ input, want string }{
-		{".", "/"},
-		{"", "/"},
-		{"/", "/"},
-		{"a/b", "/a/b"},
-		{"/a/../b", "/b"},
-		{" /a/./b/ ", "/a/b"},
+		{input: ".", want: "/"},
+		{input: "", want: "/"},
+		{input: "/", want: "/"},
+		{input: "a/b", want: "/a/b"},
+		{input: "/a/../b", want: "/b"},
+		{input: " /a/./b/ ", want: "/a/b"},
 	} {
 		if got, err := SanitizeBrowsePath(test.input); err != nil || got != test.want {
 			t.Errorf("SanitizeBrowsePath(%q) = %q, %v; want %q", test.input, got, err, test.want)

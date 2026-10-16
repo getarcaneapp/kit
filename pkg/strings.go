@@ -11,19 +11,16 @@ import (
 
 // ToString converts any value to a trimmed string.
 func ToString(v any) string {
-	if v == nil {
-		return ""
-	}
-	var s string
 	switch val := v.(type) {
+	case nil:
+		return ""
 	case string:
-		s = val
+		return strings.TrimSpace(val)
 	case fmt.Stringer:
-		s = val.String()
+		return strings.TrimSpace(val.String())
 	default:
-		s = fmt.Sprint(v)
+		return strings.TrimSpace(fmt.Sprint(v))
 	}
-	return strings.TrimSpace(s)
 }
 
 // Capitalize upper-cases the first rune of s.

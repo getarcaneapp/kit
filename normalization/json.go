@@ -11,7 +11,7 @@ import (
 // Raw JSON values retain their types and precision; unknown fields are preserved.
 // Invalid JSON returns an error so the caller can retain its normal error handling.
 func NormalizeJSON(data []byte, typ reflect.Type) ([]byte, error) {
-	p, err := planInternal(typ)
+	p, err := planFor(typ)
 	if err != nil {
 		return nil, err
 	}
@@ -23,10 +23,10 @@ func NormalizeJSON(data []byte, typ reflect.Type) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return normalizeJSONInternal(data, p)
+	return normalizeJSON(data, p)
 }
 
-func normalizeJSONInternal(data []byte, p *plan) ([]byte, error) {
+func normalizeJSON(data []byte, p *plan) ([]byte, error) {
 	if !p.hasRules {
 		return data, nil
 	}
@@ -35,7 +35,7 @@ func normalizeJSONInternal(data []byte, p *plan) ([]byte, error) {
 		return data, nil
 	}
 	if p.kind == reflect.Pointer {
-		return normalizeJSONInternal(data, p.element)
+		return normalizeJSON(data, p.element)
 	}
 	if p.kind == reflect.Struct {
 		if data[0] != '{' {
@@ -45,7 +45,7 @@ func normalizeJSONInternal(data []byte, p *plan) ([]byte, error) {
 		if err := json.Unmarshal(data, &fields); err != nil {
 			return nil, err
 		}
-		if err := normalizeObjectInternal(fields, p); err != nil {
+		if err := normalizeObject(fields, p); err != nil {
 			return nil, err
 		}
 		return json.Marshal(fields)
@@ -59,7 +59,7 @@ func normalizeJSONInternal(data []byte, p *plan) ([]byte, error) {
 			return nil, err
 		}
 		for i, value := range values {
-			normalized, err := normalizeJSONInternal(value, p.element)
+			normalized, err := normalizeJSON(value, p.element)
 			if err != nil {
 				return nil, err
 			}
@@ -70,14 +70,14 @@ func normalizeJSONInternal(data []byte, p *plan) ([]byte, error) {
 	return data, nil
 }
 
-func normalizeObjectInternal(fields map[string]jsontext.Value, p *plan) error {
+func normalizeObject(fields map[string]jsontext.Value, p *plan) error {
 	for _, f := range p.fields {
 		child := f.plan
 		for child.kind == reflect.Pointer {
 			child = child.element
 		}
 		if f.inline && child.kind == reflect.Struct {
-			if err := normalizeObjectInternal(fields, child); err != nil {
+			if err := normalizeObject(fields, child); err != nil {
 				return err
 			}
 			continue
@@ -101,7 +101,7 @@ func normalizeObjectInternal(fields map[string]jsontext.Value, p *plan) error {
 			fields[f.name] = normalized
 			continue
 		}
-		normalized, err := normalizeJSONInternal(value, f.plan)
+		normalized, err := normalizeJSON(value, f.plan)
 		if err != nil {
 			return err
 		}
