@@ -1,3 +1,13 @@
+## v0.4.2
+
+### Bug fixes
+
+* build plans and helpers with keyed literals([92f3085](https://github.com/getarcaneapp/kit/commit/92f30851ee30ac052643d0d969dc8a2630acf421) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/v0.4.1...v0.4.2
+
 ## v0.4.1
 
 ### Bug fixes
