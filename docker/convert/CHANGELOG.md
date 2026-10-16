@@ -1,3 +1,13 @@
+## docker/convert/v0.3.6
+
+### Bug fixes
+
+* build documents and nodes with literals([bd68ab7](https://github.com/getarcaneapp/kit/commit/bd68ab75a8e9748d348001852f54615f18d1908a) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.3.5...docker/convert/v0.3.6
+
 ## docker/convert/v0.3.5
 
 ### Bug fixes
