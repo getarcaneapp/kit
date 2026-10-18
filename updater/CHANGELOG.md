@@ -1,3 +1,13 @@
+## updater/v0.11.9
+
+### Bug fixes
+
+* pull and recreate targeted updates one dependency unit at a time([442d4fa](https://github.com/getarcaneapp/kit/commit/442d4fa209affd4dbb76b32fce4535f3c553030a) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.8...updater/v0.11.9
+
 ## updater/v0.11.8
 
 ### Bug fixes
