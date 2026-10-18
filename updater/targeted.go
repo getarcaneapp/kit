@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"go.getarcane.app/docker/compat"
+	kit "go.getarcane.app/kit/pkg"
 
 	"go.getarcane.app/updater/internal/deps"
 	"go.getarcane.app/updater/pkg/utils/tagpolicy"
@@ -48,6 +50,9 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		states = append(states, state)
 		containers = append(containers, planned...)
 	}
+	if !opts.DryRun && len(markedForRestart) > 0 {
+		containers = append(containers, s.collectImplicitCandidates(ctx, dockerClient, listed.Items, proxy, plansByName)...)
+	}
 	scan := &restartScan{
 		plansByName:      plansByName,
 		markedForRestart: markedForRestart,
@@ -60,32 +65,40 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		}
 	}
 
-	results := s.pullTargetPlans(ctx, dockerClient, scan, opts)
-	if !opts.DryRun && len(scan.markedForRestart) > 0 {
-		var implicit []deps.ContainerWithDeps
-		for _, cnt := range listed.Items {
-			name := containerSummaryName(cnt)
-			if _, planned := scan.plansByName[name]; planned || cnt.State != container.StateRunning || name == proxy {
-				continue
-			}
-			inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
-			if inspectErr != nil {
-				continue
-			}
-			if reason, eligibilityErr := s.containerEligibility(ctx, inspected.Container, enforceSettingsExclusions); eligibilityErr != nil || reason != "" {
-				continue
-			}
-			pinNetworkContainer(&inspected.Container, listed.Items)
-			scan.plansByName[name] = &restartPlan{cnt: cnt, inspect: &inspected.Container}
-			implicit = append(implicit, deps.ExtractContainerDeps(ctx, name, cnt, inspected.Container))
+	// Each unit is pulled and recreated before the next is pulled, so a cancelled run never leaves
+	// running containers on an image whose tag a pull already moved.
+	units := partitionRestartUnits(scan)
+	unitRank := func(unit []deps.ContainerWithDeps) int {
+		rank := 0
+		for _, candidate := range unit {
+			rank = max(rank, s.restartRank(scan, candidate))
 		}
-		scan = &restartScan{
+		return rank
+	}
+	slices.SortStableFunc(units, func(a, b []deps.ContainerWithDeps) int { return cmp.Compare(unitRank(a), unitRank(b)) })
+	// With per-operation bounds, a pulled unit finishes its recreate even after the run is cancelled.
+	recreateCtx := kit.Ternary(s.config.OperationTimeout > 0, context.WithoutCancel(ctx), ctx)
+	var results []ResourceResult
+	for _, unit := range units {
+		unitScan := &restartScan{
 			plansByName:      scan.plansByName,
 			markedForRestart: scan.markedForRestart,
-			containers:       append(scan.containers, implicit...),
+			containers:       unit,
 		}
-		propagateImplicitRestarts(scan)
-		restarted, restartErr := s.executeRestartPlans(ctx, dockerClient, s.sortRestartCandidates(ctx, scan), scan.plansByName)
+		if ctx.Err() != nil {
+			for _, candidate := range unit {
+				if scan.markedForRestart[candidate.Name] {
+					results = append(results, standaloneRestartResult(candidate.Name, scan.plansByName[candidate.Name], StatusFailed, fmt.Sprintf("update run cancelled before pull: %v", ctx.Err())))
+				}
+			}
+			continue
+		}
+		results = append(results, s.pullTargetPlans(ctx, dockerClient, unitScan, opts)...)
+		if opts.DryRun || !slices.ContainsFunc(unit, func(candidate deps.ContainerWithDeps) bool { return scan.markedForRestart[candidate.Name] }) {
+			continue
+		}
+		propagateImplicitRestarts(unitScan)
+		restarted, restartErr := s.executeRestartPlans(recreateCtx, dockerClient, s.sortRestartCandidates(ctx, unitScan), scan.plansByName)
 		if restartErr != nil {
 			return restartErr
 		}
@@ -102,11 +115,40 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		if opts.DryRun || state.failed || slices.ContainsFunc(state.targets, func(id string) bool { return !successful[id] }) {
 			continue
 		}
-		if err = s.config.PendingStore.ClearImageUpdateRecord(ctx, state.record); err != nil {
+		// Applied records are cleared even after cancellation; their containers already changed.
+		if err = s.config.PendingStore.ClearImageUpdateRecord(context.WithoutCancel(ctx), state.record); err != nil {
 			return fmt.Errorf("clear applied pending record: %w", err)
 		}
 	}
 	return nil
+}
+
+// collectImplicitCandidates plans every other running, eligible container so dependents of targets can be restarted.
+func (s *Service) collectImplicitCandidates(
+	ctx context.Context,
+	dockerClient *client.Client,
+	listed []container.Summary,
+	proxy string,
+	plansByName map[string]*restartPlan,
+) []deps.ContainerWithDeps {
+	var implicit []deps.ContainerWithDeps
+	for _, cnt := range listed {
+		name := containerSummaryName(cnt)
+		if _, planned := plansByName[name]; planned || cnt.State != container.StateRunning || name == proxy {
+			continue
+		}
+		inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
+		if inspectErr != nil {
+			continue
+		}
+		if reason, eligibilityErr := s.containerEligibility(ctx, inspected.Container, enforceSettingsExclusions); eligibilityErr != nil || reason != "" {
+			continue
+		}
+		pinNetworkContainer(&inspected.Container, listed)
+		plansByName[name] = &restartPlan{cnt: cnt, inspect: &inspected.Container}
+		implicit = append(implicit, deps.ExtractContainerDeps(ctx, name, cnt, inspected.Container))
+	}
+	return implicit
 }
 
 // collectTargetRecord plans every running container record targets and reports the ones it must reject.
@@ -231,6 +273,9 @@ func (s *Service) pullTargetPlans(ctx context.Context, dockerClient *client.Clie
 	pulled := map[string]error{}
 	var results []ResourceResult
 	for _, candidate := range scan.containers {
+		if !scan.markedForRestart[candidate.Name] {
+			continue
+		}
 		plan := scan.plansByName[candidate.Name]
 		if opts.DryRun {
 			results = append(results, ResourceResult{

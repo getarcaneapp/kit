@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"go.getarcane.app/updater/internal/compose"
+	"go.getarcane.app/updater/internal/deps"
 	"go.getarcane.app/updater/labels"
 	updatetypes "go.getarcane.app/updater/types"
 )
@@ -454,6 +456,122 @@ func TestApplyPendingAutomaticTagPolicy(t *testing.T) {
 			}
 			if result.Failed != 0 || len(puller.pulled) != 1 || len(pending) != 0 || fixture.created["one"] != "app:1.2.0" {
 				t.Fatalf("automatic update failed: result %+v, created %v, pending %v", result, fixture.created, pending)
+			}
+		})
+	}
+}
+
+type cancelOnNotify struct {
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (n *cancelOnNotify) Notify(context.Context, Notification) error {
+	n.once.Do(n.cancel)
+	return nil
+}
+
+func TestApplyPendingTargetedCancelAfterFirstUnit(t *testing.T) {
+	fixture := &targetedDocker{containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", "1.x")}, created: map[string]string{}}
+	dockerClient := newDockerClientForHandler(t, fixture.handler(t))
+	store := NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("two", "1.3.0"))
+	puller := &fakePuller{}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	service := newServiceForTest(t, Config{
+		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
+		PendingStore:         store,
+		ImagePuller:          puller,
+		Notifier:             &cancelOnNotify{cancel: cancel},
+	})
+	result, err := service.ApplyPending(ctx, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.PendingImageUpdates(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(puller.pulled) != 1 || puller.pulled[0] != "docker.io/library/app:1.2.0" {
+		t.Fatalf("pulls = %#v", puller.pulled)
+	}
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	if _, created := fixture.created["two"]; created || fixture.created["one"] != "app:1.2.0" {
+		t.Fatalf("created = %#v", fixture.created)
+	}
+	if len(pending) != 1 || pending[0].ContainerID != "two" {
+		t.Fatalf("pending = %#v", pending)
+	}
+	if !slices.ContainsFunc(result.Items, func(item ResourceResult) bool {
+		return item.ResourceID == "two" && item.Status == StatusFailed && strings.Contains(item.Error, "cancelled")
+	}) {
+		t.Fatalf("missing cancelled outcome for two: %#v", result.Items)
+	}
+}
+
+func TestPartitionRestartUnits(t *testing.T) {
+	summary := func(project string) container.Summary {
+		return container.Summary{Labels: map[string]string{compose.ProjectLabelKey: project}}
+	}
+	for _, tt := range []struct {
+		name       string
+		containers []deps.ContainerWithDeps
+		plans      map[string]*restartPlan
+		marked     []string
+		want       [][]string
+	}{
+		{
+			name:       "shared target ref",
+			containers: []deps.ContainerWithDeps{{Name: "a"}, {Name: "b"}},
+			plans:      map[string]*restartPlan{"a": {newRef: "app:2"}, "b": {newRef: "app:2"}},
+			marked:     []string{"a", "b"},
+			want:       [][]string{{"a", "b"}},
+		},
+		{
+			name:       "shared compose project",
+			containers: []deps.ContainerWithDeps{{Name: "a", Container: summary("p")}, {Name: "b", Container: summary("p")}},
+			plans:      map[string]*restartPlan{"a": {newRef: "app:2"}, "b": {newRef: "app:3"}},
+			marked:     []string{"a", "b"},
+			want:       [][]string{{"a", "b"}},
+		},
+		{
+			name:       "network dependency",
+			containers: []deps.ContainerWithDeps{{Name: "a"}, {Name: "b", NetworkDeps: []string{"a"}}},
+			plans:      map[string]*restartPlan{"a": {newRef: "app:2"}, "b": {}},
+			marked:     []string{"a"},
+			want:       [][]string{{"a", "b"}},
+		},
+		{
+			name:       "unrelated split and unmarked dropped",
+			containers: []deps.ContainerWithDeps{{Name: "a"}, {Name: "b"}, {Name: "c"}},
+			plans:      map[string]*restartPlan{"a": {newRef: "app:2"}, "b": {newRef: "app:3"}, "c": {}},
+			marked:     []string{"a", "b"},
+			want:       [][]string{{"a"}, {"b"}},
+		},
+		{
+			name:       "unknown dependency ignored",
+			containers: []deps.ContainerWithDeps{{Name: "a", DependsOn: []string{"missing"}, Links: []string{"gone"}}, {Name: "b"}},
+			plans:      map[string]*restartPlan{"a": {newRef: "app:2"}, "b": {newRef: "app:3"}},
+			marked:     []string{"a", "b"},
+			want:       [][]string{{"a"}, {"b"}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			marked := map[string]bool{}
+			for _, name := range tt.marked {
+				marked[name] = true
+			}
+			var got [][]string
+			for _, unit := range partitionRestartUnits(&restartScan{plansByName: tt.plans, markedForRestart: marked, containers: tt.containers}) {
+				var names []string
+				for _, candidate := range unit {
+					names = append(names, candidate.Name)
+				}
+				got = append(got, names)
+			}
+			if !slices.EqualFunc(got, tt.want, slices.Equal[[]string]) {
+				t.Fatalf("units = %v, want %v", got, tt.want)
 			}
 		})
 	}

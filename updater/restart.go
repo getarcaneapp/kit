@@ -139,15 +139,75 @@ func (s *Service) sortRestartCandidates(ctx context.Context, scan *restartScan) 
 		s.logger.WarnContext(ctx, "container dependency sort failed; restarting in discovery order", "error", sortErr)
 		sorted = candidates
 	}
-	rank := func(candidate deps.ContainerWithDeps) int {
-		labels := candidate.Container.Labels
-		if config := kit.FromPtr(kit.FromPtr(scan.plansByName[candidate.Name]).inspect).Config; config != nil {
-			labels = config.Labels
-		}
-		return kit.Ternary(s.config.LabelPolicy.IsAgent(labels), 1, kit.Ternary(s.config.LabelPolicy.IsServer(labels), 2, 0))
-	}
-	slices.SortStableFunc(sorted, func(a, b deps.ContainerWithDeps) int { return cmp.Compare(rank(a), rank(b)) })
+	slices.SortStableFunc(sorted, func(a, b deps.ContainerWithDeps) int {
+		return cmp.Compare(s.restartRank(scan, a), s.restartRank(scan, b))
+	})
 	return sorted
+}
+
+// restartRank orders ordinary containers first, then agents, then the server hosting this process.
+func (s *Service) restartRank(scan *restartScan, candidate deps.ContainerWithDeps) int {
+	labels := candidate.Container.Labels
+	if config := kit.FromPtr(kit.FromPtr(scan.plansByName[candidate.Name]).inspect).Config; config != nil {
+		labels = config.Labels
+	}
+	return kit.Ternary(s.config.LabelPolicy.IsAgent(labels), 1, kit.Ternary(s.config.LabelPolicy.IsServer(labels), 2, 0))
+}
+
+// partitionRestartUnits splits scan containers into units joined by dependencies, Compose project, or a
+// shared target ref, in discovery order. Units without a restart-marked member are dropped.
+func partitionRestartUnits(scan *restartScan) [][]deps.ContainerWithDeps {
+	parent := make(map[string]string, len(scan.containers))
+	for _, candidate := range scan.containers {
+		parent[candidate.Name] = candidate.Name
+	}
+	find := func(name string) string {
+		for parent[name] != name {
+			parent[name] = parent[parent[name]]
+			name = parent[name]
+		}
+		return name
+	}
+	union := func(a, b string) {
+		if _, known := parent[b]; known {
+			parent[find(b)] = find(a)
+		}
+	}
+	firstByKey := map[string]string{}
+	for _, candidate := range scan.containers {
+		for _, dep := range slices.Concat(candidate.Links, candidate.DependsOn, candidate.NetworkDeps) {
+			union(candidate.Name, dep)
+		}
+		plan := kit.FromPtr(scan.plansByName[candidate.Name])
+		project := cmp.Or(compose.ProjectLabel(labelsFromInspect(kit.FromPtr(plan.inspect))), compose.ProjectLabel(candidate.Container.Labels))
+		for _, key := range []string{
+			kit.Ternary(project != "", "project:"+project, ""),
+			kit.Ternary(scan.markedForRestart[candidate.Name] && plan.newRef != "", "ref:"+plan.newRef, ""),
+		} {
+			if key == "" {
+				continue
+			}
+			if first, seen := firstByKey[key]; seen {
+				union(first, candidate.Name)
+			} else {
+				firstByKey[key] = candidate.Name
+			}
+		}
+	}
+
+	index := map[string]int{}
+	var units [][]deps.ContainerWithDeps
+	for _, candidate := range scan.containers {
+		root := find(candidate.Name)
+		if _, seen := index[root]; !seen {
+			index[root] = len(units)
+			units = append(units, nil)
+		}
+		units[index[root]] = append(units[index[root]], candidate)
+	}
+	return slices.DeleteFunc(units, func(unit []deps.ContainerWithDeps) bool {
+		return !slices.ContainsFunc(unit, func(candidate deps.ContainerWithDeps) bool { return scan.markedForRestart[candidate.Name] })
+	})
 }
 
 // executeRestartPlans routes each sorted candidate through Compose, the standalone recreate, or, last
@@ -304,10 +364,12 @@ func (s *Service) applyComposeServiceUpdate(
 	if group.tagChanges && projectErr != nil {
 		return standaloneRestartResult(name, plan, StatusFailed, projectErr.Error())
 	}
-	verifyErr := verifyComposeService(ctx, dockerClient, projectName, serviceName,
+	verifyCtx, cancel := s.opCtx(ctx)
+	verifyErr := verifyComposeService(verifyCtx, dockerClient, projectName, serviceName,
 		kit.Ternary(group.tagChanges, "", match.CurrentContainerImageID(plan.cnt, plan.inspect)),
 		kit.Ternary(group.tagChanges, plan.newRef, ""),
 	)
+	cancel()
 	if verifyErr != nil {
 		return standaloneRestartResult(name, plan, StatusFailed, kit.Ternary(projectErr != nil,
 			fmt.Sprintf("project-level update failed: %v; service update verification failed: %v", projectErr, verifyErr),

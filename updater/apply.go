@@ -94,6 +94,8 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 	}
 
 	// Containers still on a replaced image are restarted; a failed restart keeps its plan's record.
+	// This image-wide path pulls every record first because containers are found by old image ID after
+	// the pull; container-scoped and tag records go through applyTargetedRecords, one unit at a time.
 	var restarted []ResourceResult
 	if len(oldIDToNewRef) > 0 || len(oldRefToNewRef) > 0 {
 		restarted, err = s.RestartContainersUsingOldImages(ctx, oldIDToNewRef, oldRefToNewRef)
