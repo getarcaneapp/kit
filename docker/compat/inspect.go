@@ -205,6 +205,7 @@ func repairNetwork(payload map[string]any) bool {
 		for _, value := range configs {
 			if config, isMap := value.(map[string]any); isMap {
 				changed = rewriteFields(config, false, "Gateway", "AuxiliaryAddresses", "AuxAddress") || changed
+				changed = rewriteFields(config, true, "Subnet", "IPRange") || changed
 			}
 		}
 	}
@@ -295,8 +296,11 @@ func normalizeIP(raw string, keepPrefix bool) (string, bool) {
 	if trimmed == "" {
 		return "", false
 	}
-	if _, addrErr := netip.ParseAddr(trimmed); addrErr == nil && !keepPrefix {
-		return trimmed, trimmed != raw
+	if addr, addrErr := netip.ParseAddr(trimmed); addrErr == nil {
+		if !keepPrefix {
+			return trimmed, trimmed != raw
+		}
+		return netip.PrefixFrom(addr, addr.BitLen()).String(), true
 	}
 	prefix, err := netip.ParsePrefix(trimmed)
 	if err != nil {

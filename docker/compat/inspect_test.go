@@ -16,7 +16,8 @@ import (
 )
 
 const networkListJSON = `[{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge",
-	"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64","AuxiliaryAddresses":{"router":"fdd0:0:0:c::2/64"}}]}}]`
+	"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64","AuxiliaryAddresses":{"router":"fdd0:0:0:c::2/64"}},
+	{"Subnet":"192.168.0.0/24","IPRange":"192.168.0.3"}]}}]`
 
 const containerInspectJSON = `{"Id":"abc123","Name":"/app","Config":{"Image":"test:latest"},"HostConfig":{"NetworkMode":"bridge"},
 	"NetworkSettings":{"Networks":{"bridge":{"IPv6Gateway":"fdd0:0:0:c::1/64"}}}}`
@@ -94,14 +95,18 @@ func TestRepairNetwork(t *testing.T) {
 	t.Parallel()
 
 	inspect := repairJSON[networktypes.Inspect](t, `{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge","EnableIPv6":true,
-		"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64","AuxiliaryAddresses":{"router":"fdd0:0:0:c::2/64"}}]},
+		"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64","AuxiliaryAddresses":{"router":"fdd0:0:0:c::2/64"}},
+		{"Subnet":"192.168.0.0/24","IPRange":"192.168.0.3"}]},
 		"Containers":{"abc123":{"Name":"app","EndpointID":"ep1","IPv4Address":" 172.18.0.20/16 ","IPv6Address":" fdd0:0:0:c::10/64 "}}}`, repairNetwork)
 
-	if len(inspect.IPAM.Config) != 1 || inspect.IPAM.Config[0].Subnet != netip.MustParsePrefix("fdd0:0:0:c::/64") || inspect.IPAM.Config[0].Gateway != netip.MustParseAddr("fdd0:0:0:c::1") {
+	if len(inspect.IPAM.Config) != 2 || inspect.IPAM.Config[0].Subnet != netip.MustParsePrefix("fdd0:0:0:c::/64") || inspect.IPAM.Config[0].Gateway != netip.MustParseAddr("fdd0:0:0:c::1") {
 		t.Errorf("IPAM config = %+v", inspect.IPAM.Config)
 	}
 	if inspect.IPAM.Config[0].AuxAddress["router"] != netip.MustParseAddr("fdd0:0:0:c::2") {
 		t.Errorf("AuxAddress = %v", inspect.IPAM.Config[0].AuxAddress)
+	}
+	if inspect.IPAM.Config[1].IPRange != netip.MustParsePrefix("192.168.0.3/32") {
+		t.Errorf("IPRange = %v", inspect.IPAM.Config[1].IPRange)
 	}
 	endpoint := inspect.Containers["abc123"]
 	if endpoint.IPv4Address != netip.MustParsePrefix("172.18.0.20/16") || endpoint.IPv6Address != netip.MustParsePrefix("fdd0:0:0:c::10/64") {
@@ -123,6 +128,8 @@ func TestNormalizeIP(t *testing.T) {
 		{raw: "172.18.0.1/16", want: "172.18.0.1", changed: true},
 		{raw: " 172.18.0.20/16 ", keepPrefix: true, want: "172.18.0.20/16", changed: true},
 		{raw: "172.18.0.20/16", keepPrefix: true, want: "172.18.0.20/16"},
+		{raw: "192.168.0.3", keepPrefix: true, want: "192.168.0.3/32", changed: true},
+		{raw: "fdd0:0:0:c::3", keepPrefix: true, want: "fdd0:0:0:c::3/128", changed: true},
 		{raw: "not-an-ip"},
 		{raw: ""},
 	}
@@ -239,11 +246,14 @@ func TestNetworkListWithCompatibility(t *testing.T) {
 	})
 
 	result, err := NetworkListWithCompatibility(t.Context(), dockerClient, client.NetworkListOptions{Filters: make(client.Filters).Add("name", "test-net")})
-	if err != nil || len(result.Items) != 1 || len(result.Items[0].IPAM.Config) != 1 {
+	if err != nil || len(result.Items) != 1 || len(result.Items[0].IPAM.Config) != 2 {
 		t.Fatalf("result = %+v, err = %v", result, err)
 	}
 	if result.Items[0].IPAM.Config[0].Gateway != netip.MustParseAddr("fdd0:0:0:c::1") || result.Items[0].IPAM.Config[0].AuxAddress["router"] != netip.MustParseAddr("fdd0:0:0:c::2") {
 		t.Errorf("IPAM config = %+v", result.Items[0].IPAM.Config[0])
+	}
+	if result.Items[0].IPAM.Config[1].IPRange != netip.MustParsePrefix("192.168.0.3/32") {
+		t.Errorf("IPRange = %v", result.Items[0].IPAM.Config[1].IPRange)
 	}
 	if calls != 2 {
 		t.Errorf("calls = %d, want typed attempt plus raw retry", calls)
