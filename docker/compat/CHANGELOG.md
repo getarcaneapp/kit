@@ -1,3 +1,13 @@
+## docker/compat/v0.1.5
+
+### Bug fixes
+
+* repair bare-address IPAM subnets and IP ranges([545aefd](https://github.com/getarcaneapp/kit/commit/545aefd3d9967ecb8af28be8a32ab77544b30ef9) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/compat/v0.1.4...docker/compat/v0.1.5
+
 ## docker/compat/v0.1.4
 
 ### Bug fixes
