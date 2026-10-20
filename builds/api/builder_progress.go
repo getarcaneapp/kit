@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	json "encoding/json/v2"
+	"errors"
 	"io"
 	"sync"
 
@@ -81,6 +82,5 @@ func renderDockerBuildStream(ctx context.Context, reader io.Reader, w io.Writer)
 
 	err := jsonmessage.DisplayJSONMessagesStream(reader, w, 0, false, aux)
 	close(statusCh)
-	<-displayDone
-	return err
+	return errors.Join(err, <-displayDone)
 }
