@@ -1,3 +1,13 @@
+## updater/v0.11.10
+
+### Bug fixes
+
+* keep the original container until its replacement starts([167193d](https://github.com/getarcaneapp/kit/commit/167193d1f8a4dfcf87027c6f701a6f714c83f6e5) by @Kyle Mendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.9...updater/v0.11.10
+
 ## updater/v0.11.9
 
 ### Bug fixes
