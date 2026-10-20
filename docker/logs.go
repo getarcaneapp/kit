@@ -87,7 +87,11 @@ func StreamMultiplexedLogs(ctx context.Context, logs io.Reader, logsChan chan<- 
 		case <-ctx.Done():
 			closeInputs()
 			return ctx.Err()
-		case <-done:
+		case err = <-done:
+			if err != nil && !errors.Is(err, io.EOF) {
+				closeInputs()
+				return err
+			}
 			return nil
 		}
 	}
