@@ -305,13 +305,16 @@ func (s *Service) updateStandaloneRestartCandidates(
 	}()
 
 	results := make(map[string]ResourceResult, len(candidates))
+	backups := make(map[string]string, len(candidates))
 	for _, candidate := range slices.Backward(candidates) {
 		plan := plansByName[candidate.Name]
-		if err := s.stopAndRemoveStandaloneContainer(ctx, dockerClient, plan.cnt, *plan.inspect); err != nil {
+		backupID, err := s.stopAndRenameStandaloneContainer(ctx, dockerClient, plan.cnt, *plan.inspect)
+		if err != nil {
 			results[candidate.Name] = standaloneRestartResult(candidate.Name, plan, StatusFailed, err.Error())
-		} else {
-			results[candidate.Name] = standaloneRestartResult(candidate.Name, plan, StatusChecked, "")
+			continue
 		}
+		backups[candidate.Name] = backupID
+		results[candidate.Name] = standaloneRestartResult(candidate.Name, plan, StatusChecked, "")
 	}
 
 	for _, candidate := range candidates {
@@ -319,7 +322,7 @@ func (s *Service) updateStandaloneRestartCandidates(
 		if results[candidate.Name].Status == StatusFailed {
 			continue
 		}
-		if err := s.createStartOrRollback(ctx, dockerClient, plan.cnt, *plan.inspect, plan.newRef); err != nil {
+		if err := s.createStartOrRollback(ctx, dockerClient, plan.cnt, *plan.inspect, plan.newRef, backups[candidate.Name]); err != nil {
 			results[candidate.Name] = standaloneRestartResult(candidate.Name, plan, StatusFailed, err.Error())
 			continue
 		}

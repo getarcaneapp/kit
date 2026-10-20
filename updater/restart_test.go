@@ -55,6 +55,10 @@ func TestRestartContainersUsingOldImagesRestartsDependenciesInWatchtowerOrder(t 
 			id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/stop")
 			operations = append(operations, "stop:"+id)
 			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/rename"):
+			id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/rename")
+			operations = append(operations, "rename:"+id)
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
 			id := strings.TrimPrefix(path, "/containers/")
 			operations = append(operations, "remove:"+id)
@@ -81,9 +85,13 @@ func TestRestartContainersUsingOldImagesRestartsDependenciesInWatchtowerOrder(t 
 	}
 	assertOperationsInOrder(t, operations, []string{
 		"stop:web-id",
+		"rename:web-id",
 		"stop:db-id",
+		"rename:db-id",
 		"start:new-db-id",
+		"remove:db-id",
 		"start:new-web-id",
+		"remove:web-id",
 	})
 	statusByName := map[string]ResourceStatus{}
 	for _, result := range results {
@@ -123,6 +131,8 @@ func TestRestartContainersUsingOldImagesLogsCycleFallback(t *testing.T) {
 			writeDockerJSON(t, w, image.InspectResponse{ID: "sha256:new-b"})
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/stop"):
 			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/rename"):
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && path == "/containers/create":
@@ -277,6 +287,10 @@ func TestRestartContainersUsingOldImagesSelfContainerIDFiresAfterStandalone(t *t
 			id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/stop")
 			operations = append(operations, "stop:"+id)
 			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/rename"):
+			id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/rename")
+			operations = append(operations, "rename:"+id)
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
 			id := strings.TrimPrefix(path, "/containers/")
 			operations = append(operations, "remove:"+id)
@@ -311,7 +325,9 @@ func TestRestartContainersUsingOldImagesSelfContainerIDFiresAfterStandalone(t *t
 	// container ID) and only after every standalone recreate has finished.
 	assertOperationsInOrder(t, operations, []string{
 		"stop:app-id",
+		"rename:app-id",
 		"start:new-app-id",
+		"remove:app-id",
 		"self-update:self-id",
 	})
 	if len(selfUpdater.targets) != 1 || selfUpdater.targets[0].NewImageRef != "ghcr.io/getarcaneapp/arcane:2" {

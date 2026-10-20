@@ -101,9 +101,9 @@ func TestUpdateStandaloneContainerRollsBackAndRemovesDanglingCreateOnStartFailur
 		case r.Method == http.MethodPost && path == "/containers/old-id/stop":
 			operations = append(operations, "stop:old-id")
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodDelete && path == "/containers/old-id":
-			operations = append(operations, "remove:old-id")
-			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && path == "/containers/old-id/rename":
+			operations = append(operations, "rename:old-id:"+r.URL.Query().Get("name"))
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && path == "/containers/new-id":
 			operations = append(operations, "remove:new-id")
 			w.WriteHeader(http.StatusOK)
@@ -114,18 +114,13 @@ func TestUpdateStandaloneContainerRollsBackAndRemovesDanglingCreateOnStartFailur
 			}
 			createdImages = append(createdImages, body.Image)
 			createdLabels = append(createdLabels, body.Labels)
-			if len(createdImages) == 1 {
-				operations = append(operations, "create:new")
-				writeDockerJSON(t, w, map[string]any{"Id": "new-id", "Warnings": []string{}})
-				return
-			}
-			operations = append(operations, "create:rollback")
-			writeDockerJSON(t, w, map[string]any{"Id": "rollback-id", "Warnings": []string{}})
+			operations = append(operations, "create:new")
+			writeDockerJSON(t, w, map[string]any{"Id": "new-id", "Warnings": []string{}})
 		case r.Method == http.MethodPost && path == "/containers/new-id/start":
 			operations = append(operations, "start:new-id")
 			http.Error(w, "start failed", http.StatusInternalServerError)
-		case r.Method == http.MethodPost && path == "/containers/rollback-id/start":
-			operations = append(operations, "start:rollback-id")
+		case r.Method == http.MethodPost && path == "/containers/old-id/start":
+			operations = append(operations, "start:old-id")
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
@@ -157,38 +152,41 @@ func TestUpdateStandaloneContainerRollsBackAndRemovesDanglingCreateOnStartFailur
 	if !strings.Contains(err.Error(), "rollback succeeded") {
 		t.Fatalf("error = %q, want rollback succeeded detail", err.Error())
 	}
-	if len(createdImages) != 2 || createdImages[0] != "app:2" || createdImages[1] != "sha256:old-image" {
-		t.Fatalf("created images = %#v, want new ref then old image ID", createdImages)
+	if len(createdImages) != 1 || createdImages[0] != "app:2" {
+		t.Fatalf("created images = %#v, want only the new ref", createdImages)
 	}
 	// Labels equal to the old image's were inherited, so they are dropped for the daemon to merge in the new image's.
-	for i, phase := range []string{"new", "rollback"} {
-		for _, key := range []string{"org.opencontainers.image.version", "org.opencontainers.image.revision", "org.opencontainers.image.title"} {
-			if got, ok := createdLabels[i][key]; ok {
-				t.Fatalf("%s container %s = %q, want inherited label left to the image", phase, key, got)
-			}
+	for _, key := range []string{"org.opencontainers.image.version", "org.opencontainers.image.revision", "org.opencontainers.image.title"} {
+		if got, ok := createdLabels[0][key]; ok {
+			t.Fatalf("new container %s = %q, want inherited label left to the image", key, got)
 		}
-		if got := createdLabels[i]["org.opencontainers.image.source"]; got != "https://container.example/override" {
-			t.Fatalf("%s container OCI source = %q, want container override", phase, got)
-		}
-		if got := createdLabels[i]["com.example.custom"]; got != "keep" {
-			t.Fatalf("%s container custom label = %q, want keep", phase, got)
-		}
+	}
+	if got := createdLabels[0]["org.opencontainers.image.source"]; got != "https://container.example/override" {
+		t.Fatalf("new container OCI source = %q, want container override", got)
+	}
+	if got := createdLabels[0]["com.example.custom"]; got != "keep" {
+		t.Fatalf("new container custom label = %q, want keep", got)
 	}
 	if got := createdLabels[0]["com.docker.compose.image"]; got != "sha256:new-image" {
 		t.Fatalf("new container Compose image = %q, want sha256:new-image", got)
 	}
-	if got := createdLabels[1]["com.docker.compose.image"]; got != "sha256:old-image" {
-		t.Fatalf("rollback container Compose image = %q, want sha256:old-image", got)
+	if len(operations) < 2 || !strings.HasPrefix(operations[1], "rename:old-id:app-arcane-update-") {
+		t.Fatalf("operations = %#v, want old container renamed to a backup name", operations)
 	}
 	assertOperationsInOrder(t, operations, []string{
 		"stop:old-id",
-		"remove:old-id",
+		operations[1],
 		"create:new",
 		"start:new-id",
 		"remove:new-id",
-		"create:rollback",
-		"start:rollback-id",
+		"rename:old-id:app",
+		"start:old-id",
 	})
+	for _, operation := range operations {
+		if operation == "remove:old-id" {
+			t.Fatalf("operations = %#v, did not expect the backup to be removed after a failed update", operations)
+		}
+	}
 	var sawCleanup, sawRollback bool
 	for _, event := range recorder.events {
 		if event.Phase == "container_cleanup" {
@@ -223,25 +221,16 @@ func TestUpdateStandaloneContainerRemovesCreatedContainerWhenExtraNetworkConnect
 		case r.Method == http.MethodPost && path == "/containers/old-id/stop":
 			appendOperation("stop:old-id")
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodDelete && path == "/containers/old-id":
-			appendOperation("remove:old-id")
-			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodPost && path == "/containers/create":
-			var body container.Config
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode create body: %v", err)
-			}
-			if body.Image == "app:2" {
-				appendOperation("create:new")
-				writeDockerJSON(t, w, map[string]any{"Id": "new-id", "Warnings": []string{}})
-				return
-			}
-			if !newContainerRemoved() {
+		case r.Method == http.MethodPost && path == "/containers/old-id/rename":
+			if r.URL.Query().Get("name") == "app" && !newContainerRemoved() {
 				http.Error(w, "name already in use", http.StatusConflict)
 				return
 			}
-			appendOperation("create:rollback")
-			writeDockerJSON(t, w, map[string]any{"Id": "rollback-id", "Warnings": []string{}})
+			appendOperation("rename:old-id:" + r.URL.Query().Get("name"))
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && path == "/containers/create":
+			appendOperation("create:new")
+			writeDockerJSON(t, w, map[string]any{"Id": "new-id", "Warnings": []string{}})
 		case r.Method == http.MethodPost && path == "/networks/secondary/connect":
 			var body struct {
 				Container string
@@ -262,8 +251,8 @@ func TestUpdateStandaloneContainerRemovesCreatedContainerWhenExtraNetworkConnect
 			operations = append(operations, "remove:new-id")
 			operationsMu.Unlock()
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodPost && path == "/containers/rollback-id/start":
-			appendOperation("start:rollback-id")
+		case r.Method == http.MethodPost && path == "/containers/old-id/start":
+			appendOperation("start:old-id")
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
@@ -303,8 +292,8 @@ func TestUpdateStandaloneContainerRemovesCreatedContainerWhenExtraNetworkConnect
 		"create:new",
 		"connect:secondary:new-id",
 		"remove:new-id",
-		"create:rollback",
-		"start:rollback-id",
+		"rename:old-id:app",
+		"start:old-id",
 	})
 }
 
@@ -316,6 +305,9 @@ func TestUpdateStandaloneContainerTreatsAmbiguousStartErrorAsSuccessWhenInspectR
 		case r.Method == http.MethodPost && path == "/containers/old-id/stop":
 			operations = append(operations, "stop:old-id")
 			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && path == "/containers/old-id/rename":
+			operations = append(operations, "rename:old-id")
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && path == "/containers/old-id":
 			operations = append(operations, "remove:old-id")
 			w.WriteHeader(http.StatusOK)
@@ -353,8 +345,11 @@ func TestUpdateStandaloneContainerTreatsAmbiguousStartErrorAsSuccessWhenInspectR
 		t.Fatalf("updateComposeOrStandalone() error = %v, want nil after inspect confirms running", err)
 	}
 	assertOperationsInOrder(t, operations, []string{
+		"rename:old-id",
+		"create:app",
 		"start:new-id",
 		"inspect:new-id",
+		"remove:old-id",
 	})
 	for _, operation := range operations {
 		if operation == "remove:new-id" {
@@ -371,24 +366,15 @@ func TestUpdateStandaloneContainerRollsBackAmbiguousStartErrorWhenInspectNotRunn
 		case r.Method == http.MethodPost && path == "/containers/old-id/stop":
 			operations = append(operations, "stop:old-id")
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodDelete && path == "/containers/old-id":
-			operations = append(operations, "remove:old-id")
-			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && path == "/containers/old-id/rename":
+			operations = append(operations, "rename:old-id:"+r.URL.Query().Get("name"))
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && path == "/containers/new-id":
 			operations = append(operations, "remove:new-id")
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && path == "/containers/create":
-			var body container.Config
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode create body: %v", err)
-			}
-			if body.Image == "app:2" {
-				operations = append(operations, "create:new")
-				writeDockerJSON(t, w, map[string]any{"Id": "new-id", "Warnings": []string{}})
-				return
-			}
-			operations = append(operations, "create:rollback")
-			writeDockerJSON(t, w, map[string]any{"Id": "rollback-id", "Warnings": []string{}})
+			operations = append(operations, "create:new")
+			writeDockerJSON(t, w, map[string]any{"Id": "new-id", "Warnings": []string{}})
 		case r.Method == http.MethodPost && path == "/containers/new-id/start":
 			operations = append(operations, "start:new-id")
 			closeHTTPConnection(t, w)
@@ -400,8 +386,8 @@ func TestUpdateStandaloneContainerRollsBackAmbiguousStartErrorWhenInspectNotRunn
 				Image: "sha256:new-image",
 				State: &container.State{Running: false, Status: container.StateExited},
 			})
-		case r.Method == http.MethodPost && path == "/containers/rollback-id/start":
-			operations = append(operations, "start:rollback-id")
+		case r.Method == http.MethodPost && path == "/containers/old-id/start":
+			operations = append(operations, "start:old-id")
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
@@ -427,8 +413,8 @@ func TestUpdateStandaloneContainerRollsBackAmbiguousStartErrorWhenInspectNotRunn
 		"start:new-id",
 		"inspect:new-id",
 		"remove:new-id",
-		"create:rollback",
-		"start:rollback-id",
+		"rename:old-id:app",
+		"start:old-id",
 	})
 }
 
@@ -568,7 +554,7 @@ func (d *tagSelectionDocker) handler(t *testing.T) http.HandlerFunc {
 			}
 			d.created = append(d.created, config.Image)
 			writeDockerJSON(t, w, map[string]string{"Id": "new"})
-		case strings.HasSuffix(path, "/stop") || strings.HasSuffix(path, "/start") || r.Method == http.MethodDelete:
+		case strings.HasSuffix(path, "/stop") || strings.HasSuffix(path, "/start") || strings.HasSuffix(path, "/rename") || r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.Error(w, "unexpected "+path, http.StatusNotFound)

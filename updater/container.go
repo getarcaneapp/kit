@@ -10,6 +10,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
@@ -221,22 +222,53 @@ func (s *Service) updateComposeOrStandalone(ctx context.Context, target containe
 	if err != nil {
 		return err
 	}
-	if stopErr := s.stopAndRemoveStandaloneContainer(ctx, dockerClient, target, inspect); stopErr != nil {
+	backupID, stopErr := s.stopAndRenameStandaloneContainer(ctx, dockerClient, target, inspect)
+	if stopErr != nil {
 		return stopErr
 	}
-	return s.createStartOrRollback(ctx, dockerClient, target, inspect, newRef)
+	return s.createStartOrRollback(ctx, dockerClient, target, inspect, newRef, backupID)
 }
 
 // createStartOrRollback recreates the container as newRef, spelled like its configured image, and
-// recreates it from its old image ID when that fails.
-func (s *Service) createStartOrRollback(ctx context.Context, dockerClient *client.Client, cnt container.Summary, inspect container.InspectResponse, newRef string) error {
+// restores backupID, or recreates it from its old image ID without one, when that fails.
+func (s *Service) createStartOrRollback(ctx context.Context, dockerClient *client.Client, cnt container.Summary, inspect container.InspectResponse, newRef, backupID string) error {
 	newRef = kit.Ternary(inspect.Config == nil, newRef, refs.PreserveConfiguredRef(kit.FromPtr(inspect.Config).Image, newRef))
 	name := containerSummaryName(cnt)
 	createdID, err := s.createAndStartStandaloneContainer(ctx, dockerClient, cnt, inspect, newRef)
 	if err == nil {
+		if backupID == "" {
+			return nil
+		}
+		removeCtx, cancelRemove := s.opCtx(ctx)
+		_, removeErr := dockerClient.ContainerRemove(removeCtx, backupID, client.ContainerRemoveOptions{Force: true})
+		cancelRemove()
+		if removeErr != nil && !cerrdefs.IsNotFound(removeErr) {
+			s.logger.WarnContext(ctx, "failed to remove backup container after update", "containerId", backupID, "containerName", name, "error", removeErr)
+			return nil
+		}
+		_ = s.recordEvent(ctx, "container_delete", backupID, name, map[string]any{"action": "updater_delete"})
 		return nil
 	}
 	s.removeFailedCreatedContainer(ctx, dockerClient, createdID, name)
+
+	if backupID != "" {
+		restoreCtx, cancelRestore := s.opCtx(ctx)
+		defer cancelRestore()
+		if _, renameErr := dockerClient.ContainerRename(restoreCtx, backupID, client.ContainerRenameOptions{NewName: strings.TrimPrefix(inspect.Name, "/")}); renameErr != nil {
+			return fmt.Errorf("%w; rollback failed: rename backup: %w", err, renameErr)
+		}
+		if kit.FromPtr(inspect.State).Running || kit.FromPtr(inspect.State).Restarting {
+			if _, startErr := dockerClient.ContainerStart(restoreCtx, backupID, client.ContainerStartOptions{}); startErr != nil {
+				return fmt.Errorf("%w; rollback failed: start backup: %w", err, startErr)
+			}
+		}
+		_ = s.recordEvent(ctx, "container_rollback", backupID, name, map[string]any{
+			"action":         "updater_rollback",
+			"oldContainerID": cnt.ID,
+			"rollbackImage":  inspect.Image,
+		})
+		return fmt.Errorf("%w; rollback succeeded", err)
+	}
 
 	if strings.TrimSpace(inspect.Image) == "" {
 		return fmt.Errorf("%w; rollback failed: %w", err, errors.New("old image ID unavailable"))
@@ -254,33 +286,37 @@ func (s *Service) createStartOrRollback(ctx context.Context, dockerClient *clien
 	return fmt.Errorf("%w; rollback succeeded", err)
 }
 
-func (s *Service) stopAndRemoveStandaloneContainer(ctx context.Context, dockerClient *client.Client, cnt container.Summary, inspect container.InspectResponse) error {
+func (s *Service) stopAndRenameStandaloneContainer(ctx context.Context, dockerClient *client.Client, cnt container.Summary, inspect container.InspectResponse) (string, error) {
 	name := containerSummaryName(cnt)
 	stopCtx, cancelStop := s.opCtx(ctx)
 	_, err := dockerClient.ContainerStop(stopCtx, cnt.ID, client.ContainerStopOptions{Signal: s.config.LabelPolicy.StopSignal(labelsFromInspect(inspect))})
 	cancelStop()
 	if err != nil {
-		return fmt.Errorf("stop: %w", err)
+		return "", fmt.Errorf("stop: %w", err)
 	}
 	_ = s.recordEvent(ctx, "container_stop", cnt.ID, name, map[string]any{"action": "updater_stop"})
 
-	removeCtx, cancelRemove := s.opCtx(ctx)
-	defer cancelRemove()
+	opCtx, cancelOp := s.opCtx(ctx)
+	defer cancelOp()
 	if kit.FromPtr(inspect.HostConfig).AutoRemove {
 		// The daemon removes --rm containers once stopped; wait so the name is free for the recreate.
-		wait := dockerClient.ContainerWait(removeCtx, cnt.ID, client.ContainerWaitOptions{Condition: container.WaitConditionRemoved})
+		wait := dockerClient.ContainerWait(opCtx, cnt.ID, client.ContainerWaitOptions{Condition: container.WaitConditionRemoved})
 		select {
 		case <-wait.Result:
 		case err = <-wait.Error:
 		}
-	} else {
-		_, err = dockerClient.ContainerRemove(removeCtx, cnt.ID, client.ContainerRemoveOptions{})
+		if err != nil && !cerrdefs.IsNotFound(err) {
+			return "", fmt.Errorf("remove: %w", err)
+		}
+		_ = s.recordEvent(ctx, "container_delete", cnt.ID, name, map[string]any{"action": "updater_delete"})
+		return "", nil
 	}
-	if err != nil && !cerrdefs.IsNotFound(err) {
-		return fmt.Errorf("remove: %w", err)
+	if _, err = dockerClient.ContainerRename(opCtx, cnt.ID, client.ContainerRenameOptions{
+		NewName: fmt.Sprintf("%s-arcane-update-%d", strings.TrimPrefix(inspect.Name, "/"), time.Now().Unix()),
+	}); err != nil {
+		return "", fmt.Errorf("rename: %w", err)
 	}
-	_ = s.recordEvent(ctx, "container_delete", cnt.ID, name, map[string]any{"action": "updater_delete"})
-	return nil
+	return cnt.ID, nil
 }
 
 // createAndStartStandaloneContainer recreates inspect's container from imageRef, starting it only if the old one ran.

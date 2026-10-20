@@ -305,6 +305,8 @@ func TestApplyPendingRestartsStaleContainersWhenImageAlreadyPulled(t *testing.T)
 			writeDockerJSON(t, w, container.InspectResponse{State: &container.State{Running: true}, ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/stop"):
 			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/rename"):
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && path == "/containers/create":
@@ -410,6 +412,8 @@ func TestApplyPendingKeepsPulledRecordWhenRestartFails(t *testing.T) {
 			writeDockerJSON(t, w, container.InspectResponse{State: &container.State{Running: true}, ID: "app-id", Name: "/app", Image: "sha256:old-app", Config: &container.Config{Image: "app:1"}})
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/stop"):
 			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/rename"):
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && path == "/containers/create":
