@@ -115,46 +115,8 @@ func repair[T, P any](ctx context.Context, apiClient client.APIClient, decodeErr
 	if decodeErr == nil || !strings.Contains(decodeErr.Error(), "ParseAddr(") && !strings.Contains(decodeErr.Error(), "ParsePrefix(") {
 		return repaired, nil, false
 	}
-	// fetch performs a raw GET through the client's dialer, which keeps the
-	// client's TLS and socket transport without its typed decoding.
-	raw, err := func() ([]byte, error) {
-		dialer := apiClient.Dialer()
-		if dialer == nil {
-			return nil, errors.New("docker api client does not expose a dialer")
-		}
-		version := strings.TrimSpace(strings.TrimPrefix(apiClient.ClientVersion(), "v"))
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, (&url.URL{
-			Scheme:   "http",
-			Host:     client.DummyHost,
-			Path:     path.Join("/", kit.Ternary(version == "", "", "/v"+version), resource),
-			RawQuery: query.Encode(),
-		}).String(), http.NoBody)
-		if err != nil {
-			return nil, err
-		}
-		conn, err := dialer(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = conn.Close() }()
-		err = req.Write(conn)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := http.ReadResponse(bufio.NewReader(conn), req)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = resp.Body.Close() }()
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, fmt.Errorf("docker api GET %s failed with %s: %s", resource, resp.Status, strings.TrimSpace(string(body)))
-		}
-		return body, nil
-	}()
+	version := strings.TrimSpace(strings.TrimPrefix(apiClient.ClientVersion(), "v"))
+	raw, err := rawGet(ctx, apiClient, path.Join("/", kit.Ternary(version == "", "", "/v"+version), resource), query)
 	if err != nil {
 		return repaired, nil, false
 	}
@@ -167,6 +129,44 @@ func repair[T, P any](ctx context.Context, apiClient client.APIClient, decodeErr
 		return repaired, nil, false
 	}
 	return repaired, normalized, true
+}
+
+func rawGet(ctx context.Context, apiClient client.APIClient, requestPath string, query url.Values) ([]byte, error) {
+	dialer := apiClient.Dialer()
+	if dialer == nil {
+		return nil, errors.New("docker api client does not expose a dialer")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, (&url.URL{
+		Scheme:   "http",
+		Host:     client.DummyHost,
+		Path:     requestPath,
+		RawQuery: query.Encode(),
+	}).String(), http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := dialer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+	err = req.Write(conn)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("docker api GET %s failed with %s: %s", requestPath, resp.Status, strings.TrimSpace(string(body)))
+	}
+	return body, nil
 }
 
 // repairContainerInspect strips CIDR suffixes from every address in a

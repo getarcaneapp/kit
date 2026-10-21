@@ -2,8 +2,12 @@ package compat
 
 import (
 	"context"
+	"encoding/json/v2"
+	"fmt"
 	"maps"
+	"path"
 	"slices"
+	"strconv"
 	"strings"
 
 	containertypes "github.com/moby/moby/api/types/container"
@@ -60,7 +64,12 @@ func (e EngineCompatibilityInfo) SanitizeRecreateHostConfig(hostConfig *containe
 // PrepareRecreateHostConfigForEngine shallow-copies hostConfig and removes the
 // options the connected engine rejects, returning the copy, whether anything
 // was removed, and the engine details behind that decision.
-func PrepareRecreateHostConfigForEngine(ctx context.Context, dockerClient client.APIClient, hostConfig *containertypes.HostConfig) (*containertypes.HostConfig, bool, EngineCompatibilityInfo, error) {
+func PrepareRecreateHostConfigForEngine(
+	ctx context.Context,
+	dockerClient client.APIClient,
+	containerID string,
+	hostConfig *containertypes.HostConfig,
+) (*containertypes.HostConfig, bool, EngineCompatibilityInfo, error) {
 	if hostConfig == nil {
 		return nil, false, EngineCompatibilityInfo{}, nil
 	}
@@ -74,5 +83,61 @@ func PrepareRecreateHostConfigForEngine(ctx context.Context, dockerClient client
 		return cloned, false, EngineCompatibilityInfo{}, err
 	}
 	engine := DetectEngineCompatibility(serverVersion, infoResult.Info)
-	return cloned, engine.SanitizeRecreateHostConfig(cloned), engine, nil
+	sanitized := engine.SanitizeRecreateHostConfig(cloned)
+	if engine.Name != "podman" || cloned.UsernsMode != "private" {
+		return cloned, sanitized, engine, nil
+	}
+	raw, err := rawGet(ctx, dockerClient, path.Join("/v4.0.0/libpod/containers", strings.TrimSpace(containerID), "json"), nil)
+	if err != nil {
+		return cloned, sanitized, engine, fmt.Errorf("inspect podman user namespace of %s: %w", containerID, err)
+	}
+	var inspect struct {
+		HostConfig struct {
+			IDMappings struct {
+				UIDMap []string `json:"UidMap"`
+				GIDMap []string `json:"GidMap"`
+			}
+		}
+	}
+	if err = json.Unmarshal(raw, &inspect); err != nil {
+		return cloned, sanitized, engine, fmt.Errorf("decode podman user namespace of %s: %w", containerID, err)
+	}
+	usernsMode, err := keepIDUsernsMode(inspect.HostConfig.IDMappings.UIDMap, inspect.HostConfig.IDMappings.GIDMap)
+	if err != nil {
+		return cloned, sanitized, engine, fmt.Errorf("recreate podman user namespace of %s: %w", containerID, err)
+	}
+	cloned.UsernsMode = usernsMode
+	return cloned, sanitized, engine, nil
+}
+
+func keepIDUsernsMode(uidMap, gidMap []string) (containertypes.UsernsMode, error) {
+	keepID := func(kind string, entries []string) (uint64, error) {
+		for _, entry := range entries {
+			fields := strings.Split(strings.TrimSpace(entry), ":")
+			if len(fields) != 3 {
+				return 0, fmt.Errorf("malformed %s mapping %q", kind, entry)
+			}
+			ids := make([]uint64, len(fields))
+			for i, field := range fields {
+				id, err := strconv.ParseUint(field, 10, 32)
+				if err != nil {
+					return 0, fmt.Errorf("malformed %s mapping %q: %w", kind, entry, err)
+				}
+				ids[i] = id
+			}
+			if ids[1] == 0 && ids[2] == 1 {
+				return ids[0], nil
+			}
+		}
+		return 0, fmt.Errorf("no keep-id %s mapping in %q; only keep-id user namespaces can be recreated", kind, entries)
+	}
+	uid, err := keepID("uid", uidMap)
+	if err != nil {
+		return "", err
+	}
+	gid, err := keepID("gid", gidMap)
+	if err != nil {
+		return "", err
+	}
+	return containertypes.UsernsMode(fmt.Sprintf("keep-id:uid=%d,gid=%d", uid, gid)), nil
 }

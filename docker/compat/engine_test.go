@@ -12,7 +12,7 @@ import (
 func TestPrepareRecreateHostConfigForEngine_NilHostConfig(t *testing.T) {
 	t.Parallel()
 
-	out, sanitized, engine, err := PrepareRecreateHostConfigForEngine(t.Context(), nil, nil)
+	out, sanitized, engine, err := PrepareRecreateHostConfigForEngine(t.Context(), nil, "", nil)
 	if err != nil || out != nil || sanitized || engine != (EngineCompatibilityInfo{}) {
 		t.Errorf("got (%v, %t, %+v, %v), want nil config and zero engine info", out, sanitized, engine, err)
 	}
@@ -104,6 +104,65 @@ func TestDetectEngineCompatibility(t *testing.T) {
 			t.Parallel()
 			if got := DetectEngineCompatibility(tt.version, tt.info); got != tt.want {
 				t.Errorf("DetectEngineCompatibility = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKeepIDUsernsMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		uidMap  []string
+		gidMap  []string
+		want    containertypes.UsernsMode
+		wantErr bool
+	}{
+		{
+			name:   "keep-id with uid and gid 1000",
+			uidMap: []string{"0:1:1000", "1000:0:1", "1001:1001:64536"},
+			gidMap: []string{"0:1:1000", "1000:0:1", "1001:1001:64536"},
+			want:   "keep-id:uid=1000,gid=1000",
+		},
+		{
+			name:   "keep-id with different uid and gid",
+			uidMap: []string{"0:1:1000", "1000:0:1", "1001:1001:64536"},
+			gidMap: []string{"0:1:2000", "2000:0:1", "2001:2001:63536"},
+			want:   "keep-id:uid=1000,gid=2000",
+		},
+		{
+			name:    "no keep-id entry",
+			uidMap:  []string{"0:1:65536"},
+			gidMap:  []string{"0:1:65536"},
+			wantErr: true,
+		},
+		{
+			name:    "malformed entry",
+			uidMap:  []string{"1000:0"},
+			gidMap:  []string{"1000:0:1"},
+			wantErr: true,
+		},
+		{
+			name:    "non-numeric entry",
+			uidMap:  []string{"1000:0:1"},
+			gidMap:  []string{"abc:0:1"},
+			wantErr: true,
+		},
+		{
+			name:    "empty maps",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := keepIDUsernsMode(tt.uidMap, tt.gidMap)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("keepIDUsernsMode error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("keepIDUsernsMode = %q, want %q", got, tt.want)
 			}
 		})
 	}
