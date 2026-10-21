@@ -326,7 +326,7 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 	if err != nil {
 		s.logger.WarnContext(ctx, "could not inspect previous image; keeping its inherited container config", "image", inspect.Image, "error", err)
 	}
-	hostConfig, _, _, err := compat.PrepareRecreateHostConfigForEngine(ctx, dockerClient, inspect.HostConfig)
+	hostConfig, _, _, err := compat.PrepareRecreateHostConfigForEngine(ctx, dockerClient, inspect.ID, inspect.HostConfig)
 	if err != nil {
 		return "", fmt.Errorf("prepare host config: %w", err)
 	}
