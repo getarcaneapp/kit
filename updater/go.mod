@@ -9,7 +9,7 @@ require (
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v29.9.0+incompatible
+	github.com/docker/cli v29.9.1+incompatible
 	github.com/google/go-containerregistry v0.22.1
 	github.com/moby/docker-image-spec v1.3.1
 	github.com/moby/moby/api v1.56.1
