@@ -1,3 +1,13 @@
+## updater/v0.11.11
+
+### Bug fixes
+
+* pass the container id when preparing the recreate host config([395894f](https://github.com/getarcaneapp/kit/commit/395894ff3461bc635f7ce6bc5ae32f035dc1e830) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.10...updater/v0.11.11
+
 ## updater/v0.11.10
 
 ### Bug fixes
