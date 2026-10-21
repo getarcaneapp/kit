@@ -1,3 +1,13 @@
+## docker/compat/v0.1.6
+
+### Bug fixes
+
+* recreate podman keep-id containers with their user namespace([dd8cd54](https://github.com/getarcaneapp/kit/commit/dd8cd54659d60b62167fab0020cbf49359ead413) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/compat/v0.1.5...docker/compat/v0.1.6
+
 ## docker/compat/v0.1.5
 
 ### Bug fixes
