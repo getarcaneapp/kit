@@ -1,3 +1,14 @@
+## builds/v0.4.7
+
+### Bug fixes
+
+* return the progress display error from docker build streams([2ca4bf2](https://github.com/getarcaneapp/kit/commit/2ca4bf2f8376fbe93a6ec5b625f0c25a902bdd3a) by @kmendell)
+* bump deps([b1c02ac](https://github.com/getarcaneapp/kit/commit/b1c02ac9e1bb12b26121768b16e9d5b651cc0ff0) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.4.6...builds/v0.4.7
+
 ## builds/v0.4.6
 
 ### Bug fixes
