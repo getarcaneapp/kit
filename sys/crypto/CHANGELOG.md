@@ -1,3 +1,13 @@
+## sys/crypto/v0.3.3
+
+### Bug fixes
+
+* bump deps([b1c02ac](https://github.com/getarcaneapp/kit/commit/b1c02ac9e1bb12b26121768b16e9d5b651cc0ff0) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/crypto/v0.3.2...sys/crypto/v0.3.3
+
 ## sys/crypto/v0.3.2
 
 ### Bug fixes
