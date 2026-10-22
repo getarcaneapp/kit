@@ -1,3 +1,13 @@
+## docker/v0.1.3
+
+### Bug fixes
+
+* return the second log reader's error([68e8de1](https://github.com/getarcaneapp/kit/commit/68e8de1f59d130c369021ebecce7b2c9049cbb1d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.1.2...docker/v0.1.3
+
 ## docker/v0.1.2
 
 ### Bug fixes
