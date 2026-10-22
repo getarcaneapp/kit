@@ -5,7 +5,7 @@ go 1.27
 replace go.getarcane.app/kit => ../../
 
 require (
-	github.com/compose-spec/compose-go/v2 v2.16.1
+	github.com/compose-spec/compose-go/v2 v2.16.2
 	github.com/docker/go-units v0.5.0
 	github.com/mattn/go-shellwords v1.0.16
 	go.getarcane.app/kit v0.4.2
