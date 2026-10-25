@@ -43,7 +43,7 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		if !record.NeedsUpdate() {
 			continue
 		}
-		state, planned, collectErr := s.collectTargetRecord(ctx, dockerClient, listed.Items, proxy, record, plansByName, markedForRestart, out)
+		state, planned, collectErr := s.collectTargetRecord(ctx, dockerClient, listed.Items, proxy, record, exclusionPolicy(!opts.IgnoreSettingsExclusions), plansByName, markedForRestart, out)
 		if collectErr != nil {
 			return collectErr
 		}
@@ -158,6 +158,7 @@ func (s *Service) collectTargetRecord(
 	containers []container.Summary,
 	proxy string,
 	record ImageUpdateRecord,
+	exclusions exclusionPolicy,
 	plansByName map[string]*restartPlan,
 	markedForRestart map[string]bool,
 	out *Result,
@@ -187,7 +188,7 @@ func (s *Service) collectTargetRecord(
 			continue
 		}
 		targets = append(targets, cnt.ID)
-		plan, reason, planErr := s.targetRecordPlan(ctx, cnt, inspect, record)
+		plan, reason, planErr := s.targetRecordPlan(ctx, cnt, inspect, record, exclusions)
 		if planErr != nil || reason != "" {
 			failed = true
 			if reason != "" {
@@ -219,8 +220,8 @@ func (s *Service) collectTargetRecord(
 }
 
 // targetRecordPlan validates that record still applies to the container under its current policy.
-func (s *Service) targetRecordPlan(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, record ImageUpdateRecord) (*restartPlan, string, error) {
-	reason, err := s.containerEligibility(ctx, inspect, enforceSettingsExclusions)
+func (s *Service) targetRecordPlan(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, record ImageUpdateRecord, exclusions exclusionPolicy) (*restartPlan, string, error) {
+	reason, err := s.containerEligibility(ctx, inspect, exclusions)
 	if err != nil || reason != "" {
 		return nil, reason, err
 	}

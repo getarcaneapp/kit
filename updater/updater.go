@@ -65,6 +65,7 @@ func New(config Config) (*Service, error) {
 		IsServerFunc:           kit.Ternary(config.LabelPolicy.IsServerFunc == nil, defaults.IsServerFunc, config.LabelPolicy.IsServerFunc),
 		IsSwarmTaskFunc:        kit.Ternary(config.LabelPolicy.IsSwarmTaskFunc == nil, defaults.IsSwarmTaskFunc, config.LabelPolicy.IsSwarmTaskFunc),
 		StopSignalFunc:         kit.Ternary(config.LabelPolicy.StopSignalFunc == nil, defaults.StopSignalFunc, config.LabelPolicy.StopSignalFunc),
+		UnmanagedReasonFunc:    config.LabelPolicy.UnmanagedReasonFunc,
 	}
 	service := &Service{
 		config:            config,

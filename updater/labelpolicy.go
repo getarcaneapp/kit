@@ -17,6 +17,7 @@ type LabelPolicy struct {
 	IsServerFunc           func(map[string]string) bool
 	IsSwarmTaskFunc        func(map[string]string) bool
 	StopSignalFunc         func(map[string]string) string
+	UnmanagedReasonFunc    func(map[string]string) string
 }
 
 // DefaultLabelPolicy returns the Arcane-compatible label behavior New uses for
@@ -62,6 +63,14 @@ func (p LabelPolicy) IsServer(containerLabels map[string]string) bool {
 // IsSwarmTask reports whether labels identify a Docker Swarm task container.
 func (p LabelPolicy) IsSwarmTask(containerLabels map[string]string) bool {
 	return p.IsSwarmTaskFunc != nil && p.IsSwarmTaskFunc(containerLabels)
+}
+
+// UnmanagedReason reports why another tool owns the container's updates, or "" when the updater may.
+func (p LabelPolicy) UnmanagedReason(containerLabels map[string]string) string {
+	if p.UnmanagedReasonFunc == nil {
+		return ""
+	}
+	return p.UnmanagedReasonFunc(containerLabels)
 }
 
 // StopSignal returns the configured stop signal for a container, or "" when the

@@ -31,7 +31,7 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 	if len(records) == 0 {
 		return out, nil
 	}
-	usedImages, err := s.usedImages(ctx)
+	usedImages, err := s.usedImages(ctx, exclusionPolicy(!opts.IgnoreSettingsExclusions))
 	if err != nil {
 		return nil, fmt.Errorf("collect used images: %w", err)
 	}
@@ -98,7 +98,7 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 	// the pull; container-scoped and tag records go through applyTargetedRecords, one unit at a time.
 	var restarted []ResourceResult
 	if len(oldIDToNewRef) > 0 || len(oldRefToNewRef) > 0 {
-		restarted, err = s.RestartContainersUsingOldImages(ctx, oldIDToNewRef, oldRefToNewRef)
+		restarted, err = s.restartContainersUsingOldImages(ctx, oldIDToNewRef, oldRefToNewRef, exclusionPolicy(!opts.IgnoreSettingsExclusions))
 		for _, item := range restarted {
 			s.appendRecordedResult(ctx, out, item)
 		}
@@ -168,7 +168,7 @@ func (s *Service) dockerClient(ctx context.Context) (*client.Client, error) {
 }
 
 // usedImages returns the normalized references of images that running, eligible containers use.
-func (s *Service) usedImages(ctx context.Context) (map[string]struct{}, error) {
+func (s *Service) usedImages(ctx context.Context, exclusions exclusionPolicy) (map[string]struct{}, error) {
 	if s.config.UsedImageCollector != nil {
 		return s.config.UsedImageCollector.UsedImages(ctx)
 	}
@@ -188,7 +188,8 @@ func (s *Service) usedImages(ctx context.Context) (map[string]struct{}, error) {
 	policy := s.config.LabelPolicy
 	out := map[string]struct{}{}
 	for _, summary := range listResult.Items {
-		if isExcluded(excluded, summary.ID, summary.Names...) || policy.IsUpdateDisabled(summary.Labels) ||
+		if (exclusions == enforceSettingsExclusions && (isExcluded(excluded, summary.ID, summary.Names...) || policy.IsUpdateDisabled(summary.Labels))) ||
+			policy.UnmanagedReason(summary.Labels) != "" ||
 			(policy.IsSwarmTask(summary.Labels) && !policy.IsSelfUpdateTarget(summary.Labels)) {
 			continue
 		}
@@ -197,7 +198,8 @@ func (s *Service) usedImages(ctx context.Context) (map[string]struct{}, error) {
 			continue
 		}
 		inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, summary.ID, client.ContainerInspectOptions{})
-		if inspectErr != nil || inspectResult.Container.Config == nil || policy.IsUpdateDisabled(inspectResult.Container.Config.Labels) {
+		if inspectErr != nil || inspectResult.Container.Config == nil ||
+			(exclusions == enforceSettingsExclusions && policy.IsUpdateDisabled(inspectResult.Container.Config.Labels)) {
 			continue
 		}
 		candidates := []string{inspectResult.Container.Config.Image}

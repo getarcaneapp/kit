@@ -15,8 +15,9 @@ type Options struct {
 	// DryRun reports what would be updated without pulling or recreating
 	// anything.
 	DryRun bool `json:"dryRun,omitempty"`
-	// IgnoreSettingsExclusions lets UpdateContainer update its requested container despite a settings
-	// exclusion or updater opt-out label. Batch and dependency passes still honor both, and Swarm and immutability checks still apply.
+	// IgnoreSettingsExclusions lets a user-requested run update the containers it targets despite a settings
+	// exclusion or updater opt-out label. Implicit dependency restarts still honor both, and Swarm, unmanaged,
+	// and immutability checks still apply.
 	IgnoreSettingsExclusions bool `json:"ignoreSettingsExclusions,omitempty"`
 }
 

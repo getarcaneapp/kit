@@ -193,6 +193,9 @@ func (s *Service) containerEligibility(ctx context.Context, inspect container.In
 	if s.config.LabelPolicy.IsSwarmTask(labels) && !s.isSelfUpdateCandidate(inspect.ID, labels) {
 		return "swarm service; update at the service level", nil
 	}
+	if reason := s.config.LabelPolicy.UnmanagedReason(labels); reason != "" {
+		return reason, nil
+	}
 	if policy == ignoreSettingsExclusions {
 		return "", nil
 	}

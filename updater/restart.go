@@ -30,6 +30,10 @@ type restartScan struct {
 // RestartContainersUsingOldImages restarts running containers matching old image IDs or refs, plus
 // their dependents. A dependency cycle falls back to discovery order.
 func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNewRef, oldRefToNewRef map[string]string) ([]ResourceResult, error) {
+	return s.restartContainersUsingOldImages(ctx, oldIDToNewRef, oldRefToNewRef, enforceSettingsExclusions)
+}
+
+func (s *Service) restartContainersUsingOldImages(ctx context.Context, oldIDToNewRef, oldRefToNewRef map[string]string, exclusions exclusionPolicy) ([]ResourceResult, error) {
 	dockerClient, err := s.dockerClient(ctx)
 	if err != nil {
 		return nil, err
@@ -42,9 +46,7 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNe
 	if err != nil {
 		return nil, err
 	}
-	if proxy := dockerProxyContainerName(dockerClient.DaemonHost()); proxy != "" {
-		excluded[proxy] = true
-	}
+	proxy := dockerProxyContainerName(dockerClient.DaemonHost())
 
 	updatedNorm := refs.NormalizeImageUpdateRefMapKeys(oldRefToNewRef)
 	targetImageIDs := digestcheck.NewRefIDCache(digestcheck.NewChecker(dockerClient, nil))
@@ -52,12 +54,13 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNe
 	plansByName, markedForRestart := map[string]*restartPlan{}, map[string]bool{}
 	var containers []deps.ContainerWithDeps
 	for _, summary := range listResult.Items {
-		if isExcluded(excluded, summary.ID, summary.Names...) || policy.IsUpdateDisabled(summary.Labels) ||
+		optedOut := isExcluded(excluded, summary.ID, summary.Names...) || policy.IsUpdateDisabled(summary.Labels)
+		name := containerSummaryName(summary)
+		if (proxy != "" && isExcluded(map[string]bool{proxy: true}, summary.ID, summary.Names...)) || (optedOut && exclusions == enforceSettingsExclusions) ||
+			policy.UnmanagedReason(summary.Labels) != "" ||
 			(policy.IsSwarmTask(summary.Labels) && !policy.IsSelfUpdateTarget(summary.Labels)) {
 			continue
 		}
-		name := containerSummaryName(summary)
-		containers = append(containers, deps.ContainerWithDeps{Container: summary, Name: name})
 
 		// Inspect only when the summary alone cannot settle the match.
 		var inspected *container.InspectResponse
@@ -72,6 +75,10 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNe
 		if newRef != "" && currentImageID != "" && slices.Contains(targetImageIDs.IDsForRef(ctx, newRef), currentImageID) {
 			newRef = ""
 		}
+		if optedOut && newRef == "" {
+			continue
+		}
+		containers = append(containers, deps.ContainerWithDeps{Container: summary, Name: name})
 		plansByName[name] = &restartPlan{
 			cnt:     summary,
 			inspect: inspected,
