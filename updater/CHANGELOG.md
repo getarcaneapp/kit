@@ -1,3 +1,13 @@
+## updater/v0.11.13
+
+### Bug fixes
+
+* let user-requested batch runs skip opt-outs; add unmanaged guard([428fe53](https://github.com/getarcaneapp/kit/commit/428fe53c3aea2679218fe7ecb694c8ac2800967d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.12...updater/v0.11.13
+
 ## updater/v0.11.12
 
 ### Bug fixes
