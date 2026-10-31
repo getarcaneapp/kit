@@ -1,3 +1,9 @@
+## sys/bytes/v0.3.1
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/bytes/v0.3.0...sys/bytes/v0.3.1
+
 ## sys/bytes/v0.3.0
 
 ### New features
