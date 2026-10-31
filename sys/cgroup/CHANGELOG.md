@@ -1,3 +1,13 @@
+## sys/cgroup/v0.2.6
+
+### Performance improvements
+
+* memoize container detection([f095842](https://github.com/getarcaneapp/kit/commit/f095842905b4eb0ba7b2d558b2d3ba06cd1e36b0) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.2.5...sys/cgroup/v0.2.6
+
 ## sys/cgroup/v0.2.5
 
 ### Bug fixes
