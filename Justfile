@@ -151,15 +151,15 @@ snapshot:
 
 # Create a new release for a module (use --test to dry-run without writing anything).
 # The bump is derived from conventional commits since the module's latest tag:
-# feat -> minor, fix -> patch; --patch, --minor, or --major forces a bump. An explicit
+# feat -> minor, any other commit -> patch; --patch, --minor, or --major forces a bump. An explicit
 # version skips the bump detection, e.g. when a module moved in already tagged.
 # Nested modules tag as <module>/vX.Y.Z, the root kit module as vX.Y.Z.
 # Each release also points the module's go.getarcane.app requirements at their
 # latest tags, so the published go.mod matches what it was built against.
 #
-# "all" releases, in dependency order, every module with feat or fix commits since
-# its latest tag, after one confirmation. A bump flag only changes the level for
-# those modules; modules without feat or fix commits are never released.
+# "all" releases, in dependency order, every module with commits since its latest
+# tag, after one confirmation. A bump flag only changes the level for those
+# modules; modules without commits are never released.
 #
 # Usage:
 #   just release acfs
@@ -179,7 +179,7 @@ release module *args:
     EXPLICIT_VERSION=""
     # Internal flags used by "all": --print-tag prints only the tag that would be
     # created (nothing when no release is due), --require-changes skips modules
-    # without feat or fix commits even when a bump flag is given.
+    # without commits even when a bump flag is given.
     PRINT_TAG=false
     REQUIRE_CHANGES=false
     set -- {{ args }}
@@ -277,7 +277,7 @@ release module *args:
         done
 
         PLAN=()
-        echo "Checking modules for feat or fix commits..."
+        echo "Checking modules for commits since their latest release..."
         for module in "${ORDER[@]}"; do
             tag=$(just release "$module" --print-tag --require-changes "$@")
             if [ -n "$tag" ]; then
@@ -286,7 +286,7 @@ release module *args:
             fi
         done
         if [ ${#PLAN[@]} -eq 0 ]; then
-            echo "No module has feat or fix commits since its latest release. Nothing to release."
+            echo "No module has commits since its latest release. Nothing to release."
             exit 0
         fi
 
@@ -413,7 +413,7 @@ release module *args:
         DETECTED_TYPE="minor"
     elif echo "$SUBJECTS" | grep -Eiq '^feat(\([^)]+\))?: '; then
         DETECTED_TYPE="minor"
-    elif echo "$SUBJECTS" | grep -Eiq '^fix(\([^)]+\))?: '; then
+    elif [ -n "$SUBJECTS" ]; then
         DETECTED_TYPE="patch"
     fi
     if [ -n "$EXPLICIT_VERSION" ]; then
@@ -424,9 +424,7 @@ release module *args:
         RELEASE_TYPE="$DETECTED_TYPE"
     else
         if [ "$PRINT_TAG" != true ]; then
-            echo "No 'fix' or 'feat' commits found for {{ module }} since the latest release (${LATEST_TAG}). No new release will be created."
-            echo "Commits since ${LATEST_TAG}:"
-            git log --oneline --no-merges "${LATEST_TAG}..HEAD" "${PATHSPEC[@]}" || true
+            echo "No commits found for {{ module }} since the latest release (${LATEST_TAG}). No new release will be created."
         fi
         exit 0
     fi
