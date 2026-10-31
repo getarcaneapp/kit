@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/shirou/gopsutil/v4/host"
 )
@@ -148,7 +149,7 @@ func DetectLimits() (*Limits, error) {
 // Detection: Docker always creates /.dockerenv inside every container it
 // starts.  LXC does not.  We fall back to a /proc/self/cgroup pattern check
 // as a secondary signal.
-func IsDockerContainer() bool {
+var IsDockerContainer = sync.OnceValue(func() bool {
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return true
 	}
@@ -157,11 +158,11 @@ func IsDockerContainer() bool {
 		return false
 	}
 	return cgroupV1ContainerPattern.Match(data) || cgroupV2ContainerPattern.Match(data)
-}
+})
 
 // CurrentContainerID detects the current container ID using multiple detection methods.
 // It tries cgroup, mountinfo, and hostname in that order.
-func CurrentContainerID() (string, error) {
+var CurrentContainerID = sync.OnceValues(func() (string, error) {
 	// Try cgroup first (works on cgroup v1 and cgroupns=host mode)
 	if id, err := func() (string, error) {
 		// tries to extract container ID from /proc/self/cgroup
@@ -236,7 +237,7 @@ func CurrentContainerID() (string, error) {
 	}
 
 	return "", errors.New("no container ID found via cgroup, mountinfo, or hostname")
-}
+})
 
 // ZFSARCReclaimable returns the number of bytes of ZFS ARC (Adaptive
 // Replacement Cache) that the kernel counts as used memory but that can be
