@@ -1,3 +1,9 @@
+## builds/v0.4.8
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.4.7...builds/v0.4.8
+
 ## builds/v0.4.7
 
 ### Bug fixes
