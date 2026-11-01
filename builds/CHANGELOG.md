@@ -1,3 +1,14 @@
+## builds/v0.4.9
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* validate required providers once in NewService([a4e6016](https://github.com/getarcaneapp/kit/commit/a4e60160d37fa2b0405338278627b6d5ba9fc92a) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.4.8...builds/v0.4.9
+
 ## builds/v0.4.8
 
 
