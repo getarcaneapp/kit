@@ -1,3 +1,17 @@
+## kit/v0.6.0
+
+### New features
+
+* add concurrency package, LookupEnvOrFile, fs perms, and tag metadata helpers([c6cac51](https://github.com/getarcaneapp/kit/commit/c6cac5121d9c50fe11e5a4e21e616724c25aebca) by @Kyle Mendell)
+
+### Bug fixes
+
+* match registry host normalization to arcane rules([28d0905](https://github.com/getarcaneapp/kit/commit/28d0905c3efea34861678b102013d2f44c6871d5) by @Kyle Mendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/kit/v0.5.1...kit/v0.6.0
+
 ## kit/v0.5.1
 
 ### Bug fixes
