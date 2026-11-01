@@ -9,8 +9,9 @@ import (
 	"strings"
 
 	"kit.getarcane.app"
-	"kit.getarcane.app/builds/types"
 	"kit.getarcane.app/utils"
+
+	"kit.getarcane.app/builds/types"
 )
 
 func validateBuildRequest(req types.BuildRequest, providerName string) error {
