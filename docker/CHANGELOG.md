@@ -1,3 +1,14 @@
+## docker/v0.1.4
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* take ExecRequest and LogOptions structs([952048d](https://github.com/getarcaneapp/kit/commit/952048dc1746650df14416d014d2036f47348418) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.1.3...docker/v0.1.4
+
 ## docker/v0.1.3
 
 ### Bug fixes
