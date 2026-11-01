@@ -13,12 +13,6 @@ import (
 	kit "go.getarcane.app/kit/pkg"
 )
 
-// RemoteEnvironmentLister lists the remote environment IDs an aggregated stream
-// should cover.
-type RemoteEnvironmentLister interface {
-	ListRemoteEnvironmentIDs(ctx context.Context) ([]string, error)
-}
-
 // Producer sends events until ctx is canceled.
 type Producer[T any] func(ctx context.Context, events chan<- T)
 
@@ -134,30 +128,6 @@ type PollerConfig[T any] struct {
 	Interval time.Duration
 }
 
-// EnvironmentPollerConfig configures ReconcileEnvironmentPollers.
-type EnvironmentPollerConfig struct {
-	// Lister returns the remote environments that should each have a poller.
-	Lister RemoteEnvironmentLister
-	// Run is the poller body; it must return when ctx is canceled.
-	Run func(ctx context.Context, environmentID string)
-	// Label names the stream in log messages.
-	Label string
-	// Interval is how often Lister is re-checked. Zero or negative means one minute.
-	Interval time.Duration
-}
-
-// ReconcileEnvironmentPollers keeps one poller goroutine per enabled remote
-// environment until ctx is canceled.
-func ReconcileEnvironmentPollers(ctx context.Context, cfg EnvironmentPollerConfig) {
-	ReconcilePollersByKey(ctx, PollerConfig[string]{
-		List:     cfg.Lister.ListRemoteEnvironmentIDs,
-		Key:      func(environmentID string) string { return environmentID },
-		Run:      cfg.Run,
-		Label:    cfg.Label,
-		Interval: cfg.Interval,
-	})
-}
-
 // ReconcilePollersByKey keeps one poller goroutine per listed item, keyed by a
 // stable item ID, until ctx is canceled.
 func ReconcilePollersByKey[T any](ctx context.Context, cfg PollerConfig[T]) {
@@ -177,7 +147,7 @@ func ReconcilePollersByKey[T any](ctx context.Context, cfg PollerConfig[T]) {
 		items, err := cfg.List(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
-				slog.Default().WarnContext(ctx, "failed to list environments", "stream", cfg.Label, "error", err)
+				slog.Default().WarnContext(ctx, "failed to list poller items", "stream", cfg.Label, "error", err)
 			}
 			return
 		}
