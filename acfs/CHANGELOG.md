@@ -1,3 +1,13 @@
+## acfs/v0.7.0
+
+### New features
+
+* move to kit.getarcane.app/acfs([7fa8a31](https://github.com/getarcaneapp/kit/commit/7fa8a31faa3e5c60bb1671a0cd8fd30e594f88b1) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/acfs/v0.6.4...acfs/v0.7.0
+
 ## acfs/v0.6.4
 
 ### Bug fixes
