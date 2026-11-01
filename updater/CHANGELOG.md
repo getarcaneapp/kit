@@ -1,3 +1,13 @@
+## updater/v0.12.0
+
+### New features
+
+* move to kit.getarcane.app/updater([3c904f8](https://github.com/getarcaneapp/kit/commit/3c904f8f4140e4a8d224675bbd35053b07106363) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.14...updater/v0.12.0
+
 ## updater/v0.11.14
 
 ### Bug fixes
