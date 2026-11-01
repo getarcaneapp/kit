@@ -1,3 +1,13 @@
+## docker/convert/v0.4.0
+
+### New features
+
+* move to kit.getarcane.app/docker/convert([c79df79](https://github.com/getarcaneapp/kit/commit/c79df79aabeda6ea9561b3883051532696f1a9bd) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.3.8...docker/convert/v0.4.0
+
 ## docker/convert/v0.3.8
 
 ### Bug fixes
