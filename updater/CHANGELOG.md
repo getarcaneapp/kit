@@ -1,3 +1,15 @@
+## updater/v0.11.14
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* take request structs and build Config in one literal([30e97cb](https://github.com/getarcaneapp/kit/commit/30e97cbbcee5ca4140b07cf56385641ed000d3b0) by @kmendell)
+* use CreateRequest; align exclusion test with batch opt-out bypass([a0edbaa](https://github.com/getarcaneapp/kit/commit/a0edbaa2fbd6ded5ba904a2da182ca2f7d5bc9a7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.11.13...updater/v0.11.14
+
 ## updater/v0.11.13
 
 ### Bug fixes
