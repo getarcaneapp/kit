@@ -1,3 +1,11 @@
+## kit/v0.5.0
+
+### New features
+
+* move kit module to kit.getarcane.app([d500cd3](https://github.com/getarcaneapp/kit/commit/d500cd381427e4bfda8808a3849c6aa752945311) by @Kyle Mendell)
+
+
+
 ## v0.4.4
 
 ### Bug fixes
