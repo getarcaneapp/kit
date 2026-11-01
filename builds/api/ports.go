@@ -3,7 +3,7 @@ package api
 import (
 	"log/slog"
 
-	"go.getarcane.app/builds/types"
+	"kit.getarcane.app/builds/types"
 )
 
 // SettingsProvider provides build settings owned by the host application.

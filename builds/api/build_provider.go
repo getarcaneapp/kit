@@ -13,9 +13,9 @@ import (
 	depotmachine "github.com/depot/depot-go/machine"
 	cliv1 "github.com/depot/depot-go/proto/depot/cli/v1"
 	"github.com/moby/buildkit/client"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/builds/types"
+	"kit.getarcane.app/builds/types"
 )
 
 type buildSession struct {

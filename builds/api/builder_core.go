@@ -13,11 +13,11 @@ import (
 	configtypes "github.com/docker/cli/cli/config/types"
 	buildkit "github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/session/auth/authprovider"
-	kit "go.getarcane.app/kit/pkg"
-	"go.getarcane.app/kit/pkg/utils"
+	"kit.getarcane.app"
+	"kit.getarcane.app/utils"
 
-	dockerutils "go.getarcane.app/builds/pkg/docker"
-	"go.getarcane.app/builds/types"
+	dockerutils "kit.getarcane.app/builds/pkg/docker"
+	"kit.getarcane.app/builds/types"
 )
 
 const defaultBuildTimeout = 30 * time.Minute

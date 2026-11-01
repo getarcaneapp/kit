@@ -8,7 +8,7 @@ import (
 
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 
-	"go.getarcane.app/builds/types"
+	"kit.getarcane.app/builds/types"
 )
 
 func requiresDirectLocalBuildkitSession(req types.BuildRequest) (bool, error) {

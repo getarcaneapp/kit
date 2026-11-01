@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.getarcane.app/builds/types"
+	"kit.getarcane.app/builds/types"
 )
 
 func createBuildContextWithDockerfile(t *testing.T) string {

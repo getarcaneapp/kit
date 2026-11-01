@@ -15,10 +15,10 @@ import (
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth/authprovider"
 	"github.com/tonistiigi/fsutil"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	dockerutils "go.getarcane.app/builds/pkg/docker"
-	"go.getarcane.app/builds/types"
+	dockerutils "kit.getarcane.app/builds/pkg/docker"
+	"kit.getarcane.app/builds/types"
 )
 
 // parseBuildkitCacheEntries parses --cache-from/--cache-to style values.

@@ -1,8 +1,8 @@
-module go.getarcane.app/builds
+module kit.getarcane.app/builds
 
 go 1.27
 
-replace go.getarcane.app/kit => ../
+replace kit.getarcane.app => ../kit
 
 require (
 	github.com/containerd/platforms v1.0.0-rc.5
@@ -18,7 +18,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tonistiigi/fsutil v0.0.0-20261027232937-ca65610c2295
-	go.getarcane.app/kit v0.4.4
+	kit.getarcane.app v0.4.4
 )
 
 require (

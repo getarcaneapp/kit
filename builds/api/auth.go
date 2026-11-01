@@ -8,8 +8,8 @@ import (
 	ref "github.com/distribution/reference"
 	"github.com/moby/moby/api/pkg/authconfig"
 	dockerregistry "github.com/moby/moby/api/types/registry"
-	kit "go.getarcane.app/kit/pkg"
-	"go.getarcane.app/kit/pkg/registry"
+	"kit.getarcane.app"
+	"kit.getarcane.app/registry"
 )
 
 func registryAuthConfigForHost(ctx context.Context, provider RegistryAuthProvider, host string) (dockerregistry.AuthConfig, bool, error) {

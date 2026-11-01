@@ -4,7 +4,7 @@
 
 Portable Docker and BuildKit image build orchestration for Go applications.
 
-<a href="https://pkg.go.dev/go.getarcane.app/builds"><img src="https://pkg.go.dev/badge/go.getarcane.app/builds.svg" alt="Go Reference"></a>
+<a href="https://pkg.go.dev/kit.getarcane.app/builds"><img src="https://pkg.go.dev/badge/kit.getarcane.app/builds.svg" alt="Go Reference"></a>
 <a href="https://github.com/getarcaneapp/kit/builds/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License"></a>
 
 </div>
@@ -33,7 +33,7 @@ The build engine does not own durable persistence, Git repository credentials, r
 Arcane Builds requires Go 1.27 or newer.
 
 ```sh
-go get go.getarcane.app/builds@latest
+go get kit.getarcane.app/builds@latest
 ```
 
 ```go

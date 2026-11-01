@@ -26,10 +26,10 @@ import (
 	"github.com/moby/patternmatcher"
 	"github.com/moby/patternmatcher/ignorefile"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	dockerutils "go.getarcane.app/builds/pkg/docker"
-	"go.getarcane.app/builds/types"
+	dockerutils "kit.getarcane.app/builds/pkg/docker"
+	"kit.getarcane.app/builds/types"
 )
 
 type dockerBuildInput struct {
