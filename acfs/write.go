@@ -28,20 +28,28 @@ type WriteOptions struct {
 	InPlace bool
 }
 
-// WriteFrom atomically writes exactly expectedSize bytes from source to a
+// WriteFromOptions configures WriteFrom.
+type WriteFromOptions struct {
+	// Size is the exact number of bytes WriteFrom must read from the source.
+	Size int64
+	// Mode is the permission set applied to the written file.
+	Mode os.FileMode
+}
+
+// WriteFrom atomically writes exactly options.Size bytes from source to a
 // root-confined file. The destination is unchanged when the transfer fails.
-func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Reader, expectedSize int64, mode os.FileMode) (int64, error) {
+func (r Root) WriteFrom(ctx context.Context, logicalPath string, source io.Reader, options WriteFromOptions) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	if source == nil {
 		return 0, errors.New("source reader is required")
 	}
-	if expectedSize < 0 {
+	if options.Size < 0 {
 		return 0, fmt.Errorf("%w: size must be non-negative", ErrSizeMismatch)
 	}
-	if mode&^chmodModeMask != 0 {
-		return 0, fmt.Errorf("invalid file mode %v", mode)
+	if options.Mode&^chmodModeMask != 0 {
+		return 0, fmt.Errorf("invalid file options.Mode %v", options.Mode)
 	}
 
 	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
@@ -56,7 +64,7 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 		return 0, ErrIsDirectory
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return 0, fmt.Errorf("open workspace root: %w", err)
 	}
@@ -66,7 +74,7 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 	if err != nil {
 		return 0, err
 	}
-	return writeFromRoot(ctx, root, logicalPath, path.Join(resolvedParent, base), source, expectedSize, mode)
+	return writeFromRoot(ctx, root, logicalPath, path.Join(resolvedParent, base), source, options.Size, options.Mode)
 }
 
 // Write writes data to a root-confined file, creating it when absent. By default
@@ -74,7 +82,7 @@ func WriteFrom(ctx context.Context, rootPath, logicalPath string, source io.Read
 // With InPlace enabled it preserves regular-file inodes, leaves identical files
 // untouched, and refuses final symlinks. In-place writes are not atomic; callers
 // coordinate writers and provide recovery if partial writes must be rolled back.
-func Write(ctx context.Context, rootPath, logicalPath string, data []byte, options WriteOptions) (retErr error) {
+func (r Root) Write(ctx context.Context, logicalPath string, data []byte, options WriteOptions) (retErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -92,7 +100,7 @@ func Write(ctx context.Context, rootPath, logicalPath string, data []byte, optio
 	if relativePath == "." {
 		return ErrIsDirectory
 	}
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}
@@ -181,7 +189,7 @@ func Write(ctx context.Context, rootPath, logicalPath string, data []byte, optio
 // byte offset, growing the file (sparsely) when the offset lies beyond its
 // current end. Unlike WriteFrom, the write is in-place and not atomic; callers
 // coordinate concurrent writers themselves.
-func WriteAt(ctx context.Context, rootPath, logicalPath string, offset int64, data []byte) error {
+func (r Root) WriteAt(ctx context.Context, logicalPath string, offset int64, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -201,7 +209,7 @@ func WriteAt(ctx context.Context, rootPath, logicalPath string, offset int64, da
 		return ErrIsDirectory
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}

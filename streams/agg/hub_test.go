@@ -8,7 +8,7 @@ import (
 )
 
 func TestHubSharesRunnerAcrossSubscribersAndReplaysLast(t *testing.T) {
-	hub := NewHub[int]()
+	hub := &Hub[int]{}
 
 	var starts atomic.Int32
 	runner := func(ctx context.Context, publish func(int)) {

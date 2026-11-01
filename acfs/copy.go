@@ -15,21 +15,20 @@ import (
 
 const copyDirectoryMode = 0o755
 
-// CopyDir copies the contents of sourceRootPath into destinationRootPath. Both
-// paths are separate workspace roots and may not nest, so a copy can never feed
-// itself.
+// CopyTo copies the contents of r into destination. The two roots must be
+// separate and may not nest, so a copy can never feed itself.
 //
 // Directories are recreated, regular files are written with the source's
 // permission bits, and symbolic links are skipped silently: the destination
 // gets no link, because ACFS never creates one. Sockets, FIFOs, and device
 // nodes are skipped and recorded in CopyResult.Skipped.
-func CopyDir(ctx context.Context, sourceRootPath, destinationRootPath string, options acfstypes.CopyOptions) (acfstypes.CopyResult, error) {
-	if err := validateDistinctRoots(sourceRootPath, destinationRootPath); err != nil {
+func (r Root) CopyTo(ctx context.Context, destination Root, options acfstypes.CopyOptions) (acfstypes.CopyResult, error) {
+	if err := validateDistinctRoots(r.Path, destination.Path); err != nil {
 		return acfstypes.CopyResult{}, err
 	}
 
 	var skipped []string
-	copied, err := copyDirectoryContents(ctx, sourceRootPath, destinationRootPath, options.TolerateUnreadable, false, func(relativePath string) {
+	copied, err := copyDirectoryContents(ctx, r.Path, destination.Path, options.TolerateUnreadable, false, func(relativePath string) {
 		skipped = append(skipped, relativePath)
 	})
 	slices.Sort(skipped)
@@ -39,7 +38,7 @@ func CopyDir(ctx context.Context, sourceRootPath, destinationRootPath string, op
 	}, err
 }
 
-// MirrorDir makes destinationRootPath match sourceRootPath while updating files
+// MirrorTo makes destination match r while updating files
 // and directories IN PLACE. Entries missing from the source, or whose type
 // differs, are removed first, then the source is copied over the result.
 //
@@ -58,8 +57,8 @@ func CopyDir(ctx context.Context, sourceRootPath, destinationRootPath string, op
 // directory in a mixed state that is worse than one stale file (#3509, #3085).
 // Destination files the process cannot write are tolerated in the same spirit
 // (#3625): the stale file keeps its old content and the mirror carries on.
-func MirrorDir(ctx context.Context, sourceRootPath, destinationRootPath string, options acfstypes.MirrorOptions) error {
-	if err := validateDistinctRoots(sourceRootPath, destinationRootPath); err != nil {
+func (r Root) MirrorTo(ctx context.Context, destination Root, options acfstypes.MirrorOptions) error {
+	if err := validateDistinctRoots(r.Path, destination.Path); err != nil {
 		return err
 	}
 
@@ -68,19 +67,19 @@ func MirrorDir(ctx context.Context, sourceRootPath, destinationRootPath string, 
 		preserve[filepath.Clean(entry)] = struct{}{}
 	}
 	if err := func() error {
-		sourceRoot, openErr := os.OpenRoot(sourceRootPath)
+		sourceRoot, openErr := os.OpenRoot(r.Path)
 		if openErr != nil {
 			return openErr
 		}
 		defer func() { _ = sourceRoot.Close() }()
 
-		destinationRoot, openErr := os.OpenRoot(destinationRootPath)
+		destinationRoot, openErr := os.OpenRoot(destination.Path)
 		if openErr != nil {
 			return openErr
 		}
 		defer func() { _ = destinationRoot.Close() }()
 
-		return filepath.WalkDir(destinationRootPath, func(currentPath string, entry os.DirEntry, walkErr error) error {
+		return filepath.WalkDir(destination.Path, func(currentPath string, entry os.DirEntry, walkErr error) error {
 			// An unreadable destination subdirectory (e.g. foreign-owned
 			// bind-mount data) cannot be pruned; leave it in place instead of
 			// failing the whole mirror mid-restore (#3509, #3085). Entries that
@@ -91,14 +90,14 @@ func MirrorDir(ctx context.Context, sourceRootPath, destinationRootPath string, 
 			if walkErr != nil {
 				return walkErr
 			}
-			if currentPath == destinationRootPath {
+			if currentPath == destination.Path {
 				return nil
 			}
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 
-			relativePath, err := filepath.Rel(destinationRootPath, currentPath)
+			relativePath, err := filepath.Rel(destination.Path, currentPath)
 			if err != nil {
 				return err
 			}
@@ -140,7 +139,7 @@ func MirrorDir(ctx context.Context, sourceRootPath, destinationRootPath string, 
 		return err
 	}
 
-	_, err := copyDirectoryContents(ctx, sourceRootPath, destinationRootPath, true, true, func(string) {})
+	_, err := copyDirectoryContents(ctx, r.Path, destination.Path, true, true, func(string) {})
 	return err
 }
 

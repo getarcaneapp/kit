@@ -32,7 +32,7 @@ func TestCopyDirSkipsSymlinksAndRecordsUncopyableEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := CopyDir(ctx, source, destination, acfstypes.CopyOptions{TolerateUnreadable: true})
+	result, err := Root{Path: source}.CopyTo(ctx, Root{Path: destination}, acfstypes.CopyOptions{TolerateUnreadable: true})
 	if err != nil {
 		t.Fatalf("CopyDir: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestCopyDirRecordsUnreadableFileOnlyWhenTolerant(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o640) })
 
-	tolerant, err := CopyDir(ctx, source, t.TempDir(), acfstypes.CopyOptions{TolerateUnreadable: true})
+	tolerant, err := Root{Path: source}.CopyTo(ctx, Root{Path: t.TempDir()}, acfstypes.CopyOptions{TolerateUnreadable: true})
 	if err != nil {
 		t.Fatalf("tolerant CopyDir: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestCopyDirRecordsUnreadableFileOnlyWhenTolerant(t *testing.T) {
 		t.Fatalf("tolerant CopyDir skipped = %v", tolerant.Skipped)
 	}
 
-	_, err = CopyDir(ctx, source, t.TempDir(), acfstypes.CopyOptions{})
+	_, err = Root{Path: source}.CopyTo(ctx, Root{Path: t.TempDir()}, acfstypes.CopyOptions{})
 	if !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("strict CopyDir error = %v, want a permission error", err)
 	}
@@ -112,7 +112,7 @@ func TestMirrorDirLeavesUnreadableDestinationSubtreeIntact(t *testing.T) {
 
 	// The unreadable live-project subtree must be left intact rather than
 	// failing the whole mirror (#3509, #3085).
-	if err := MirrorDir(t.Context(), source, destination, acfstypes.MirrorOptions{Preserve: []string{"volumes"}}); err != nil {
+	if err := (Root{Path: source}).MirrorTo(t.Context(), (Root{Path: destination}), acfstypes.MirrorOptions{Preserve: []string{"volumes"}}); err != nil {
 		t.Fatalf("MirrorDir: %v", err)
 	}
 	if err := os.Chmod(locked, 0o750); err != nil {
@@ -132,7 +132,7 @@ func TestCopyDirRejectsNestedRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := CopyDir(t.Context(), source, nested, acfstypes.CopyOptions{}); err == nil {
+	if _, err := (Root{Path: source}).CopyTo(t.Context(), (Root{Path: nested}), acfstypes.CopyOptions{}); err == nil {
 		t.Fatal("CopyDir accepted a destination nested inside the source")
 	}
 }
@@ -150,7 +150,7 @@ func TestCopyDirAcceptsSiblingWithDotDotPrefix(t *testing.T) {
 	}
 	writeFixtureFile(t, filepath.Join(source, "compose.yaml"), "services: {}", 0o640)
 
-	result, err := CopyDir(t.Context(), source, destination, acfstypes.CopyOptions{})
+	result, err := Root{Path: source}.CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{})
 	if err != nil {
 		t.Fatalf("CopyDir rejected a sibling destination named ..dst: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestMirrorDirPreservesListedEntriesAndDestinationInodes(t *testing.T) {
 	// Files the backup could not read (#3509) must survive the restore, along
 	// with the directory that still holds one.
 	options := acfstypes.MirrorOptions{Preserve: []string{"unreadable.txt", filepath.Join("data", "secret.db")}}
-	err = MirrorDir(ctx, source, destination, options)
+	err = Root{Path: source}.MirrorTo(ctx, Root{Path: destination}, options)
 	if err != nil {
 		t.Fatalf("MirrorDir: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestMirrorDirSkipsRewritingIdenticalDestinationFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := MirrorDir(ctx, source, destination, acfstypes.MirrorOptions{}); err != nil {
+	if err := (Root{Path: source}).MirrorTo(ctx, (Root{Path: destination}), acfstypes.MirrorOptions{}); err != nil {
 		t.Fatalf("MirrorDir: %v", err)
 	}
 
@@ -275,7 +275,7 @@ func TestMirrorDirToleratesUnwritableDestinationFiles(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(destination, "secrets", "app.env"), "TOKEN=1", 0o440)
 	writeFixtureFile(t, filepath.Join(destination, "secrets", "stale.conf"), "stale", 0o440)
 
-	if err := MirrorDir(ctx, source, destination, acfstypes.MirrorOptions{}); err != nil {
+	if err := (Root{Path: source}).MirrorTo(ctx, (Root{Path: destination}), acfstypes.MirrorOptions{}); err != nil {
 		t.Fatalf("MirrorDir: %v", err)
 	}
 

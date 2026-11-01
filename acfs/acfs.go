@@ -22,7 +22,7 @@ const directoryReadBatchSize = 256
 
 // ListEach visits the direct children of a root-confined directory in
 // deterministic name order without retaining all metadata in memory.
-func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfstypes.Entry) error) error {
+func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfstypes.Entry) error) error {
 	if visit == nil {
 		return errors.New("visit callback is required")
 	}
@@ -39,7 +39,7 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 		return err
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}
@@ -115,9 +115,9 @@ func ListEach(ctx context.Context, rootPath, logicalPath string, visit func(acfs
 }
 
 // List returns the direct children of a root-confined directory.
-func List(ctx context.Context, rootPath, logicalPath string) ([]acfstypes.Entry, error) {
+func (r Root) List(ctx context.Context, logicalPath string) ([]acfstypes.Entry, error) {
 	entries := make([]acfstypes.Entry, 0)
-	err := ListEach(ctx, rootPath, logicalPath, func(entry acfstypes.Entry) error {
+	err := r.ListEach(ctx, logicalPath, func(entry acfstypes.Entry) error {
 		entries = append(entries, entry)
 		return nil
 	})
@@ -127,11 +127,10 @@ func List(ctx context.Context, rootPath, logicalPath string) ([]acfstypes.Entry,
 	return entries, nil
 }
 
-// Stat returns metadata for a root-confined path. When followFinal is false the
-// final symbolic link is not followed, so the Entry describes the link itself.
-// When it is true the link is resolved and the returned Entry.Path is the fully
-// resolved logical path, making Stat double as a root-confined symlink resolver.
-func Stat(ctx context.Context, rootPath, logicalPath string, followFinal bool) (acfstypes.Entry, error) {
+// Stat returns metadata for a root-confined path. By default the final symbolic
+// link is not followed, so the Entry describes the link itself; set
+// options.FollowFinal to resolve it.
+func (r Root) Stat(ctx context.Context, logicalPath string, options acfstypes.StatOptions) (acfstypes.Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return acfstypes.Entry{}, err
 	}
@@ -145,13 +144,13 @@ func Stat(ctx context.Context, rootPath, logicalPath string, followFinal bool) (
 		return acfstypes.Entry{}, err
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return acfstypes.Entry{}, fmt.Errorf("open workspace root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
 
-	resolvedPath, err := resolvePath(root, relativePath, followFinal)
+	resolvedPath, err := resolvePath(root, relativePath, options.FollowFinal)
 	if err != nil {
 		return acfstypes.Entry{}, err
 	}
@@ -167,8 +166,8 @@ func Stat(ctx context.Context, rootPath, logicalPath string, followFinal bool) (
 // final symbolic link, so a dangling link still counts as existing. A target
 // missing anywhere along the path is reported as (false, nil); every other
 // failure — including a path that escapes the root — is returned as an error.
-func Exists(ctx context.Context, rootPath, logicalPath string) (bool, error) {
-	if _, err := Stat(ctx, rootPath, logicalPath, false); err != nil {
+func (r Root) Exists(ctx context.Context, logicalPath string) (bool, error) {
+	if _, err := r.Stat(ctx, logicalPath, acfstypes.StatOptions{}); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
 		}
@@ -178,15 +177,9 @@ func Exists(ctx context.Context, rootPath, logicalPath string) (bool, error) {
 }
 
 // Walk visits every descendant of a root-confined directory in deterministic
-// depth-first order. It does not follow symbolic links encountered in the tree.
-func Walk(ctx context.Context, rootPath, logicalPath string, visit func(acfstypes.Entry) error) error {
-	_, err := WalkBounded(ctx, rootPath, logicalPath, acfstypes.WalkOptions{}, visit)
-	return err
-}
-
-// WalkBounded visits descendants using deterministic sequential traversal and
-// reports whether depth or entry limits omitted any entries.
-func WalkBounded(ctx context.Context, rootPath, logicalPath string, options acfstypes.WalkOptions, visit func(acfstypes.Entry) error) (acfstypes.WalkResult, error) {
+// depth-first order and reports whether options' depth or entry limits omitted
+// any entries. It does not follow symbolic links encountered in the tree.
+func (r Root) Walk(ctx context.Context, logicalPath string, options acfstypes.WalkOptions, visit func(acfstypes.Entry) error) (acfstypes.WalkResult, error) {
 	if visit == nil {
 		return acfstypes.WalkResult{}, errors.New("visit callback is required")
 	}
@@ -207,7 +200,7 @@ func WalkBounded(ctx context.Context, rootPath, logicalPath string, options acfs
 		directories = directories[:last]
 
 		childDirectories := make([]walkDirectory, 0)
-		err := ListEach(ctx, rootPath, currentDirectory.path, func(entry acfstypes.Entry) error {
+		err := r.ListEach(ctx, currentDirectory.path, func(entry acfstypes.Entry) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -229,7 +222,7 @@ func WalkBounded(ctx context.Context, rootPath, logicalPath string, options acfs
 			}
 
 			if options.MaxDepth > 0 && currentDirectory.depth+1 >= options.MaxDepth {
-				err := ListEach(ctx, rootPath, entry.Path, func(acfstypes.Entry) error {
+				err := r.ListEach(ctx, entry.Path, func(acfstypes.Entry) error {
 					truncated = true
 					return fs.SkipAll
 				})
@@ -257,7 +250,7 @@ func WalkBounded(ctx context.Context, rootPath, logicalPath string, options acfs
 }
 
 // MkdirAll creates a root-confined directory and any missing parents.
-func MkdirAll(ctx context.Context, rootPath, logicalPath string, mode os.FileMode) error {
+func (r Root) MkdirAll(ctx context.Context, logicalPath string, mode os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -274,7 +267,7 @@ func MkdirAll(ctx context.Context, rootPath, logicalPath string, mode os.FileMod
 		return err
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}
@@ -302,7 +295,7 @@ func MkdirAll(ctx context.Context, rootPath, logicalPath string, mode os.FileMod
 // Mkdir creates a single root-confined directory whose parent must already
 // exist. An existing target reports ErrAlreadyExists, which also satisfies
 // errors.Is(err, fs.ErrExist) so collision loops can match either sentinel.
-func Mkdir(ctx context.Context, rootPath, logicalPath string, mode os.FileMode) error {
+func (r Root) Mkdir(ctx context.Context, logicalPath string, mode os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -322,7 +315,7 @@ func Mkdir(ctx context.Context, rootPath, logicalPath string, mode os.FileMode) 
 		return fmt.Errorf("%w: workspace root: %w", ErrAlreadyExists, fs.ErrExist)
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}
@@ -348,7 +341,7 @@ func Mkdir(ctx context.Context, rootPath, logicalPath string, mode os.FileMode) 
 // Unlike RemoveAll, Remove does not swallow a missing target: the underlying
 // not-exist error is returned so callers such as bounded empty-parent cleanup
 // loops can stop on the first failure of any kind.
-func Remove(ctx context.Context, rootPath, logicalPath string) error {
+func (r Root) Remove(ctx context.Context, logicalPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -365,7 +358,7 @@ func Remove(ctx context.Context, rootPath, logicalPath string) error {
 		return ErrRootRemoval
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}
@@ -390,7 +383,7 @@ func Remove(ctx context.Context, rootPath, logicalPath string) error {
 
 // RemoveAll removes a root-confined file, symbolic link, or directory tree. A
 // missing target is not an error.
-func RemoveAll(ctx context.Context, rootPath, logicalPath string) error {
+func (r Root) RemoveAll(ctx context.Context, logicalPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -407,7 +400,7 @@ func RemoveAll(ctx context.Context, rootPath, logicalPath string) error {
 		return ErrRootRemoval
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}

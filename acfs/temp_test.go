@@ -14,11 +14,11 @@ func TestMkdirTempCreatesUniqueDirectoriesFromPattern(t *testing.T) {
 	root := t.TempDir()
 	ctx := t.Context()
 
-	first, err := MkdirTemp(ctx, root, "/", "stage-*.tmp")
+	first, err := Root{Path: root}.MkdirTemp(ctx, "/", "stage-*.tmp")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
-	second, err := MkdirTemp(ctx, root, "/", "stage-*.tmp")
+	second, err := Root{Path: root}.MkdirTemp(ctx, "/", "stage-*.tmp")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestMkdirTempCreatesUniqueDirectoriesFromPattern(t *testing.T) {
 		t.Fatalf("temporary directory mode = %v, want %v", info.Mode(), os.FileMode(temporaryDirectoryMode))
 	}
 
-	_, err = MkdirTemp(ctx, root, "/", "nested/pattern")
+	_, err = Root{Path: root}.MkdirTemp(ctx, "/", "nested/pattern")
 	if !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("MkdirTemp with multi-component pattern error = %v, want ErrInvalidPath", err)
 	}

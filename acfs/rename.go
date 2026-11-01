@@ -24,7 +24,7 @@ import (
 // A cross-device rename (EXDEV) is returned unchanged. Staying on one device is
 // the caller's contract — staging directories created with MkdirTemp under the
 // same root always satisfy it.
-func Rename(ctx context.Context, rootPath, sourceLogical, targetLogical string) error {
+func (r Root) Rename(ctx context.Context, sourceLogical, targetLogical string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func Rename(ctx context.Context, rootPath, sourceLogical, targetLogical string) 
 		return path.Join(resolvedParent, base), nil
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return fmt.Errorf("open workspace root: %w", err)
 	}

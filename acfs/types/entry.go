@@ -45,6 +45,15 @@ type WalkRecord struct {
 	Version   int    `json:"version"`
 }
 
+// StatOptions configures Root.Stat. The zero value describes a final symbolic
+// link itself rather than its target.
+type StatOptions struct {
+	// FollowFinal resolves a final symbolic link; the returned Entry.Path is
+	// then the fully resolved logical path, so Stat doubles as a root-confined
+	// symlink resolver.
+	FollowFinal bool
+}
+
 // WalkOptions bounds a recursive traversal. Zero values are unlimited.
 type WalkOptions struct {
 	MaxDepth   int

@@ -1,8 +1,9 @@
 // Package acfs provides root-confined filesystem operations for Arcane
 // helper processes.
 //
-// Every operation takes a host rootPath and an absolute logical path
-// interpreted relative to it, and can never touch anything outside that root:
+// Every operation is a method on Root, a host directory built with a literal
+// such as acfs.Root{Path: dir}. Methods take an absolute logical path
+// interpreted relative to Root.Path and can never touch anything outside it:
 // ".." components are collapsed, and a symbolic link whose target escapes the
 // root reports ErrOutsideRoot rather than being followed.
 //
@@ -25,12 +26,12 @@
 // Writes are atomic by default: Write and WriteFrom stage the content in a
 // temporary file inside the target's directory and rename it into place, so a
 // reader never observes a torn file. Write with WriteOptions.InPlace and
-// MirrorDir rewrite destination files in place to preserve their inodes for
+// Root.MirrorTo rewrite destination files in place to preserve their inodes for
 // live bind mounts. In-place writes can leave partial contents on failure.
 //
 // Temporary files created during a write use the reserved ".acfs-write-"
 // name prefix. Paths containing a component with that prefix are rejected, and
-// List, Walk, and CopyDir hide them.
+// List, Walk, and CopyTo hide them.
 //
 // # Subpackages
 //

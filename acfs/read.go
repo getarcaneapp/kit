@@ -24,7 +24,7 @@ func (r *contextReadCloser) Close() error {
 // OpenRead opens a file for a root-confined streaming read. The returned size
 // is the number of bytes available after applying maxBytes; a non-positive
 // limit reads the complete file.
-func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64) (io.ReadCloser, int64, error) {
+func (r Root) OpenRead(ctx context.Context, logicalPath string, maxBytes int64) (io.ReadCloser, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -38,7 +38,7 @@ func OpenRead(ctx context.Context, rootPath, logicalPath string, maxBytes int64)
 		return nil, 0, err
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open workspace root: %w", err)
 	}
@@ -108,7 +108,7 @@ func (r *contextReadSeekCloser) Close() error {
 // OpenReadSeek opens a root-confined regular file for a seekable read of its
 // complete contents, following its final symbolic link. The returned size is
 // the file size at open time.
-func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSeekCloser, int64, error) {
+func (r Root) OpenReadSeek(ctx context.Context, logicalPath string) (io.ReadSeekCloser, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -122,7 +122,7 @@ func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSee
 		return nil, 0, err
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open workspace root: %w", err)
 	}
@@ -156,8 +156,8 @@ func OpenReadSeek(ctx context.Context, rootPath, logicalPath string) (io.ReadSee
 
 // ReadFile returns the complete contents of a root-confined regular file,
 // following its final symbolic link.
-func ReadFile(ctx context.Context, rootPath, logicalPath string) ([]byte, error) {
-	reader, size, err := OpenRead(ctx, rootPath, logicalPath, 0)
+func (r Root) ReadFile(ctx context.Context, logicalPath string) ([]byte, error) {
+	reader, size, err := r.OpenRead(ctx, logicalPath, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -173,11 +173,11 @@ func ReadFile(ctx context.Context, rootPath, logicalPath string) ([]byte, error)
 
 // ReadTo streams a root-confined file into destination. A non-positive limit
 // reads the complete file.
-func ReadTo(ctx context.Context, rootPath, logicalPath string, destination io.Writer, maxBytes int64) (int64, error) {
+func (r Root) ReadTo(ctx context.Context, logicalPath string, destination io.Writer, maxBytes int64) (int64, error) {
 	if destination == nil {
 		return 0, errors.New("destination writer is required")
 	}
-	reader, _, err := OpenRead(ctx, rootPath, logicalPath, maxBytes)
+	reader, _, err := r.OpenRead(ctx, logicalPath, maxBytes)
 	if err != nil {
 		return 0, err
 	}

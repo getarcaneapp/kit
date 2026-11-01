@@ -25,7 +25,7 @@ const (
 // Apply performs an ordered batch of root-confined mutations. It stops at the
 // first failure; callers that require transactionality remain responsible for
 // restoring their own backup.
-func Apply(ctx context.Context, rootPath, stagingPath string, manifest acfstypes.ApplyManifest) (int, error) {
+func (r Root) Apply(ctx context.Context, staging Root, manifest acfstypes.ApplyManifest) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -42,16 +42,16 @@ func Apply(ctx context.Context, rootPath, stagingPath string, manifest acfstypes
 			}
 		}
 	}
-	if err := validateDistinctRoots(rootPath, stagingPath); err != nil {
+	if err := validateDistinctRoots(r.Path, staging.Path); err != nil {
 		return 0, err
 	}
 
-	root, openErr := os.OpenRoot(rootPath)
+	root, openErr := os.OpenRoot(r.Path)
 	if openErr != nil {
 		return 0, fmt.Errorf("open workspace root: %w", openErr)
 	}
 	defer func() { _ = root.Close() }()
-	stagingRoot, openErr := os.OpenRoot(stagingPath)
+	stagingRoot, openErr := os.OpenRoot(staging.Path)
 	if openErr != nil {
 		return 0, fmt.Errorf("open staging root: %w", openErr)
 	}

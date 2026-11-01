@@ -147,7 +147,7 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 	var encodedEntry bytes.Buffer
 	entryEncoder := json.NewEncoder(&encodedEntry)
 	entryEncoder.SetEscapeHTML(false)
-	err = acfs.ListEach(ctx, values.root, values.path, func(entry acfstypes.Entry) error {
+	err = acfs.Root{Path: values.root}.ListEach(ctx, values.path, func(entry acfstypes.Entry) error {
 		if !started {
 			if _, writeErr := io.WriteString(bufferedOutput, `{"entries":[`); writeErr != nil {
 				return fmt.Errorf("write list prefix: %w", writeErr)
@@ -212,7 +212,7 @@ func runStat(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
-	entry, err := acfs.Stat(ctx, values.root, values.path, false)
+	entry, err := acfs.Root{Path: values.root}.Stat(ctx, values.path, acfstypes.StatOptions{})
 	if err != nil {
 		return err
 	}
@@ -239,7 +239,7 @@ func runWalk(ctx context.Context, args []string, stdout io.Writer) error {
 
 	encoder := json.NewEncoder(stdout)
 	encoder.SetEscapeHTML(false)
-	result, err := acfs.WalkBounded(ctx, values.root, values.path, acfstypes.WalkOptions{
+	result, err := acfs.Root{Path: values.root}.Walk(ctx, values.path, acfstypes.WalkOptions{
 		MaxDepth:   *maxDepth,
 		MaxEntries: *maxEntries,
 	}, func(entry acfstypes.Entry) error {
@@ -276,7 +276,7 @@ func runRead(ctx context.Context, args []string, stdout io.Writer) error {
 		return errors.New("--limit must be non-negative")
 	}
 
-	reader, size, err := acfs.OpenRead(ctx, values.root, values.path, *limit)
+	reader, size, err := acfs.Root{Path: values.root}.OpenRead(ctx, values.path, *limit)
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func runWrite(ctx context.Context, args []string, stdin io.Reader) error {
 		return err
 	}
 
-	_, err = acfs.WriteFrom(ctx, values.root, values.path, stdin, *size, mode)
+	_, err = acfs.Root{Path: values.root}.WriteFrom(ctx, values.path, stdin, acfs.WriteFromOptions{Size: *size, Mode: mode})
 	return err
 }
 
@@ -344,7 +344,7 @@ func runMkdir(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return acfs.MkdirAll(ctx, values.root, values.path, mode)
+	return acfs.Root{Path: values.root}.MkdirAll(ctx, values.path, mode)
 }
 
 func runRemove(ctx context.Context, args []string) error {
@@ -359,7 +359,7 @@ func runRemove(ctx context.Context, args []string) error {
 	if err := validatePathFlags(values); err != nil {
 		return err
 	}
-	return acfs.RemoveAll(ctx, values.root, values.path)
+	return acfs.Root{Path: values.root}.RemoveAll(ctx, values.path)
 }
 
 func runApply(ctx context.Context, args []string, stdout io.Writer) error {
@@ -408,7 +408,7 @@ func runApply(ctx context.Context, args []string, stdout io.Writer) error {
 		return errors.Join(closeErr, rootCloseErr)
 	}
 
-	applied, err := acfs.Apply(ctx, *rootPath, *stagingPath, manifest)
+	applied, err := acfs.Root{Path: *rootPath}.Apply(ctx, acfs.Root{Path: *stagingPath}, manifest)
 	if err != nil {
 		return err
 	}

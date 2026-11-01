@@ -59,7 +59,7 @@ func TestListAndStat(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries, err := List(t.Context(), root, "/")
+	entries, err := Root{Path: root}.List(t.Context(), "/")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestListAndStat(t *testing.T) {
 		t.Errorf("unexpected named pipe: %#v", namedPipe)
 	}
 
-	stat, err := Stat(t.Context(), root, "/relative-link", false)
+	stat, err := Root{Path: root}.Stat(t.Context(), "/relative-link", acfstypes.StatOptions{})
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestListAndStat(t *testing.T) {
 
 func TestListEmptyDirectory(t *testing.T) {
 	t.Parallel()
-	entries, err := List(t.Context(), t.TempDir(), "/")
+	entries, err := Root{Path: t.TempDir()}.List(t.Context(), "/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestReadToResolvesOnlyInternalSymlinks(t *testing.T) {
 
 	for _, logicalPath := range []string{"/relative", "/volume", "/chain"} {
 		var destination bytes.Buffer
-		written, err := ReadTo(t.Context(), root, logicalPath, &destination, 4)
+		written, err := Root{Path: root}.ReadTo(t.Context(), logicalPath, &destination, 4)
 		if err != nil {
 			t.Fatalf("ReadTo(%q): %v", logicalPath, err)
 		}
@@ -153,12 +153,12 @@ func TestReadToResolvesOnlyInternalSymlinks(t *testing.T) {
 
 	for _, logicalPath := range []string{"/external", "/broken"} {
 		var destination bytes.Buffer
-		if _, err := ReadTo(t.Context(), root, logicalPath, &destination, 0); err == nil {
+		if _, err := (Root{Path: root}).ReadTo(t.Context(), logicalPath, &destination, 0); err == nil {
 			t.Errorf("ReadTo(%q) unexpectedly succeeded", logicalPath)
 		}
 	}
 	var directoryDestination bytes.Buffer
-	if _, err := ReadTo(t.Context(), root, "/data", &directoryDestination, 0); !errors.Is(err, ErrIsDirectory) {
+	if _, err := (Root{Path: root}).ReadTo(t.Context(), "/data", &directoryDestination, 0); !errors.Is(err, ErrIsDirectory) {
 		t.Fatalf("ReadTo(directory) = %v, want ErrIsDirectory", err)
 	}
 
@@ -169,7 +169,7 @@ func TestReadToResolvesOnlyInternalSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	var destination bytes.Buffer
-	_, err := ReadTo(t.Context(), root, "/loop-a", &destination, 0)
+	_, err := Root{Path: root}.ReadTo(t.Context(), "/loop-a", &destination, 0)
 	if !errors.Is(err, ErrSymlinkLoop) {
 		t.Fatalf("ReadTo(loop) error = %v, want ErrSymlinkLoop", err)
 	}
@@ -177,7 +177,7 @@ func TestReadToResolvesOnlyInternalSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = OpenRead(t.Context(), root, "/fifo", 0)
+	_, _, err = Root{Path: root}.OpenRead(t.Context(), "/fifo", 0)
 	if !errors.Is(err, ErrNotFile) {
 		t.Fatalf("OpenRead(fifo) error = %v, want ErrNotFile", err)
 	}
@@ -187,16 +187,16 @@ func TestReadToResolvesOnlyInternalSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Stat(t.Context(), root, "/env", true)
+	_, err = Root{Path: root}.Stat(t.Context(), "/env", acfstypes.StatOptions{FollowFinal: true})
 	if !errors.Is(err, ErrOutsideRoot) {
 		t.Fatalf("Stat external env = %v, want ErrOutsideRoot", err)
 	}
 	volumeRoot := filepath.VolumeName(root) + string(filepath.Separator)
-	logicalEnv, err := LogicalPath(volumeRoot, filepath.Join(root, "env"))
+	logicalEnv, err := Root{Path: volumeRoot}.LogicalPath(filepath.Join(root, "env"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolvedEnv, err := Stat(t.Context(), volumeRoot, logicalEnv, true)
+	resolvedEnv, err := Root{Path: volumeRoot}.Stat(t.Context(), logicalEnv, acfstypes.StatOptions{FollowFinal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestWalkIsDeterministicAndDoesNotFollowSymlinks(t *testing.T) {
 	}
 
 	var paths []string
-	err := Walk(t.Context(), root, "/", func(entry acfstypes.Entry) error {
+	_, err := Root{Path: root}.Walk(t.Context(), "/", acfstypes.WalkOptions{}, func(entry acfstypes.Entry) error {
 		paths = append(paths, entry.Path)
 		return nil
 	})
@@ -236,7 +236,7 @@ func TestWalkIsDeterministicAndDoesNotFollowSymlinks(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	visits := 0
-	err = Walk(ctx, root, "/", func(acfstypes.Entry) error {
+	_, err = Root{Path: root}.Walk(ctx, "/", acfstypes.WalkOptions{}, func(acfstypes.Entry) error {
 		visits++
 		cancel()
 		return nil
@@ -246,7 +246,7 @@ func TestWalkIsDeterministicAndDoesNotFollowSymlinks(t *testing.T) {
 	}
 }
 
-func TestWalkBoundedReportsExactTruncation(t *testing.T) {
+func TestWalkReportsExactTruncation(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -257,7 +257,7 @@ func TestWalkBoundedReportsExactTruncation(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "root-file"), "x", 0o600)
 
 	var limited []string
-	result, err := WalkBounded(t.Context(), root, "/", acfstypes.WalkOptions{MaxEntries: 2}, func(entry acfstypes.Entry) error {
+	result, err := Root{Path: root}.Walk(t.Context(), "/", acfstypes.WalkOptions{MaxEntries: 2}, func(entry acfstypes.Entry) error {
 		limited = append(limited, entry.Path)
 		return nil
 	})
@@ -269,7 +269,7 @@ func TestWalkBoundedReportsExactTruncation(t *testing.T) {
 	}
 
 	var depthLimited []string
-	result, err = WalkBounded(t.Context(), root, "/", acfstypes.WalkOptions{MaxDepth: 1}, func(entry acfstypes.Entry) error {
+	result, err = Root{Path: root}.Walk(t.Context(), "/", acfstypes.WalkOptions{MaxDepth: 1}, func(entry acfstypes.Entry) error {
 		depthLimited = append(depthLimited, entry.Path)
 		return nil
 	})
@@ -285,7 +285,7 @@ func TestWalkBoundedReportsExactTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err = WalkBounded(t.Context(), emptyRoot, "/", acfstypes.WalkOptions{MaxDepth: 1}, func(acfstypes.Entry) error { return nil })
+	result, err = Root{Path: emptyRoot}.Walk(t.Context(), "/", acfstypes.WalkOptions{MaxDepth: 1}, func(acfstypes.Entry) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestWriteFromIsExactAndAtomic(t *testing.T) {
 	destination := filepath.Join(root, "destination")
 	writeFixtureFile(t, destination, "original", 0o600)
 
-	written, err := WriteFrom(t.Context(), root, "/destination", strings.NewReader("replacement"), 11, 0o640)
+	written, err := Root{Path: root}.WriteFrom(t.Context(), "/destination", strings.NewReader("replacement"), WriteFromOptions{Size: 11, Mode: 0o640})
 	if err != nil {
 		t.Fatalf("WriteFrom: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestWriteFromIsExactAndAtomic(t *testing.T) {
 	if info.Mode().Perm() != 0o640 {
 		t.Errorf("mode = %o, want 640", info.Mode().Perm())
 	}
-	err = Write(t.Context(), root, "/destination", []byte("replacement"), WriteOptions{Mode: 0o640})
+	err = Root{Path: root}.Write(t.Context(), "/destination", []byte("replacement"), WriteOptions{Mode: 0o640})
 	if err != nil {
 		t.Fatalf("atomic Write: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestWriteFromIsExactAndAtomic(t *testing.T) {
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			_, writeErr := WriteFrom(t.Context(), root, "/destination", reader, 5, 0o600)
+			_, writeErr := Root{Path: root}.WriteFrom(t.Context(), "/destination", reader, WriteFromOptions{Size: 5, Mode: 0o600})
 			if writeErr == nil {
 				t.Fatal("WriteFrom unexpectedly succeeded")
 			}
@@ -396,10 +396,10 @@ func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
 	writeFixtureFile(t, destination, "", 0o600)
 	ctx := t.Context()
 
-	if err := WriteAt(ctx, root, "/chunks", 8, []byte("tail")); err != nil {
+	if err := (Root{Path: root}).WriteAt(ctx, "/chunks", 8, []byte("tail")); err != nil {
 		t.Fatalf("WriteAt beyond end: %v", err)
 	}
-	if err := WriteAt(ctx, root, "/chunks", 0, []byte("headpart")); err != nil {
+	if err := (Root{Path: root}).WriteAt(ctx, "/chunks", 0, []byte("headpart")); err != nil {
 		t.Fatalf("WriteAt at start: %v", err)
 	}
 	contents, err := os.ReadFile(destination)
@@ -410,15 +410,15 @@ func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
 		t.Fatalf("contents = %q, want %q", contents, "headparttail")
 	}
 
-	err = WriteAt(ctx, root, "/missing", 0, []byte("x"))
+	err = Root{Path: root}.WriteAt(ctx, "/missing", 0, []byte("x"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("WriteAt on missing file error = %v, want fs.ErrNotExist", err)
 	}
-	err = WriteAt(ctx, root, "/", 0, []byte("x"))
+	err = Root{Path: root}.WriteAt(ctx, "/", 0, []byte("x"))
 	if !errors.Is(err, ErrIsDirectory) {
 		t.Fatalf("WriteAt on root error = %v, want ErrIsDirectory", err)
 	}
-	err = WriteAt(ctx, root, "/chunks", -1, nil)
+	err = Root{Path: root}.WriteAt(ctx, "/chunks", -1, nil)
 	if !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("WriteAt with negative offset error = %v, want ErrInvalidPath", err)
 	}
@@ -426,7 +426,7 @@ func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Write(ctx, root, "/chunks", []byte("short"), WriteOptions{Mode: 0o640, InPlace: true})
+	err = Root{Path: root}.Write(ctx, "/chunks", []byte("short"), WriteOptions{Mode: 0o640, InPlace: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,11 +442,11 @@ func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Write(ctx, root, "/chunks", []byte("short"), WriteOptions{Mode: 0o400, InPlace: true})
+	err = Root{Path: root}.Write(ctx, "/chunks", []byte("short"), WriteOptions{Mode: 0o400, InPlace: true})
 	if err != nil {
 		t.Fatalf("identical read-only file: %v", err)
 	}
-	err = Write(ctx, root, "/created", []byte("new"), WriteOptions{Mode: 0o750, InPlace: true})
+	err = Root{Path: root}.Write(ctx, "/created", []byte("new"), WriteOptions{Mode: 0o750, InPlace: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +458,7 @@ func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Write(ctx, root, "/link", []byte("changed"), WriteOptions{Mode: 0o600, InPlace: true})
+	err = Root{Path: root}.Write(ctx, "/link", []byte("changed"), WriteOptions{Mode: 0o600, InPlace: true})
 	if !errors.Is(err, ErrSymlink) {
 		t.Fatalf("in-place Write symlink = %v, want ErrSymlink", err)
 	}
@@ -466,17 +466,17 @@ func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
 	if err != nil || string(contents) != "short" {
 		t.Fatalf("symlink target changed: %q, %v", contents, err)
 	}
-	err = Write(ctx, root, "/.acfs-write-reserved", nil, WriteOptions{Mode: 0o600, InPlace: true})
+	err = Root{Path: root}.Write(ctx, "/.acfs-write-reserved", nil, WriteOptions{Mode: 0o600, InPlace: true})
 	if !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("in-place Write reserved path = %v, want ErrInvalidPath", err)
 	}
 	cancelCtx, cancel := context.WithCancel(ctx)
 	cancel()
-	err = Write(cancelCtx, root, "/created", []byte("cancelled"), WriteOptions{Mode: 0o600, InPlace: true})
+	err = Root{Path: root}.Write(cancelCtx, "/created", []byte("cancelled"), WriteOptions{Mode: 0o600, InPlace: true})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("in-place Write cancelled = %v, want context.Canceled", err)
 	}
-	err = Write(ctx, root, "/link", []byte("regular replacement"), WriteOptions{Mode: 0o600})
+	err = Root{Path: root}.Write(ctx, "/link", []byte("regular replacement"), WriteOptions{Mode: 0o600})
 	if err != nil {
 		t.Fatalf("atomic Write should replace final symlink: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestOpenReadSeekReadsAndRewinds(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "payload"), "seekable-contents", 0o600)
 	ctx := t.Context()
 
-	reader, size, err := OpenReadSeek(ctx, root, "/payload")
+	reader, size, err := Root{Path: root}.OpenReadSeek(ctx, "/payload")
 	if err != nil {
 		t.Fatalf("OpenReadSeek: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestOpenReadSeekReadsAndRewinds(t *testing.T) {
 		t.Fatalf("reads differ: %q vs %q", first, second)
 	}
 
-	_, _, err = OpenReadSeek(ctx, root, "/")
+	_, _, err = Root{Path: root}.OpenReadSeek(ctx, "/")
 	if !errors.Is(err, ErrIsDirectory) {
 		t.Fatalf("OpenReadSeek on directory error = %v, want ErrIsDirectory", err)
 	}
@@ -538,7 +538,7 @@ func TestMkdirAndRemoveStayInsideRoot(t *testing.T) {
 	if err := os.Symlink("real", filepath.Join(root, "alias")); err != nil {
 		t.Fatal(err)
 	}
-	if err := MkdirAll(t.Context(), root, "/alias/one/two", 0o750); err != nil {
+	if err := (Root{Path: root}).MkdirAll(t.Context(), "/alias/one/two", 0o750); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	if info, err := os.Stat(filepath.Join(root, "real", "one", "two")); err != nil || !info.IsDir() {
@@ -549,7 +549,7 @@ func TestMkdirAndRemoveStayInsideRoot(t *testing.T) {
 	if err := os.Symlink("real/keep", filepath.Join(root, "remove-link")); err != nil {
 		t.Fatal(err)
 	}
-	if err := RemoveAll(t.Context(), root, "/remove-link"); err != nil {
+	if err := (Root{Path: root}).RemoveAll(t.Context(), "/remove-link"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(root, "remove-link")); !errors.Is(err, fs.ErrNotExist) {
@@ -559,10 +559,10 @@ func TestMkdirAndRemoveStayInsideRoot(t *testing.T) {
 		t.Fatalf("symlink target changed: (%q, %v)", contents, err)
 	}
 
-	if err := RemoveAll(t.Context(), root, "/"); !errors.Is(err, ErrRootRemoval) {
+	if err := (Root{Path: root}).RemoveAll(t.Context(), "/"); !errors.Is(err, ErrRootRemoval) {
 		t.Fatalf("RemoveAll(root) = %v, want ErrRootRemoval", err)
 	}
-	if err := RemoveAll(t.Context(), root, "/missing/child"); err != nil {
+	if err := (Root{Path: root}).RemoveAll(t.Context(), "/missing/child"); err != nil {
 		t.Fatalf("RemoveAll(missing) = %v, want nil", err)
 	}
 }
@@ -572,7 +572,7 @@ func TestRejectsMalformedAndEscapingPaths(t *testing.T) {
 
 	root := t.TempDir()
 	for _, logicalPath := range []string{"", "relative", "/../outside", "/a/../b", "/a//b", "/a/./b", "/trailing/", "/nul\x00byte"} {
-		_, err := Stat(t.Context(), root, logicalPath, false)
+		_, err := Root{Path: root}.Stat(t.Context(), logicalPath, acfstypes.StatOptions{})
 		if !errors.Is(err, ErrInvalidPath) {
 			t.Errorf("Stat(%q) error = %v, want ErrInvalidPath", logicalPath, err)
 		}
@@ -582,13 +582,13 @@ func TestRejectsMalformedAndEscapingPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	var destination bytes.Buffer
-	if _, err := ReadTo(t.Context(), root, "/escape", &destination, 0); !errors.Is(err, ErrOutsideRoot) {
+	if _, err := (Root{Path: root}).ReadTo(t.Context(), "/escape", &destination, 0); !errors.Is(err, ErrOutsideRoot) {
 		t.Fatalf("ReadTo(escape) = %v, want ErrOutsideRoot", err)
 	}
 	if err := os.Symlink("/tmp", filepath.Join(root, "absolute-external")); err != nil {
 		t.Fatal(err)
 	}
-	if err := MkdirAll(t.Context(), root, "/absolute-external/child", 0o755); !errors.Is(err, ErrOutsideRoot) {
+	if err := (Root{Path: root}).MkdirAll(t.Context(), "/absolute-external/child", 0o755); !errors.Is(err, ErrOutsideRoot) {
 		t.Fatalf("MkdirAll(external) = %v, want ErrOutsideRoot", err)
 	}
 }
@@ -606,7 +606,7 @@ func TestListToleratesConcurrentRemoval(t *testing.T) {
 			_ = os.Remove(filepath.Join(root, fmt.Sprintf("entry-%04d", index)))
 		}
 	}()
-	if _, err := List(t.Context(), root, "/"); err != nil {
+	if _, err := (Root{Path: root}).List(t.Context(), "/"); err != nil {
 		t.Fatalf("List failed while entries were removed: %v", err)
 	}
 	<-removeDone
@@ -618,14 +618,14 @@ func TestReservedWriteNamesAreHiddenAndRejected(t *testing.T) {
 	root := t.TempDir()
 	reserved := temporaryWritePrefix + "fixture"
 	writeFixtureFile(t, filepath.Join(root, reserved), "internal", 0o600)
-	entries, err := List(t.Context(), root, "/")
+	entries, err := Root{Path: root}.List(t.Context(), "/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 0 {
 		t.Fatalf("reserved entry was listed: %#v", entries)
 	}
-	_, err = WriteFrom(t.Context(), root, "/"+reserved, strings.NewReader("x"), 1, 0o600)
+	_, err = Root{Path: root}.WriteFrom(t.Context(), "/"+reserved, strings.NewReader("x"), WriteFromOptions{Size: 1, Mode: 0o600})
 	if !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("reserved write error = %v, want ErrInvalidPath", err)
 	}
@@ -643,7 +643,7 @@ func BenchmarkList(b *testing.B) {
 			}
 			b.ResetTimer()
 			for range b.N {
-				if _, err := List(b.Context(), root, "/"); err != nil {
+				if _, err := (Root{Path: root}).List(b.Context(), "/"); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -678,7 +678,7 @@ func BenchmarkReadTo(b *testing.B) {
 			b.SetBytes(size)
 			b.ResetTimer()
 			for range b.N {
-				_, err = ReadTo(b.Context(), root, "/payload", io.Discard, 0)
+				_, err = Root{Path: root}.ReadTo(b.Context(), "/payload", io.Discard, 0)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -696,7 +696,7 @@ func BenchmarkWriteFrom(b *testing.B) {
 			b.ResetTimer()
 			for range b.N {
 				source := io.LimitReader(zeroReader{}, size)
-				if _, err := WriteFrom(b.Context(), root, "/payload", source, size, 0o600); err != nil {
+				if _, err := (Root{Path: root}).WriteFrom(b.Context(), "/payload", source, WriteFromOptions{Size: size, Mode: 0o600}); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -713,18 +713,18 @@ func TestRemoveSurfacesMissingTargetAndNonEmptyDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Remove(ctx, root, "/parent"); !errors.Is(err, ErrNotEmpty) {
+	if err := (Root{Path: root}).Remove(ctx, "/parent"); !errors.Is(err, ErrNotEmpty) {
 		t.Fatalf("Remove of non-empty directory error = %v, want ErrNotEmpty", err)
 	}
-	if err := Remove(ctx, root, "/parent/child"); err != nil {
+	if err := (Root{Path: root}).Remove(ctx, "/parent/child"); err != nil {
 		t.Fatalf("Remove of empty directory: %v", err)
 	}
 
 	// Unlike RemoveAll, Remove reports a missing target so cleanup loops stop.
-	if err := Remove(ctx, root, "/parent/child"); !errors.Is(err, fs.ErrNotExist) {
+	if err := (Root{Path: root}).Remove(ctx, "/parent/child"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Remove of missing target error = %v, want fs.ErrNotExist", err)
 	}
-	if err := RemoveAll(ctx, root, "/parent/child"); err != nil {
+	if err := (Root{Path: root}).RemoveAll(ctx, "/parent/child"); err != nil {
 		t.Fatalf("RemoveAll of missing target = %v, want nil", err)
 	}
 }
@@ -734,11 +734,11 @@ func TestMkdirRejectsExistingTarget(t *testing.T) {
 
 	root := t.TempDir()
 	ctx := t.Context()
-	if err := Mkdir(ctx, root, "/created", 0o750); err != nil {
+	if err := (Root{Path: root}).Mkdir(ctx, "/created", 0o750); err != nil {
 		t.Fatalf("Mkdir: %v", err)
 	}
 
-	err := Mkdir(ctx, root, "/created", 0o750)
+	err := Root{Path: root}.Mkdir(ctx, "/created", 0o750)
 	if !errors.Is(err, ErrAlreadyExists) || !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("Mkdir on existing directory error = %v, want ErrAlreadyExists and fs.ErrExist", err)
 	}
@@ -757,7 +757,7 @@ func TestStatFollowingSymlinkResolvesToItsTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	linked, err := Stat(ctx, root, "/link.yaml", false)
+	linked, err := Root{Path: root}.Stat(ctx, "/link.yaml", acfstypes.StatOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,7 +765,7 @@ func TestStatFollowingSymlinkResolvesToItsTarget(t *testing.T) {
 		t.Fatalf("Stat reported IsSymlink = false for a symlink")
 	}
 
-	followed, err := Stat(ctx, root, "/link.yaml", true)
+	followed, err := Root{Path: root}.Stat(ctx, "/link.yaml", acfstypes.StatOptions{FollowFinal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,29 +790,29 @@ func TestExistsAndLogicalPath(t *testing.T) {
 	ctx := t.Context()
 	writeFixtureFile(t, filepath.Join(root, "present.txt"), "x", 0o640)
 
-	present, err := Exists(ctx, root, "/present.txt")
+	present, err := Root{Path: root}.Exists(ctx, "/present.txt")
 	if err != nil || !present {
 		t.Fatalf("Exists(present) = %v, %v; want true, nil", present, err)
 	}
-	missing, err := Exists(ctx, root, "/missing/deep.txt")
+	missing, err := Root{Path: root}.Exists(ctx, "/missing/deep.txt")
 	if err != nil || missing {
 		t.Fatalf("Exists(missing) = %v, %v; want false, nil", missing, err)
 	}
 
-	logical, err := LogicalPath(root, filepath.Join(root, "nested", "file.txt"))
+	logical, err := Root{Path: root}.LogicalPath(filepath.Join(root, "nested", "file.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if logical != "/nested/file.txt" {
 		t.Fatalf("LogicalPath = %q, want %q", logical, "/nested/file.txt")
 	}
-	_, err = LogicalPath(root, filepath.Dir(root))
+	_, err = Root{Path: root}.LogicalPath(filepath.Dir(root))
 	if !errors.Is(err, ErrOutsideRoot) {
 		t.Fatalf("LogicalPath escape error = %v, want ErrOutsideRoot", err)
 	}
 
 	// A directory whose name merely starts with ".." still lives inside the root.
-	dotted, err := LogicalPath(root, filepath.Join(root, "..hidden", "file"))
+	dotted, err := Root{Path: root}.LogicalPath(filepath.Join(root, "..hidden", "file"))
 	if err != nil {
 		t.Fatalf("LogicalPath(..hidden) error = %v, want nil", err)
 	}

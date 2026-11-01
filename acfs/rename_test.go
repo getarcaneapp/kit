@@ -16,7 +16,7 @@ func TestRenameReplacesFileAndRejectsNonEmptyDirectoryTarget(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "source.txt"), "source", 0o640)
 	writeFixtureFile(t, filepath.Join(root, "target.txt"), "target", 0o640)
 
-	if err := Rename(ctx, root, "/source.txt", "/target.txt"); err != nil {
+	if err := (Root{Path: root}).Rename(ctx, "/source.txt", "/target.txt"); err != nil {
 		t.Fatalf("Rename onto existing file: %v", err)
 	}
 	contents, err := os.ReadFile(filepath.Join(root, "target.txt"))
@@ -39,16 +39,16 @@ func TestRenameReplacesFileAndRejectsNonEmptyDirectoryTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Rename(ctx, root, "/mover", "/occupied")
+	err = Root{Path: root}.Rename(ctx, "/mover", "/occupied")
 	if !errors.Is(err, ErrNotEmpty) {
 		t.Fatalf("Rename onto non-empty directory error = %v, want ErrNotEmpty", err)
 	}
 
-	err = Rename(ctx, root, "/occupied", "/occupied/child/nested")
+	err = Root{Path: root}.Rename(ctx, "/occupied", "/occupied/child/nested")
 	if !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("Rename into own subtree error = %v, want ErrInvalidPath", err)
 	}
-	err = Rename(ctx, root, "/", "/anywhere")
+	err = Root{Path: root}.Rename(ctx, "/", "/anywhere")
 	if !errors.Is(err, ErrRootRemoval) {
 		t.Fatalf("Rename of workspace root error = %v, want ErrRootRemoval", err)
 	}

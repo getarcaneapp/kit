@@ -32,11 +32,6 @@ type hubSubscriber[T any] struct {
 	has    bool
 }
 
-// NewHub returns an empty Hub. It is equivalent to new(Hub[T]).
-func NewHub[T any]() *Hub[T] {
-	return &Hub[T]{}
-}
-
 // Subscribe attaches to the shared runner for key, starting run when no
 // runner exists yet, and blocks until ctx is done or deliver returns false.
 // run receives a context tied to the runner's lifetime — detached from any

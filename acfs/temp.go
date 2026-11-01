@@ -27,7 +27,7 @@ const (
 //
 // The directory is created with mode 0o700 and is not cleaned up
 // automatically; callers own its lifetime.
-func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (string, error) {
+func (r Root) MkdirTemp(ctx context.Context, logicalDir, pattern string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -48,7 +48,7 @@ func MkdirTemp(ctx context.Context, rootPath, logicalDir, pattern string) (strin
 		return "", err
 	}
 
-	root, err := os.OpenRoot(rootPath)
+	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return "", fmt.Errorf("open workspace root: %w", err)
 	}

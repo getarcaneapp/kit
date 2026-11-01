@@ -17,13 +17,16 @@ const (
 )
 
 // LogicalPath translates an absolute host path into the logical workspace path
-// that every ACFS operation on rootPath expects. It is a purely lexical
-// translation — no filesystem access, no symlink resolution — and reports
-// ErrOutsideRoot for a path that does not lexically live under rootPath.
-func LogicalPath(rootPath, absPath string) (string, error) {
-	absoluteRoot, err := filepath.Abs(rootPath)
+// that every ACFS operation on r expects. It is a purely lexical translation —
+// no filesystem access, no symlink resolution — and reports ErrOutsideRoot for
+// a path that does not lexically live under r.Path.
+func (r Root) LogicalPath(absPath string) (string, error) {
+	if r.Path == "" {
+		return "", fmt.Errorf("%w: root path is empty", ErrInvalidPath)
+	}
+	absoluteRoot, err := filepath.Abs(r.Path)
 	if err != nil {
-		return "", fmt.Errorf("%w: resolve root %q: %w", ErrInvalidPath, rootPath, err)
+		return "", fmt.Errorf("%w: resolve root %q: %w", ErrInvalidPath, r.Path, err)
 	}
 	absoluteTarget, err := filepath.Abs(absPath)
 	if err != nil {
@@ -32,10 +35,10 @@ func LogicalPath(rootPath, absPath string) (string, error) {
 
 	relative, err := filepath.Rel(absoluteRoot, absoluteTarget)
 	if err != nil {
-		return "", fmt.Errorf("%w: %q is not relative to %q", ErrOutsideRoot, absPath, rootPath)
+		return "", fmt.Errorf("%w: %q is not relative to %q", ErrOutsideRoot, absPath, r.Path)
 	}
 	if !filepath.IsLocal(relative) {
-		return "", fmt.Errorf("%w: %q is outside %q", ErrOutsideRoot, absPath, rootPath)
+		return "", fmt.Errorf("%w: %q is outside %q", ErrOutsideRoot, absPath, r.Path)
 	}
 	return kitfs.LogicalPath(filepath.ToSlash(relative)), nil
 }
