@@ -1,3 +1,15 @@
+## streams/v0.4.7
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* replace functional options with config structs([c46516d](https://github.com/getarcaneapp/kit/commit/c46516d1e3c7748cc2432b1fc4fb1bc880dd8ad5) by @kmendell)
+* remove ReconcileEnvironmentPollers wrapper([9112e58](https://github.com/getarcaneapp/kit/commit/9112e5897fd3a4e52e0707ea64799b98faeeee4b) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/streams/v0.4.6...streams/v0.4.7
+
 ## streams/v0.4.6
 
 ### Bug fixes
