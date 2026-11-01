@@ -9,7 +9,7 @@ import (
 
 	"github.com/moby/moby/api/types/events"
 
-	"go.getarcane.app/streams/internal/buffer"
+	"kit.getarcane.app/docker/streams/internal/buffer"
 )
 
 const defaultSubscriberBuffer = 16

@@ -3,7 +3,7 @@ package docker
 import (
 	"strings"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // ContainerNameFromNames returns Docker's first container name without the

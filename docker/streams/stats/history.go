@@ -7,7 +7,7 @@ import (
 	"time"
 
 	dockercontainer "github.com/moby/moby/api/types/container"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 const (

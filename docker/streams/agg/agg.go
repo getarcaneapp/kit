@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // Producer sends events until ctx is canceled.

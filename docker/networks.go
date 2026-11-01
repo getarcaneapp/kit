@@ -10,7 +10,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 const defaultNetworkMode = "bridge"

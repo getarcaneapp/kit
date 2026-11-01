@@ -17,7 +17,7 @@ import (
 	containertypes "github.com/moby/moby/api/types/container"
 	networktypes "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // WrapDockerAPIClientForInspectCompatibility wraps a client so create, inspect,

@@ -1,8 +1,8 @@
-module go.getarcane.app/docker
+module kit.getarcane.app/docker
 
 go 1.27
 
-replace go.getarcane.app/kit => ../
+replace kit.getarcane.app => ../kit
 
 require (
 	github.com/moby/moby/api v1.56.1
@@ -10,7 +10,7 @@ require (
 	github.com/samber/hot v0.13.1
 	github.com/samber/mo v1.17.0
 	github.com/stretchr/testify v1.12.1
-	go.getarcane.app/kit v0.4.4
+	kit.getarcane.app v0.4.4
 )
 
 require (

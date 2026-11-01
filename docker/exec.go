@@ -12,7 +12,7 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // streamEndErrors are the typed errors that mark an ordinary end of a Docker

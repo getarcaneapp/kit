@@ -10,7 +10,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // MountForSubpath returns a Mount that exposes a subpath of one of the

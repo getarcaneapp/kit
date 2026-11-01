@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/streams/internal/buffer"
+	"kit.getarcane.app/docker/streams/internal/buffer"
 )
 
 const (

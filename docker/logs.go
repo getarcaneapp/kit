@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // LogOptions describes the log stream StreamContainerLogs reads.

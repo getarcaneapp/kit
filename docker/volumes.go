@@ -15,7 +15,7 @@ import (
 	"github.com/moby/moby/client"
 	"github.com/samber/hot"
 	"github.com/samber/mo"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 var volumeUsageCache = hot.NewHotCache[string, []volume.Volume](hot.LRU, 16).
