@@ -1,16 +1,12 @@
 go 1.27
 
 use (
-	.
+	./kit
 	./acfs
 	./builds
 	./docker
-	./docker/compat
 	./docker/convert
-	./tripwire
-	./streams
-	./sys/bytes
 	./sys/cgroup
-	./sys/crypto
+	./tripwire
 	./updater
 )

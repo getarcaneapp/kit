@@ -2,16 +2,13 @@ version: 2
 updates:
   - package-ecosystem: "gomod"
     directories:
-      - "/"
+      - "/kit"
       - "/acfs"
       - "/builds"
       - "/docker"
       - "/docker/convert"
       - "/tripwire"
-      - "/streams"
-      - "/sys/bytes"
       - "/sys/cgroup"
-      - "/sys/crypto"
       - "/updater"
     schedule:
       interval: "weekly"

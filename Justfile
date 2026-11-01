@@ -1,6 +1,6 @@
 set working-directory := './'
 
-modules := '. ./acfs ./builds ./docker ./docker/compat ./docker/convert ./tripwire ./streams ./sys/bytes ./sys/cgroup ./sys/crypto ./updater'
+modules := './kit ./acfs ./builds ./docker ./docker/convert ./sys/cgroup ./tripwire ./updater'
 golangci_config := justfile_directory() / '.golangci.yml'
 
 _default:
@@ -153,8 +153,8 @@ snapshot:
 # The bump is derived from conventional commits since the module's latest tag:
 # feat -> minor, any other commit -> patch; --patch, --minor, or --major forces a bump. An explicit
 # version skips the bump detection, e.g. when a module moved in already tagged.
-# Nested modules tag as <module>/vX.Y.Z, the root kit module as vX.Y.Z.
-# Each release also points the module's go.getarcane.app requirements at their
+# Every module tags as <dir>/vX.Y.Z, e.g. kit/v0.5.0 or docker/convert/v0.4.0.
+# Each release also points the module's kit.getarcane.app requirements at their
 # latest tags, so the published go.mod matches what it was built against.
 #
 # "all" releases, in dependency order, every module with commits since its latest
@@ -226,16 +226,12 @@ release module *args:
         exit 1
     fi
 
-    # Directory of a module name ("kit" is the root module).
-    module_dir() {
-        if [ "$1" == "kit" ]; then echo "."; else echo "$1"; fi
-    }
-    # Module names of the go.getarcane.app modules in this repo that $1 requires.
+    # Module names of the kit.getarcane.app modules in this repo that $1 requires.
     internal_deps() {
-        (cd "$(module_dir "$1")" && go mod edit -json) |
-            jq -r '.Require[]? | .Path | select(startswith("go.getarcane.app/")) | ltrimstr("go.getarcane.app/")' |
+        (cd "$1" && go mod edit -json) |
+            jq -r '.Require[]? | .Path | if . == "kit.getarcane.app" then "kit" elif startswith("kit.getarcane.app/") then ltrimstr("kit.getarcane.app/") else empty end' |
             while read -r dep; do
-                if [ -f "$(module_dir "$dep")/go.mod" ]; then echo "$dep"; fi
+                if [ -f "$dep/go.mod" ]; then echo "$dep"; fi
             done
     }
 
@@ -249,7 +245,7 @@ release module *args:
         remaining=()
         for module in {{ modules }}; do
             module="${module#./}"
-            remaining+=("$([ "$module" == "." ] && echo kit || echo "$module")")
+            remaining+=("$module")
         done
         ordered=" "
         ORDER=()
@@ -315,43 +311,24 @@ release module *args:
         exit 1
     fi
 
-    case "{{ module }}" in
-        kit|.)
-            MODULE_DIR="."
-            PREFIX="v"
-            TAG_PATTERN="^v[0-9]"
-            CHANGELOG_FILE="CHANGELOG.md"
-            CLIFF_PATH_ARGS=()
-            PATHSPEC=(-- .)
-            for module in {{ modules }}; do
-                if [ "$module" != "." ]; then
-                    module="${module#./}"
-                    CLIFF_PATH_ARGS+=(--exclude-path "$module/**")
-                    PATHSPEC+=(":(exclude)$module")
-                fi
-            done
-            ;;
-        *)
-            if [ ! -f "{{ module }}/go.mod" ]; then
-                echo "Unknown module {{ module }}" >&2
-                exit 1
-            fi
-            MODULE_DIR="{{ module }}"
-            PREFIX="{{ module }}/v"
-            TAG_PATTERN="^{{ module }}/v[0-9]"
-            CHANGELOG_FILE="{{ module }}/CHANGELOG.md"
-            CLIFF_PATH_ARGS=(--include-path "{{ module }}/**")
-            PATHSPEC=(-- '{{ module }}')
-            # Modules nested below this one (docker/compat under docker) release separately.
-            for module in {{ modules }}; do
-                module="${module#./}"
-                if [[ "$module" == "{{ module }}/"* ]]; then
-                    CLIFF_PATH_ARGS+=(--exclude-path "$module/**")
-                    PATHSPEC+=(":(exclude)$module")
-                fi
-            done
-            ;;
-    esac
+    if [ ! -f "{{ module }}/go.mod" ]; then
+        echo "Unknown module {{ module }}" >&2
+        exit 1
+    fi
+    MODULE_DIR="{{ module }}"
+    PREFIX="{{ module }}/v"
+    TAG_PATTERN="^{{ module }}/v[0-9]"
+    CHANGELOG_FILE="{{ module }}/CHANGELOG.md"
+    CLIFF_PATH_ARGS=(--include-path "{{ module }}/**")
+    PATHSPEC=(-- '{{ module }}')
+    # Modules nested below this one (docker/convert under docker) release separately.
+    for module in {{ modules }}; do
+        module="${module#./}"
+        if [[ "$module" == "{{ module }}/"* ]]; then
+            CLIFF_PATH_ARGS+=(--exclude-path "$module/**")
+            PATHSPEC+=(":(exclude)$module")
+        fi
+    done
 
     # Function to increment the version
     increment_version() {
@@ -377,12 +354,9 @@ release module *args:
 
     # Commits touching this module since its last tag, minus any whose
     # conventional-commit scope names a different module. A commit like
-    # "fix(updater): ..." that also adds a file under docker/compat belongs to
+    # "fix(updater): ..." that also adds a file under docker/convert belongs to
     # the updater changelog only. Unscoped commits stay, as they are cross-cutting.
     MODULE_NAME="{{ module }}"
-    if [ "$MODULE_NAME" == "." ]; then
-        MODULE_NAME="kit"
-    fi
     SUBJECTS=""
     SKIP_ARGS=()
     while read -r hash subject; do
@@ -391,9 +365,6 @@ release module *args:
         if [ -n "$scope" ] && [ "$scope" != "$MODULE_NAME" ] && [ "$scope" != "${MODULE_NAME##*/}" ]; then
             for other in {{ modules }}; do
                 other="${other#./}"
-                if [ "$other" == "." ]; then
-                    other="kit"
-                fi
                 if [ "$scope" == "$other" ] || [ "$scope" == "${other##*/}" ]; then
                     foreign=true
                     break
@@ -451,14 +422,15 @@ release module *args:
     # Internal requirements that lag behind the required module's latest tag.
     DEP_BUMPS=()
     for dep in $(internal_deps "$MODULE_NAME"); do
-        dep_prefix="$([ "$dep" == "kit" ] && echo "v" || echo "$dep/v")"
+        dep_prefix="$dep/v"
         dep_tag=$(git tag -l "${dep_prefix}[0-9]*" --sort=-v:refname | head -n1)
         dep_version="v${dep_tag#"$dep_prefix"}"
-        required=$(cd "$MODULE_DIR" && go mod edit -json | jq -r --arg path "go.getarcane.app/$dep" '.Require[] | select(.Path == $path) | .Version')
+        dep_path="kit.getarcane.app$([ "$dep" == "kit" ] || echo "/$dep")"
+        required=$(cd "$MODULE_DIR" && go mod edit -json | jq -r --arg path "$dep_path" '.Require[] | select(.Path == $path) | .Version')
         if [ -n "$dep_tag" ] && [ "$required" != "$dep_version" ] &&
             [ "$(printf '%s\n%s\n' "$required" "$dep_version" | sort -V | tail -n1)" == "$dep_version" ]; then
-            DEP_BUMPS+=("go.getarcane.app/$dep@$dep_version")
-            echo "Requirement go.getarcane.app/$dep: $required -> $dep_version"
+            DEP_BUMPS+=("$dep_path@$dep_version")
+            echo "Requirement $dep_path: $required -> $dep_version"
         fi
     done
 
