@@ -1,3 +1,14 @@
+## v0.4.4
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* replace normalization.Text bool flags with TextOptions([3e30272](https://github.com/getarcaneapp/kit/commit/3e3027269858658b8c7df2b1309e7d1d6226acc3) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/v0.4.3...v0.4.4
+
 ## v0.4.3
 
 
