@@ -439,12 +439,15 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 	}()
 
 	createCtx, cancelCreate := s.opCtx(ctx)
-	resp, err := compat.ContainerCreateWithCompatibilityForAPIVersion(createCtx, dockerClient, client.ContainerCreateOptions{
-		Config:           cfg,
-		HostConfig:       hostConfig,
-		NetworkingConfig: networkingConfig,
-		Name:             strings.TrimPrefix(inspect.Name, "/"),
-	}, apiVersion)
+	resp, err := compat.ContainerCreateWithCompatibility(createCtx, dockerClient, compat.CreateRequest{
+		Options: client.ContainerCreateOptions{
+			Config:           cfg,
+			HostConfig:       hostConfig,
+			NetworkingConfig: networkingConfig,
+			Name:             strings.TrimPrefix(inspect.Name, "/"),
+		},
+		APIVersion: apiVersion,
+	})
 	cancelCreate()
 	if err != nil {
 		return resp.ID, fmt.Errorf("create: %w", err)

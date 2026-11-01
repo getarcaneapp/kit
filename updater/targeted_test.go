@@ -353,8 +353,40 @@ func TestApplyPendingTargetedFailedComposeDependencyRetained(t *testing.T) {
 	}
 }
 
-// A pending batch, even forced, leaves settings exclusions, stopped containers and the Docker proxy
-// alone; IgnoreSettingsExclusions only applies to an explicit UpdateContainer target.
+// IgnoreSettingsExclusions lets a user-requested batch update a container its settings exclude.
+func TestApplyPendingTargetedIgnoreSettingsExclusionsUpdatesExcluded(t *testing.T) {
+	const name = "settings-excluded"
+	fixture := &targetedDocker{containers: []container.InspectResponse{newTargetedContainer(name, "1.x")}, created: map[string]string{}}
+	server := httptest.NewServer(fixture.handler(t))
+	defer server.Close()
+	dockerClient, err := client.New(client.WithHost("tcp://docker-proxy:2375"), client.WithAPIVersion("1.41"), client.WithDialContext(func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if closeErr := dockerClient.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	}()
+	service := newServiceForTest(t, Config{
+		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
+		PendingStore:         NewMemoryPendingStore(targetedPending(name, "1.2.0")),
+		ImagePuller:          &fakePuller{},
+		Settings:             &fakeSettings{excluded: []string{name}},
+	})
+	result, err := service.ApplyPending(t.Context(), Options{Force: true, IgnoreSettingsExclusions: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Updated != 1 || result.Failed != 0 {
+		t.Fatalf("excluded container not updated despite IgnoreSettingsExclusions: %#v", result)
+	}
+}
+
+// A pending batch, even forced, leaves stopped containers and the Docker proxy alone despite
+// IgnoreSettingsExclusions, and leaves a settings exclusion alone unless that option is set.
 func TestApplyPendingTargetedExcludedContainers(t *testing.T) {
 	for _, name := range []string{"stopped", "docker-proxy", "settings-excluded"} {
 		t.Run(name, func(t *testing.T) {
@@ -383,7 +415,7 @@ func TestApplyPendingTargetedExcludedContainers(t *testing.T) {
 			store := NewMemoryPendingStore(targetedPending(name, "1.2.0"))
 			puller := &fakePuller{}
 			service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}, PendingStore: store, ImagePuller: puller, Settings: settings})
-			result, err := service.ApplyPending(t.Context(), Options{Force: true, IgnoreSettingsExclusions: true})
+			result, err := service.ApplyPending(t.Context(), Options{Force: true, IgnoreSettingsExclusions: name != "settings-excluded"})
 			if err != nil {
 				t.Fatal(err)
 			}
