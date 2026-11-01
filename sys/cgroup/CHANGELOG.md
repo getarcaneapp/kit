@@ -1,3 +1,13 @@
+## sys/cgroup/v0.3.0
+
+### New features
+
+* move to kit.getarcane.app/sys/cgroup([2c69e0e](https://github.com/getarcaneapp/kit/commit/2c69e0e53ce8029ecd9e1eb10878683b351c59a6) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.2.7...sys/cgroup/v0.3.0
+
 ## sys/cgroup/v0.2.7
 
 ### Bug fixes
