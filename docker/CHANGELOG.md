@@ -1,3 +1,13 @@
+## docker/v0.2.0
+
+### New features
+
+* move to kit.getarcane.app/docker([76581a3](https://github.com/getarcaneapp/kit/commit/76581a3eacd15ebd1449ec3c0599ef03d2353274) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.1.4...docker/v0.2.0
+
 ## docker/v0.1.4
 
 ### Bug fixes
