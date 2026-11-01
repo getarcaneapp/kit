@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 const (
