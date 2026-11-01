@@ -6,7 +6,7 @@ replace kit.getarcane.app => ../kit
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
-	kit.getarcane.app v0.4.4
+	kit.getarcane.app v0.5.0
 )
 
 require golang.org/x/sys v0.48.0 // indirect

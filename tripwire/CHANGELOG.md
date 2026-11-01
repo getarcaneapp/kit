@@ -1,3 +1,13 @@
+## tripwire/v0.1.1
+
+### Bug fixes
+
+* require kit.getarcane.app([839b08f](https://github.com/getarcaneapp/kit/commit/839b08fe409954866a8ef27d0d120fd2c1ec3b78) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/tripwire/v0.1.0...tripwire/v0.1.1
+
 ## tripwire/v0.1.0
 
 ### New features
