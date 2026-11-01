@@ -1,3 +1,14 @@
+## sys/bytes/v0.3.2
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* use keyed literals for the unit table([52187fe](https://github.com/getarcaneapp/kit/commit/52187fe623111dc484ce8567e29cea138973eeb7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/bytes/v0.3.1...sys/bytes/v0.3.2
+
 ## sys/bytes/v0.3.1
 
 
