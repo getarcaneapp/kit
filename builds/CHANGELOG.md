@@ -1,3 +1,13 @@
+## builds/v0.5.0
+
+### New features
+
+* move to kit.getarcane.app/builds([bdd0da4](https://github.com/getarcaneapp/kit/commit/bdd0da41247b5a069c33056e06f908397209daa3) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.4.9...builds/v0.5.0
+
 ## builds/v0.4.9
 
 ### Bug fixes
