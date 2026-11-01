@@ -41,10 +41,7 @@ type Config struct {
 
 // InitEncryption initializes the package default encryptor. Applications should
 // prefer constructing an Encryptor with New and passing it explicitly.
-func InitEncryption(cfg *Config) {
-	if cfg == nil {
-		panic("encryption config is required")
-	}
+func InitEncryption(cfg Config) {
 	keyStr := strings.TrimSpace(cfg.EncryptionKey)
 	if keyStr == "" {
 		if cfg.Environment == "production" && !cfg.AgentMode {
@@ -69,7 +66,7 @@ func InitEncryption(cfg *Config) {
 	if len(keyStr) >= KeySize {
 		legacy = append(legacy, []byte(keyStr[:KeySize]))
 	}
-	encryptor, err := New(key, legacy...)
+	encryptor, err := New(Keys{Primary: key, Previous: legacy})
 	if err != nil {
 		panic(err.Error())
 	}
@@ -108,23 +105,30 @@ type Encryptor struct {
 	keys [][]byte
 }
 
-// New creates an Encryptor with a primary AES-256 key and optional old keys for
-// decryption during rotation.
-func New(primary []byte, old ...[]byte) (*Encryptor, error) {
-	keys := make([][]byte, 0, 1+len(old))
-	primaryKey, err := copyAESKey(primary)
+// Keys is the key material for an Encryptor.
+type Keys struct {
+	// Primary is the AES-256 key used to encrypt and tried first when decrypting.
+	Primary []byte
+	// Previous holds retired keys that are only used to decrypt during rotation.
+	Previous [][]byte
+}
+
+// New creates an Encryptor from keys. Every key must be KeySize bytes.
+func New(keys Keys) (*Encryptor, error) {
+	normalizedKeys := make([][]byte, 0, 1+len(keys.Previous))
+	primaryKey, err := copyAESKey(keys.Primary)
 	if err != nil {
 		return nil, err
 	}
-	keys = append(keys, primaryKey)
-	for i, key := range old {
+	normalizedKeys = append(normalizedKeys, primaryKey)
+	for i, key := range keys.Previous {
 		normalized, keyErr := copyAESKey(key)
 		if keyErr != nil {
 			return nil, &InvalidKeyError{Reason: fmt.Sprintf("old key %d: %v", i, keyErr)}
 		}
-		keys = append(keys, normalized)
+		normalizedKeys = append(normalizedKeys, normalized)
 	}
-	return &Encryptor{keys: keys}, nil
+	return &Encryptor{keys: normalizedKeys}, nil
 }
 
 // ParseKey parses explicit key material. Hex and base64 keys must use the

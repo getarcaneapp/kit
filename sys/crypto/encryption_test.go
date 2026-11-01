@@ -44,7 +44,7 @@ func TestInitEncryptionDecryptsLegacyHexCiphertext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeString returned error: %v", err)
 	}
-	legacyEncryptor, err := New(legacyKey)
+	legacyEncryptor, err := New(Keys{Primary: legacyKey})
 	if err != nil {
 		t.Fatalf("New legacy returned error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestInitEncryptionDecryptsLegacyHexCiphertext(t *testing.T) {
 		t.Fatalf("Encrypt returned error: %v", err)
 	}
 
-	InitEncryption(&Config{EncryptionKey: hexLookalike, Environment: "production"})
+	InitEncryption(Config{EncryptionKey: hexLookalike, Environment: "production"})
 	plaintext, err := Decrypt(ciphertext)
 	if err != nil {
 		t.Fatalf("Decrypt returned error: %v", err)
@@ -99,7 +99,7 @@ func TestEncryptorEncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseKey returned error: %v", err)
 	}
-	encryptor, err := New(key)
+	encryptor, err := New(Keys{Primary: key})
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestEncryptorEncryptDecrypt(t *testing.T) {
 }
 
 func TestEncryptorDecryptRejectsShortCiphertext(t *testing.T) {
-	encryptor, err := New(bytes.Repeat([]byte{0x42}, KeySize))
+	encryptor, err := New(Keys{Primary: bytes.Repeat([]byte{0x42}, KeySize)})
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestEncryptorDecryptsWithOldKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseKey old returned error: %v", err)
 	}
-	oldEncryptor, err := New(oldKey)
+	oldEncryptor, err := New(Keys{Primary: oldKey})
 	if err != nil {
 		t.Fatalf("New old returned error: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestEncryptorDecryptsWithOldKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseKey new returned error: %v", err)
 	}
-	rotated, err := New(newKey, oldKey)
+	rotated, err := New(Keys{Primary: newKey, Previous: [][]byte{oldKey}})
 	if err != nil {
 		t.Fatalf("New rotated returned error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestEncryptorDecryptsKnownAnswer(t *testing.T) {
 	// Produced by an earlier Encrypt that prepended a manually read nonce; it
 	// locks in the base64(nonce || ciphertext || tag) layout for stored values.
 	const ciphertext = "jMk330Va3XkU6mvwnmXGRJPsOmGksAQMLrF4fxVr/FHncDcMSbXvJg=="
-	encryptor, err := New(bytes.Repeat([]byte{0x42}, KeySize))
+	encryptor, err := New(Keys{Primary: bytes.Repeat([]byte{0x42}, KeySize)})
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
