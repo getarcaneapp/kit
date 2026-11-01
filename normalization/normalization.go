@@ -33,13 +33,18 @@ func Normalize(value any) error {
 	return normalizeValue(v, p, make(map[any]bool))
 }
 
-// Text optionally trims surrounding Unicode whitespace, then applies NFC.
+type TextOptions struct {
+	Trim bool
+	NFC bool
+}
+
+// Text applies the normalizations selected by opts: trimming first, then NFC.
 // It preserves case and internal whitespace and must not be used for secrets.
-func Text(value string, trim, nfc bool) string {
-	if trim {
+func Text(value string, opts TextOptions) string {
+	if opts.Trim {
 		value = strings.TrimSpace(value)
 	}
-	if nfc {
+	if opts.NFC {
 		value = norm.NFC.String(value)
 	}
 	return value
@@ -66,7 +71,7 @@ func normalizeValue(v reflect.Value, p *plan, seen map[any]bool) error {
 	case v.Kind() == reflect.Struct:
 		for _, f := range p.fields {
 			field := v.Field(f.index)
-			if !f.trim && !f.nfc {
+			if f.text == (TextOptions{}) {
 				if err := normalizeValue(field, f.plan, seen); err != nil {
 					return fmt.Errorf("%s: %w", f.name, err)
 				}
@@ -104,7 +109,7 @@ func normalizedString(value reflect.Value, field fieldPlan) (reflect.Value, erro
 		replacement.Elem().Set(normalized)
 		return replacement, nil
 	}
-	text := Text(value.String(), field.trim, field.nfc)
+	text := Text(value.String(), field.text)
 	length := utf8.RuneCountInString(text)
 	if length < field.minLength {
 		return reflect.Value{}, fmt.Errorf("must contain at least %d characters after normalization", field.minLength)

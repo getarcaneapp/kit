@@ -18,8 +18,7 @@ type fieldPlan struct {
 	minLength int
 	maxLength int
 	inline    bool
-	trim      bool
-	nfc       bool
+	text      TextOptions
 }
 
 type plan struct {
@@ -150,11 +149,13 @@ func compileField(field reflect.StructField, seen map[reflect.Type]*plan) (field
 	}
 	child, err := compile(field.Type, seen)
 	return fieldPlan{
-		index:     field.Index[0],
-		name:      cmp.Or(jsonTag[0], field.Name),
-		inline:    (field.Anonymous && jsonTag[0] == "" && fieldType.Kind() == reflect.Struct) || slices.Contains(jsonTag[1:], "inline"),
-		trim:      hasTrim,
-		nfc:       hasNorm,
+		index:  field.Index[0],
+		name:   cmp.Or(jsonTag[0], field.Name),
+		inline: (field.Anonymous && jsonTag[0] == "" && fieldType.Kind() == reflect.Struct) || slices.Contains(jsonTag[1:], "inline"),
+		text: TextOptions{
+			Trim: hasTrim,
+			NFC:  hasNorm,
+		},
 		plan:      child,
 		minLength: minimum,
 		maxLength: maximum,
@@ -167,7 +168,7 @@ func hasRules(p *plan, seen map[*plan]bool) bool {
 	}
 	seen[p] = true
 	for _, f := range p.fields {
-		if f.trim || f.nfc || hasRules(f.plan, seen) {
+		if f.text != (TextOptions{}) || hasRules(f.plan, seen) {
 			return true
 		}
 	}

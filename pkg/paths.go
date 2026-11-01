@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"cmp"
 	"errors"
 	"net/url"
 	"path"
@@ -15,7 +16,7 @@ func SQLitePathFromDSN(dsn string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return Ternary(parsed.Opaque != "", parsed.Opaque, parsed.Path), nil
+	return cmp.Or(parsed.Opaque, parsed.Path), nil
 }
 
 // NormalizeRelativePath validates and cleans a slash-delimited path rooted at a

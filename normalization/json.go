@@ -86,7 +86,7 @@ func normalizeObject(fields map[string]jsontext.Value, p *plan) error {
 		if !ok {
 			continue
 		}
-		if f.trim || f.nfc {
+		if f.text != (TextOptions{}) {
 			if value.Kind() != '"' {
 				continue
 			}
@@ -94,7 +94,7 @@ func normalizeObject(fields map[string]jsontext.Value, p *plan) error {
 			if err := json.Unmarshal(value, &text); err != nil {
 				return err
 			}
-			normalized, err := json.Marshal(Text(text, f.trim, f.nfc))
+			normalized, err := json.Marshal(Text(text, f.text))
 			if err != nil {
 				return err
 			}

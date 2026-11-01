@@ -29,10 +29,11 @@ func TestText(t *testing.T) {
 		{name: "invisible", input: "\u200bA\u200b", want: "\u200bA\u200b"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := Text(test.input, true, true); got != test.want {
+			opts := TextOptions{Trim: true, NFC: true}
+			if got := Text(test.input, opts); got != test.want {
 				t.Fatalf("got %q, want %q", got, test.want)
 			}
-			if got := Text(Text(test.input, true, true), true, true); got != test.want {
+			if got := Text(Text(test.input, opts), opts); got != test.want {
 				t.Fatalf("not idempotent: %q", got)
 			}
 		})
