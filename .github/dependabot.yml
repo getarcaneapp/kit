@@ -7,6 +7,7 @@ updates:
       - "/builds"
       - "/docker"
       - "/docker/convert"
+      - "/tripwire"
       - "/streams"
       - "/sys/bytes"
       - "/sys/cgroup"

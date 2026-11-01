@@ -1,6 +1,6 @@
 set working-directory := './'
 
-modules := '. ./acfs ./builds ./docker ./docker/compat ./docker/convert ./streams ./sys/bytes ./sys/cgroup ./sys/crypto ./updater'
+modules := '. ./acfs ./builds ./docker ./docker/compat ./docker/convert ./tripwire ./streams ./sys/bytes ./sys/cgroup ./sys/crypto ./updater'
 golangci_config := justfile_directory() / '.golangci.yml'
 
 _default:

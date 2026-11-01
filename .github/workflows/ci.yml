@@ -67,6 +67,9 @@ jobs:
           - name: docker-convert
             dir: docker/convert
             args: --config=../../.golangci.yml
+          - name: tripwire
+            dir: tripwire
+            args: --config=../.golangci.yml
           - name: streams
             dir: streams
             args: --config=../.golangci.yml
