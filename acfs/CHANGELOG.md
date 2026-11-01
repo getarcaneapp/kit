@@ -1,3 +1,14 @@
+## acfs/v0.6.4
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* make operations methods on a Root value type([c6fa5b7](https://github.com/getarcaneapp/kit/commit/c6fa5b784c879db379e75746d67be6363b73fa22) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/acfs/v0.6.3...acfs/v0.6.4
+
 ## acfs/v0.6.3
 
 ### Bug fixes

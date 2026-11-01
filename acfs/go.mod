@@ -4,4 +4,4 @@ go 1.27
 
 replace go.getarcane.app/kit => ../
 
-require go.getarcane.app/kit v0.4.2
+require go.getarcane.app/kit v0.4.4
