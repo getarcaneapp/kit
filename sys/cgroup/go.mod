@@ -1,4 +1,4 @@
-module go.getarcane.app/sys/cgroup
+module kit.getarcane.app/sys/cgroup
 
 go 1.27
 
