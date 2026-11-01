@@ -10,11 +10,11 @@ import (
 func TestSelect(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
+		policy    types.Policy
 		name      string
 		current   string
-		tags      []string
-		policy    types.Policy
 		want      string
+		tags      []string
 		wantError bool
 	}{
 		{name: "numeric ordering", current: "3.1.9", tags: []string{"3.1.10", "3.1.8", "4.0.0"}, want: "3.1.10"},

@@ -28,8 +28,8 @@ func TestNormalizeLogicalPath(t *testing.T) {
 func TestFormatMode(t *testing.T) {
 	t.Parallel()
 	tests := map[string]struct {
-		mode os.FileMode
 		want string
+		mode os.FileMode
 	}{
 		"regular":        {mode: 0o640, want: "-rw-r-----"},
 		"directory":      {mode: os.ModeDir | 0o755, want: "drwxr-xr-x"},

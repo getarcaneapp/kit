@@ -2,7 +2,7 @@
 version: "2"
 
 run:
-  go: "1.27.2"
+  go: "1.27.3"
   timeout: 5m
 
 issues:
@@ -106,8 +106,7 @@ linters:
       line-length: 200
 
     govet:
-      enable:
-        - shadow
+      enable-all: true
       settings:
         shadow:
           strict: true

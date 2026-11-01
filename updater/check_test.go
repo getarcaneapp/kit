@@ -12,8 +12,8 @@ import (
 )
 
 type testTagLister struct {
-	tags  []string
 	err   error
+	tags  []string
 	calls int
 }
 
@@ -224,8 +224,8 @@ func TestCheckContainerCandidatesAreScoped(t *testing.T) {
 func TestCheckImageAutomaticStrategy(t *testing.T) {
 	for _, tt := range []struct {
 		current string
-		tags    []string
 		want    string
+		tags    []string
 	}{
 		{current: "3.1.9", tags: []string{"3.1.10", "4.0.0"}, want: "3.1.10"},
 		{current: "0.2.9", tags: []string{"0.2.10", "0.3.0"}, want: "0.2.10"},

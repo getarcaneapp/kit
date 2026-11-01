@@ -35,8 +35,8 @@ type CheckResult struct {
 	CurrentDigest   string `json:"currentDigest,omitempty"`
 	TargetDigest    string `json:"targetDigest,omitempty"`
 	UpdateType      string `json:"updateType,omitempty"`
-	UpdateAvailable bool   `json:"updateAvailable"`
 	Reason          string `json:"reason,omitempty"`
+	UpdateAvailable bool   `json:"updateAvailable"`
 }
 
 // ServiceImageChange describes a persisted Compose image replacement. Adapters

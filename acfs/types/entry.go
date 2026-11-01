@@ -10,11 +10,11 @@ const ProtocolVersion = 2
 // Entry describes a filesystem entry relative to a workspace root.
 type Entry struct {
 	ModTime         time.Time `json:"modTime"`
-	ModTimeUnixNano int64     `json:"modTimeUnixNano"`
 	Name            string    `json:"name"`
 	Path            string    `json:"path"`
 	Mode            string    `json:"mode"`
 	LinkTarget      string    `json:"linkTarget,omitempty"`
+	ModTimeUnixNano int64     `json:"modTimeUnixNano"`
 	Size            int64     `json:"size"`
 	// UnixMode carries the raw os.FileMode bits of the entry, so callers can
 	// compare or reapply them. Mode is a human-readable rendering meant for

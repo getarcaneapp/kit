@@ -445,18 +445,22 @@ func TestServiceFallsBackToStandaloneWhenComposeProjectUnresolved(t *testing.T) 
 const tagSelectionContainerID, tagSelectionContainerName = "app", "web"
 
 type tagSelectionScenario struct {
-	name                string
-	dry, force, self    bool
-	current, constraint string
-	// repository is the configured spelling of the current app:1.0.0 image.
-	repository        string
-	disabled, compose bool
 	// excluded is a settings exclusion matching the container by name or ID;
 	// override sets Options.IgnoreSettingsExclusions.
-	excluded        string
+	excluded   string
+	constraint string
+	name       string
+	// repository is the configured spelling of the current app:1.0.0 image.
+	repository      string
+	current         string
+	wantFailure     bool
+	compose         bool
+	self            bool
+	dry             bool
+	force           bool
 	override        bool
 	unchangedDigest bool
-	wantFailure     bool
+	disabled        bool
 	wantSkipped     bool
 }
 

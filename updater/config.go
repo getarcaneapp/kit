@@ -45,12 +45,12 @@ type Config struct {
 	// images by listing running containers.
 	UsedImageCollector UsedImageCollector
 
+	// Logger receives the updater's diagnostics. Defaults to slog.Default().
+	Logger *slog.Logger
 	// SelfContainerID is the ID (or ID prefix) of the container the host application runs in.
 	// When set, that container always goes through the SelfUpdater, whatever its labels.
 	SelfContainerID string
 	// OperationTimeout optionally bounds individual Docker mutation operations
 	// and compose project updates. Zero leaves caller context deadlines unchanged.
 	OperationTimeout time.Duration
-	// Logger receives the updater's diagnostics. Defaults to slog.Default().
-	Logger *slog.Logger
 }

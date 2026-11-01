@@ -119,8 +119,8 @@ func TestNormalizeIP(t *testing.T) {
 
 	tests := []struct {
 		raw        string
-		keepPrefix bool
 		want       string
+		keepPrefix bool
 		changed    bool
 	}{
 		{raw: " 172.18.0.1 ", want: "172.18.0.1", changed: true},
@@ -325,8 +325,8 @@ func TestWrapDockerAPIClientForInspectCompatibility_ContainerCreateLegacyNetwork
 	t.Parallel()
 
 	type connectRequest struct {
-		Container      string                         `json:"Container"`
 		EndpointConfig *networktypes.EndpointSettings `json:"EndpointConfig"`
+		Container      string                         `json:"Container"`
 	}
 	var createPayload struct {
 		NetworkingConfig networktypes.NetworkingConfig `json:"NetworkingConfig"`

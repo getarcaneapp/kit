@@ -10,8 +10,8 @@ import (
 )
 
 type memoryPendingStore struct {
-	mu      sync.Mutex
 	records map[string]ImageUpdateRecord
+	mu      sync.Mutex
 }
 
 // NewMemoryPendingStore returns an in-memory pending update store.

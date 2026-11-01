@@ -196,9 +196,9 @@ func (f *fakeRunRecorder) RecordUpdateRun(ctx context.Context, result ResourceRe
 }
 
 type fakePuller struct {
-	pulled []string
 	err    error
 	after  func(imageRef string)
+	pulled []string
 }
 
 func (f *fakePuller) PullImage(ctx context.Context, imageRef string, progress io.Writer) error {
@@ -252,8 +252,8 @@ func (fakeDigestResolver) ImageDigest(ctx context.Context, imageRef string) (str
 }
 
 type countingDigestResolver struct {
-	digest string
 	err    error
+	digest string
 	calls  int
 }
 
@@ -271,9 +271,9 @@ func (r *countingDigestResolver) ImageDigest(ctx context.Context, imageRef strin
 }
 
 type fakeProjectUpdater struct {
+	err         error
 	projects    map[string]ComposeProject
 	updateCalls []string
-	err         error
 	delay       time.Duration
 }
 

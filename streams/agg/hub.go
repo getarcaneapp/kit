@@ -14,8 +14,8 @@ import (
 // rather than deltas — a slow consumer skips straight to the newest one and
 // can never stall the runner or its peers.
 type Hub[T any] struct {
-	mu      sync.Mutex
 	entries map[string]*hubEntry[T]
+	mu      sync.Mutex
 }
 
 type hubEntry[T any] struct {
@@ -26,10 +26,10 @@ type hubEntry[T any] struct {
 }
 
 type hubSubscriber[T any] struct {
-	mu     sync.Mutex
 	latest T
-	has    bool
 	wake   chan struct{}
+	mu     sync.Mutex
+	has    bool
 }
 
 // NewHub returns an empty Hub.

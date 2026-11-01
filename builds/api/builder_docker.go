@@ -33,27 +33,26 @@ import (
 )
 
 type dockerBuildInput struct {
+	buildArgs map[string]*string
+	labels    map[string]string
 	buildFilesystemInput
-
 	platform    string
-	buildArgs   map[string]*string
-	labels      map[string]string
-	cacheFrom   []string
-	noCache     bool
-	pullParent  bool
 	networkMode string
 	isolation   string
-	shmSize     int64
+	cacheFrom   []string
 	ulimits     []*dockercontainer.Ulimit
 	extraHosts  []string
+	shmSize     int64
+	noCache     bool
+	pullParent  bool
 }
 
 type buildFilesystemInput struct {
 	contextDir           string
 	fullDockerfilePath   string
 	relDockerfile        string
-	dockerfileOutsideCtx bool
 	dockerfileInline     string
+	dockerfileOutsideCtx bool
 }
 
 func parseUlimits(values map[string]string) ([]*dockercontainer.Ulimit, error) {

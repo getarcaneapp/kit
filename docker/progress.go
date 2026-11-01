@@ -30,12 +30,12 @@ type nopWriteCloser struct{ io.Writer }
 func (nopWriteCloser) Close() error { return nil }
 
 type logLineWriter struct {
-	dst io.Writer
+	dst    io.Writer
+	buffer []byte
 
 	// Writers such as compose's plain progress renderer write from multiple
 	// goroutines concurrently; the line buffer must be guarded.
-	mu     sync.Mutex
-	buffer []byte
+	mu sync.Mutex
 }
 
 func (w *logLineWriter) Write(p []byte) (int, error) {

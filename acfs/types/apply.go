@@ -30,11 +30,11 @@ const (
 
 // ErrorResponse is emitted as one JSON line on stderr when a command fails.
 type ErrorResponse struct {
+	ChangeIndex *int      `json:"changeIndex,omitempty"`
 	Code        ErrorCode `json:"code"`
 	Message     string    `json:"message"`
 	Operation   string    `json:"operation,omitempty"`
 	Path        string    `json:"path,omitempty"`
-	ChangeIndex *int      `json:"changeIndex,omitempty"`
 	Version     int       `json:"version"`
 }
 
@@ -65,10 +65,10 @@ type ApplyResponse struct {
 
 // ApplyError identifies the manifest change that failed.
 type ApplyError struct {
-	Index     int
+	Err       error
 	Operation ApplyOperation
 	Path      string
-	Err       error
+	Index     int
 }
 
 func (e *ApplyError) Error() string {

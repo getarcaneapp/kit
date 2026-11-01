@@ -14,14 +14,12 @@ import (
 // Service coordinates Docker image updates, container recreation, and the host adapters configured
 // through Config. A Service is safe for concurrent use.
 type Service struct {
-	config Config
 	logger *slog.Logger
-
 	// ownedDockerClient is the default provider New built, the only one Close may shut down.
-	ownedDockerClient *DockerClient
-
+	ownedDockerClient  *DockerClient
 	updatingContainers atomic.Pointer[[]string]
 	updatingProjects   atomic.Pointer[[]string]
+	config             Config
 }
 
 type updatePlan struct {
@@ -33,10 +31,10 @@ type updatePlan struct {
 }
 
 type restartPlan struct {
-	cnt      container.Summary
 	inspect  *container.InspectResponse
 	newRef   string
 	match    string
+	cnt      container.Summary
 	implicit bool
 }
 

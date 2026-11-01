@@ -7,11 +7,11 @@ import (
 
 func TestShouldDisableArcaneServerRedeploy(t *testing.T) {
 	tests := []struct {
-		name               string
+		currentErr         error
 		labels             map[string]string
+		name               string
 		containerID        string
 		currentContainerID string
-		currentErr         error
 		want               bool
 	}{
 		{

@@ -16,8 +16,8 @@ func (e *InvalidKeyError) Error() string {
 
 // RandomError reports failure from the cryptographic random source.
 type RandomError struct {
-	Op  string
 	Err error
+	Op  string
 }
 
 func (e *RandomError) Error() string {

@@ -24,10 +24,10 @@ import (
 )
 
 type targetedDocker struct {
-	mu         sync.Mutex
-	containers []container.InspectResponse
 	created    map[string]string
+	containers []container.InspectResponse
 	mutations  int
+	mu         sync.Mutex
 }
 
 func newTargetedContainer(id, constraint string) container.InspectResponse {
@@ -142,11 +142,11 @@ func TestApplyPendingTargetedSharedImage(t *testing.T) {
 
 func TestApplyPendingTargetedRetainsRejected(t *testing.T) {
 	for _, tt := range []struct {
-		name      string
 		change    func(*container.InspectResponse)
+		name      string
+		wantPulls int
 		pullError bool
 		skipped   bool
-		wantPulls int
 	}{
 		{name: "disabled", skipped: true, change: func(c *container.InspectResponse) { c.Config.Labels[labels.LabelUpdater] = "false" }},
 		{name: "digest pin", change: func(c *container.InspectResponse) { c.Config.Image = "app@sha256:" + strings.Repeat("a", 64) }},
@@ -195,11 +195,11 @@ func TestApplyPendingTargetedRetainsRejected(t *testing.T) {
 }
 
 type targetedComposeAdapter struct {
-	fakeProjectUpdater
 	fixture *targetedDocker
-	calls   int
 	changes map[string]updatetypes.ServiceImageChange
-	fail    bool
+	fakeProjectUpdater
+	calls int
+	fail  bool
 }
 
 func (f *targetedComposeAdapter) UpdateServiceImages(_ context.Context, projectID string, changes map[string]updatetypes.ServiceImageChange) error {

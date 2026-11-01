@@ -3,8 +3,8 @@ package types
 import "fmt"
 
 type BuildKitImageExporterError struct {
-	ProviderName string
 	Err          error
+	ProviderName string
 }
 
 func (e *BuildKitImageExporterError) Error() string {
@@ -14,8 +14,8 @@ func (e *BuildKitImageExporterError) Error() string {
 func (e *BuildKitImageExporterError) Unwrap() error { return e.Err }
 
 type BuildKitDockerExporterError struct {
-	ProviderName string
 	Err          error
+	ProviderName string
 }
 
 func (e *BuildKitDockerExporterError) Error() string {

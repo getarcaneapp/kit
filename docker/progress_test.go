@@ -60,8 +60,8 @@ func TestLogLineWriterConcurrentWrites(t *testing.T) {
 }
 
 type syncBuffer struct {
-	mu  sync.Mutex
 	buf strings.Builder
+	mu  sync.Mutex
 }
 
 func (b *syncBuffer) Write(p []byte) (int, error) {

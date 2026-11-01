@@ -21,8 +21,8 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestIsFallbackEligibleDaemonError(t *testing.T) {
 	tests := []struct {
-		name string
 		err  error
+		name string
 		want bool
 	}{
 		{name: "nil", err: nil, want: false},
@@ -79,9 +79,9 @@ func manifestResponse(r *http.Request, body, digest string) *http.Response {
 
 func TestFetchDigestUsesHeadWithTokenAuth(t *testing.T) {
 	for _, tt := range []struct {
-		name       string
 		credential *authn.AuthConfig
 		checkToken func(*testing.T, *http.Request)
+		name       string
 	}{
 		{name: "anonymous", checkToken: func(t *testing.T, r *http.Request) {
 			if _, _, ok := r.BasicAuth(); ok {

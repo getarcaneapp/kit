@@ -11,13 +11,13 @@ import (
 func TestMountForDestination(t *testing.T) {
 	tests := []struct {
 		name       string
-		mounts     []containertypes.MountPoint
 		dest       string
 		target     string
-		wantNil    bool
 		wantType   mounttypes.Type
 		wantSource string
 		wantTarget string
+		mounts     []containertypes.MountPoint
+		wantNil    bool
 		wantRO     bool
 	}{
 		{

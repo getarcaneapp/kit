@@ -33,10 +33,10 @@ type Checker struct {
 
 // CheckResult contains the result of a digest check.
 type CheckResult struct {
-	NeedsUpdate   bool
+	Error         error
 	LocalDigest   string
 	RemoteDigest  string
-	Error         error
+	NeedsUpdate   bool
 	CheckedViaAPI bool
 }
 

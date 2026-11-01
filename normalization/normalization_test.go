@@ -10,14 +10,14 @@ import (
 )
 
 type sample struct {
+	Optional *string           `json:"optional,omitempty" trim:"true" unorm:"nfc"`
+	Map      map[string]string `json:"map"`
+	Next     *sample           `json:"next,omitempty"`
 	Name     string            `json:"name" unorm:"nfc" trim:"true"`
 	Unicode  string            `json:"unicode" unorm:"nfc"`
 	Trim     string            `json:"trim" trim:"true"`
-	Optional *string           `json:"optional,omitempty" trim:"true" unorm:"nfc"`
 	Secret   string            `json:"secret"`
-	Map      map[string]string `json:"map"`
 	Children []sample          `json:"children,omitempty"`
-	Next     *sample           `json:"next,omitempty"`
 }
 
 func TestText(t *testing.T) {
@@ -84,8 +84,8 @@ func TestNormalize(t *testing.T) {
 
 func TestHasRules(t *testing.T) {
 	tests := []struct {
-		name    string
 		typ     reflect.Type
+		name    string
 		want    bool
 		invalid bool
 	}{
@@ -188,8 +188,8 @@ func TestNormalizeNested(t *testing.T) {
 		Value string `json:"value" trim:"true"`
 	}
 	type envelope struct {
-		Embedded embedded   `json:",inline"`
 		Array    [1]*sample `json:"array"`
+		Embedded embedded   `json:",inline"`
 	}
 	input := envelope{Embedded: embedded{Value: " a "}, Array: [1]*sample{{Name: " b "}}}
 	if err := Normalize(&input); err != nil {
@@ -246,11 +246,11 @@ func TestRecursiveInlineRejected(t *testing.T) {
 
 func TestNormalizeReplacesAliasedStringPointers(t *testing.T) {
 	type row struct {
-		Name     string   `trim:"true" unorm:"nfc"`
 		Optional *string  `trim:"true" unorm:"nfc"`
 		Nested   **string `trim:"true" unorm:"nfc"`
 		InnerNil **string `trim:"true"`
 		Nil      *string  `trim:"true"`
+		Name     string   `trim:"true" unorm:"nfc"`
 	}
 	text := " e\u0301 "
 	pointer := &text
@@ -281,8 +281,8 @@ func TestNormalizeReplacesAliasedStringPointers(t *testing.T) {
 
 func TestNormalizeLengthConstraints(t *testing.T) {
 	type input struct {
-		Name     string  `json:"name" trim:"true" unorm:"nfc" minLength:"1" maxLength:"2"`
 		Optional *string `json:"optional" trim:"true" minLength:"1"`
+		Name     string  `json:"name" trim:"true" unorm:"nfc" minLength:"1" maxLength:"2"`
 	}
 	for _, test := range []struct {
 		name, text, want string

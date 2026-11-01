@@ -12,20 +12,20 @@ import (
 )
 
 type fieldPlan struct {
-	index     int
+	plan      *plan
 	name      string
+	index     int
+	minLength int
+	maxLength int
 	inline    bool
 	trim      bool
 	nfc       bool
-	plan      *plan
-	minLength int
-	maxLength int
 }
 
 type plan struct {
-	kind     reflect.Kind
 	element  *plan
 	fields   []fieldPlan
+	kind     reflect.Kind
 	hasRules bool
 }
 
@@ -35,9 +35,8 @@ type cachedPlan struct {
 }
 
 var plans = struct {
-	sync.Mutex
-
 	values map[reflect.Type]cachedPlan
+	sync.Mutex
 }{values: make(map[reflect.Type]cachedPlan)}
 
 // HasRules validates normalization tags and reports whether the type contains any.
@@ -128,8 +127,8 @@ func compileField(field reflect.StructField, seen map[reflect.Type]*plan) (field
 			return fieldPlan{}, false, errors.New("normalization tags require an exported string or string pointer")
 		}
 		for _, constraint := range []struct {
-			name   string
 			target *int
+			name   string
 		}{{name: "minLength", target: &minimum}, {name: "maxLength", target: &maximum}} {
 			raw, ok := field.Tag.Lookup(constraint.name)
 			if !ok {

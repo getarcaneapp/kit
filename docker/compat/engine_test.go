@@ -69,10 +69,10 @@ func TestDetectEngineCompatibility(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		version client.ServerVersionResult
-		info    systemtypes.Info
 		want    EngineCompatibilityInfo
+		name    string
+		info    systemtypes.Info
+		version client.ServerVersionResult
 	}{
 		{
 			name:    "prefers platform name for podman detection",
@@ -114,9 +114,9 @@ func TestKeepIDUsernsMode(t *testing.T) {
 
 	tests := []struct {
 		name    string
+		want    containertypes.UsernsMode
 		uidMap  []string
 		gidMap  []string
-		want    containertypes.UsernsMode
 		wantErr bool
 	}{
 		{

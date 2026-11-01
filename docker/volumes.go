@@ -44,9 +44,9 @@ func GetVolumeUsageData(ctx context.Context, dockerClient *client.Client) ([]vol
 	}
 
 	type refreshResult struct {
+		err     error
 		volumes []volume.Volume
 		found   bool
-		err     error
 	}
 	result := make(chan refreshResult, 1)
 	deadline, hasDeadline := ctx.Deadline()

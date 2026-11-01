@@ -6,15 +6,15 @@ import (
 )
 
 type netipConfig struct {
-	Subnet  netip.Prefix
-	Gateway netip.Addr
 	Aux     map[string]netip.Addr
+	Gateway netip.Addr
+	Subnet  netip.Prefix
 }
 
 type stringConfig struct {
+	Aux     map[string]string
 	Subnet  string
 	Gateway string
-	Aux     map[string]string
 }
 
 func TestMapOneConvertsNetipAndStrings(t *testing.T) {

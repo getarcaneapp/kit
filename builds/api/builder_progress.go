@@ -18,8 +18,8 @@ import (
 // between concurrent producers. Callers hand BuildImage a plain io.Writer and
 // must not be required to make it concurrency-safe themselves.
 type syncWriter struct {
-	mu sync.Mutex
 	w  io.Writer
+	mu sync.Mutex
 }
 
 func (s *syncWriter) Write(p []byte) (int, error) {

@@ -14,8 +14,8 @@ import (
 // stream), so access is guarded. Writes never fail: once the limit is reached
 // the remainder is dropped and the capture is marked truncated.
 type Capture struct {
-	mu        sync.Mutex
 	buf       bytes.Buffer
+	mu        sync.Mutex
 	maxBytes  int
 	truncated bool
 }

@@ -31,10 +31,10 @@ var (
 
 // ConfigError reports a Config field that New could not accept.
 type ConfigError struct {
-	// Field is the Config field at fault, as written in Go source.
-	Field string
 	// Reason is the underlying cause.
 	Reason error
+	// Field is the Config field at fault, as written in Go source.
+	Field string
 }
 
 // Error implements error.

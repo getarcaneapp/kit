@@ -9,8 +9,8 @@ import (
 func TestContainerNameFromNames(t *testing.T) {
 	tests := []struct {
 		name  string
-		names []string
 		want  string
+		names []string
 	}{
 		{
 			name:  "single name with slash",

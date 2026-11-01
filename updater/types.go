@@ -35,25 +35,25 @@ type ResourceResult struct {
 	ResourceName    string         `json:"resourceName,omitempty"`
 	ResourceType    ResourceType   `json:"resourceType"`
 	Status          ResourceStatus `json:"status"`
-	UpdateAvailable bool           `json:"updateAvailable,omitempty"`
-	UpdateApplied   bool           `json:"updateApplied,omitempty"`
 	OldImage        string         `json:"oldImage,omitempty"`
 	NewImage        string         `json:"newImage,omitempty"`
-	Error           string         `json:"error,omitempty"`
 	Details         map[string]any `json:"details,omitempty"`
+	Error           string         `json:"error,omitempty"`
+	UpdateAvailable bool           `json:"updateAvailable,omitempty"`
+	UpdateApplied   bool           `json:"updateApplied,omitempty"`
 }
 
 // Result represents a complete updater run.
 type Result struct {
-	Success   bool             `json:"success,omitempty"`
+	StartTime time.Time        `json:"startTime,omitzero"`
+	EndTime   time.Time        `json:"endTime,omitzero"`
+	Items     []ResourceResult `json:"items"`
 	Checked   int              `json:"checked"`
 	Updated   int              `json:"updated"`
 	Restarted int              `json:"restarted,omitempty"`
 	Skipped   int              `json:"skipped"`
 	Failed    int              `json:"failed"`
-	StartTime time.Time        `json:"startTime,omitzero"`
-	EndTime   time.Time        `json:"endTime,omitzero"`
-	Items     []ResourceResult `json:"items"`
+	Success   bool             `json:"success,omitempty"`
 }
 
 // Duration reports how long the run took. It is zero until the run finishes.
@@ -66,27 +66,27 @@ func (r Result) Duration() time.Duration {
 
 // Status reports resources that are actively being updated by this service instance.
 type Status struct {
-	UpdatingContainers int      `json:"updatingContainers"`
-	UpdatingProjects   int      `json:"updatingProjects"`
 	ContainerIDs       []string `json:"containerIds"`
 	ProjectIDs         []string `json:"projectIds"`
+	UpdatingContainers int      `json:"updatingContainers"`
+	UpdatingProjects   int      `json:"updatingProjects"`
 }
 
 // ImageUpdateRecord is a pending image update known to a caller-provided store.
 type ImageUpdateRecord struct {
+	LatestVersion *string
+	CurrentDigest *string
+	LatestDigest  *string
+	LastError     *string
+	CheckTime     time.Time
 	// ContainerID scopes this record to one container; ID remains the image/store ID.
 	ContainerID    string
 	ID             string
 	Repository     string
 	Tag            string
-	HasUpdate      bool
 	UpdateType     UpdateType
 	CurrentVersion string
-	LatestVersion  *string
-	CurrentDigest  *string
-	LatestDigest   *string
-	CheckTime      time.Time
-	LastError      *string
+	HasUpdate      bool
 }
 
 // NeedsUpdate reports whether the record indicates a pending update.
@@ -157,10 +157,10 @@ type Notification struct {
 
 // Event describes a generic updater event for host applications.
 type Event struct {
+	Metadata     map[string]any
 	Phase        string
 	Severity     string
 	ResourceID   string
 	ResourceName string
 	ResourceType ResourceType
-	Metadata     map[string]any
 }

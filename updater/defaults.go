@@ -21,8 +21,8 @@ import (
 // DockerClient is the built-in DockerClientProvider: it lazily opens one client, pings it on every
 // hand-out, and reconnects after the daemon goes away. Construct one with NewDockerClientProvider.
 type DockerClient struct {
-	options []client.Opt
 	client  atomic.Pointer[client.Client]
+	options []client.Opt
 }
 
 type defaultImagePuller struct {

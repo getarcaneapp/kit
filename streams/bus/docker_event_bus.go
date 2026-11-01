@@ -41,14 +41,14 @@ func WithSubscriberBuffer(size int) SubscribeOption {
 
 // DockerEventBus is an in-process fan-out point for Docker daemon events.
 type DockerEventBus struct {
-	deliveryMu sync.RWMutex
 	state      atomic.Pointer[dockerEventBusState]
 	onDrop     func(events.Message)
+	deliveryMu sync.RWMutex
 }
 
 type dockerEventBusState struct {
-	closed      bool
 	subscribers map[events.Type][]chan events.Message
+	closed      bool
 }
 
 // NewDockerEventBus creates an empty Docker event bus.

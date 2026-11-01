@@ -61,12 +61,12 @@ func TestFingerprint(t *testing.T) {
 		secret     string
 	}
 	type env struct {
-		ID       string
-		Enabled  bool
 		LastSeen *time.Time
-		Tags     []string
 		Cert     *cert
 		Labels   map[string]string
+		ID       string
+		Tags     []string
+		Enabled  bool
 	}
 	now := time.Unix(1700000000, 0)
 	name := "edge"

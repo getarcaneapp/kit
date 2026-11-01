@@ -19,35 +19,35 @@ type BuildSettings struct {
 
 // BuildRequest contains options for building an image with BuildKit.
 type BuildRequest struct {
-	ContextDir       string            `json:"contextDir" minLength:"1" doc:"Build context directory or Git URL"`
-	Dockerfile       string            `json:"dockerfile,omitempty" doc:"Dockerfile path"`
-	DockerfileInline string            `json:"dockerfileInline,omitempty" doc:"Inline Dockerfile content"`
-	Tags             []string          `json:"tags,omitempty" doc:"Image tags"`
-	Target           string            `json:"target,omitempty" doc:"Target stage"`
 	BuildArgs        map[string]string `json:"buildArgs,omitempty" doc:"Build arguments"`
 	Labels           map[string]string `json:"labels,omitempty" doc:"Build labels"`
-	CacheFrom        []string          `json:"cacheFrom,omitempty" doc:"Build cache sources"`
-	CacheTo          []string          `json:"cacheTo,omitempty" doc:"Build cache targets"`
-	NoCache          bool              `json:"noCache,omitempty" doc:"Disable build cache"`
-	Pull             bool              `json:"pull,omitempty" doc:"Always pull referenced base images"`
-	Network          string            `json:"network,omitempty" doc:"Build network mode"`
-	Isolation        string            `json:"isolation,omitempty" doc:"Build isolation mode"`
-	ShmSize          int64             `json:"shmSize,omitempty" doc:"Build shared memory size in bytes"`
 	Ulimits          map[string]string `json:"ulimits,omitempty" doc:"Build ulimits"`
+	Network          string            `json:"network,omitempty" doc:"Build network mode"`
+	Dockerfile       string            `json:"dockerfile,omitempty" doc:"Dockerfile path"`
+	DockerfileInline string            `json:"dockerfileInline,omitempty" doc:"Inline Dockerfile content"`
+	Provider         string            `json:"provider,omitempty" doc:"Build provider override"`
+	Target           string            `json:"target,omitempty" doc:"Target stage"`
+	ContextDir       string            `json:"contextDir" minLength:"1" doc:"Build context directory or Git URL"`
+	Isolation        string            `json:"isolation,omitempty" doc:"Build isolation mode"`
 	Entitlements     []string          `json:"entitlements,omitempty" doc:"Build entitlements"`
-	Privileged       bool              `json:"privileged,omitempty" doc:"Enable privileged build"`
+	CacheTo          []string          `json:"cacheTo,omitempty" doc:"Build cache targets"`
+	CacheFrom        []string          `json:"cacheFrom,omitempty" doc:"Build cache sources"`
 	ExtraHosts       []string          `json:"extraHosts,omitempty" doc:"Build extra host mappings"`
 	Platforms        []string          `json:"platforms,omitempty" doc:"Target platforms"`
+	Tags             []string          `json:"tags,omitempty" doc:"Image tags"`
+	ShmSize          int64             `json:"shmSize,omitempty" doc:"Build shared memory size in bytes"`
+	Pull             bool              `json:"pull,omitempty" doc:"Always pull referenced base images"`
+	NoCache          bool              `json:"noCache,omitempty" doc:"Disable build cache"`
+	Privileged       bool              `json:"privileged,omitempty" doc:"Enable privileged build"`
 	Push             bool              `json:"push,omitempty" doc:"Push image"`
 	Load             bool              `json:"load,omitempty" doc:"Load image into local Docker"`
-	Provider         string            `json:"provider,omitempty" doc:"Build provider override"`
 }
 
 // BuildResult provides basic build output metadata.
 type BuildResult struct {
 	Provider string   `json:"provider"`
-	Tags     []string `json:"tags,omitempty"`
 	Digest   string   `json:"digest,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 // SettingsProvider provides build settings owned by the host application.

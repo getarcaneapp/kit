@@ -20,9 +20,9 @@ const (
 // Entry is a single captured log record.
 type Entry struct {
 	Time    time.Time      `json:"time"`
+	Attrs   map[string]any `json:"attrs,omitempty"`
 	Level   string         `json:"level"`
 	Message string         `json:"message"`
-	Attrs   map[string]any `json:"attrs,omitempty"`
 }
 
 // Option configures a Broadcaster.
@@ -40,14 +40,14 @@ func WithSubscriberBuffer(size int) Option {
 // Broadcaster keeps a bounded ring buffer of recent log entries and fans new
 // entries out to active subscribers.
 type Broadcaster struct {
-	historyMu        sync.Mutex
-	deliveryMu       sync.RWMutex
+	subscribers      atomic.Pointer[logSubscriberSnapshot]
 	buf              []Entry
 	start            int
 	size             int
 	capN             int
 	subscriberBuffer int
-	subscribers      atomic.Pointer[logSubscriberSnapshot]
+	deliveryMu       sync.RWMutex
+	historyMu        sync.Mutex
 }
 
 type logSubscriberSnapshot struct {

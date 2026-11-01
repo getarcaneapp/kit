@@ -22,9 +22,9 @@ type dockerComposeProjectUpdater struct {
 type dockerComposeProjectMetadata struct {
 	projectName string
 	workingDir  string
+	dockerHost  string
 	configFiles []string
 	envFiles    []string
-	dockerHost  string
 }
 
 // NewDockerComposeProjectUpdater returns a Docker Compose CLI project updater.

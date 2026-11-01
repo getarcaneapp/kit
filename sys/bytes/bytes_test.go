@@ -8,31 +8,31 @@ import (
 
 func TestCapacityString(t *testing.T) {
 	tests := []struct {
-		in   Capacity
 		want string
+		in   Capacity
 	}{
-		{0, "0"},
-		{1, "1"},
-		{999, "999"},
-		{Kilobyte, "1K"},
-		{1001, "1K"},
-		{1040, "1K"},     // .04 rounds down
-		{1050, "1.1K"},   // .05 is the first hundredth that rounds up
-		{1100, "1.1K"},   // .1 rounds to a tenth
-		{1149, "1.1K"},   // .149 rounds to .1
-		{1990, "2K"},     // .99 rounds up to the next whole unit
-		{Kibibyte, "1K"}, // 1024 bytes reads as 1K in base 10
-		{Megabyte, "1M"}, // exact-unit fast path
-		{Mebibyte, "1M"}, // 1048576 -> 1.048M -> 1M
-		{10_400_000_000, "10.4G"},
-		{Gigabyte, "1G"},
-		{Terabyte, "1T"},
-		{Petabyte, "1P"},
-		{Exabyte, "1E"},
-		{Gibibyte, "1.1G"},
-		{Tebibyte, "1.1T"},
-		{999_900_000_000_000_000, "999.9P"}, // longest fractional output
-		{maxCapacity, "18.4E"},              // longest whole-unit output
+		{want: "0", in: 0},
+		{want: "1", in: 1},
+		{want: "999", in: 999},
+		{want: "1K", in: Kilobyte},
+		{want: "1K", in: 1001},
+		{want: "1K", in: 1040},     // .04 rounds down
+		{want: "1.1K", in: 1050},   // .05 is the first hundredth that rounds up
+		{want: "1.1K", in: 1100},   // .1 rounds to a tenth
+		{want: "1.1K", in: 1149},   // .149 rounds to .1
+		{want: "2K", in: 1990},     // .99 rounds up to the next whole unit
+		{want: "1K", in: Kibibyte}, // 1024 bytes reads as 1K in base 10
+		{want: "1M", in: Megabyte}, // exact-unit fast path
+		{want: "1M", in: Mebibyte}, // 1048576 -> 1.048M -> 1M
+		{want: "10.4G", in: 10_400_000_000},
+		{want: "1G", in: Gigabyte},
+		{want: "1T", in: Terabyte},
+		{want: "1P", in: Petabyte},
+		{want: "1E", in: Exabyte},
+		{want: "1.1G", in: Gibibyte},
+		{want: "1.1T", in: Tebibyte},
+		{want: "999.9P", in: 999_900_000_000_000_000}, // longest fractional output
+		{want: "18.4E", in: maxCapacity},              // longest whole-unit output
 	}
 	for _, tt := range tests {
 		if got := tt.in.String(); got != tt.want {

@@ -26,10 +26,9 @@ type StatsHistorySample struct {
 
 // StatsStreamPayload is a container stats stream payload.
 type StatsStreamPayload struct {
+	StatsHistory []StatsHistorySample `json:"statsHistory,omitempty"`
 	dockercontainer.StatsResponse
-
-	StatsHistory         []StatsHistorySample `json:"statsHistory,omitempty"`
-	CurrentHistorySample StatsHistorySample   `json:"currentHistorySample"`
+	CurrentHistorySample StatsHistorySample `json:"currentHistorySample"`
 }
 
 // Option configures a Store.
@@ -64,19 +63,19 @@ func WithPruneInterval(interval time.Duration) Option {
 
 // Store keeps bounded per-container stats history.
 type Store struct {
-	mu            sync.Mutex
-	histories     map[string]*historyBuffer
 	lastPrune     time.Time
+	histories     map[string]*historyBuffer
 	capacity      int
 	ttl           time.Duration
 	pruneInterval time.Duration
+	mu            sync.Mutex
 }
 
 type historyBuffer struct {
+	updatedAt time.Time
 	samples   []StatsHistorySample
 	start     int
 	count     int
-	updatedAt time.Time
 }
 
 // NewStore creates a configured Store.

@@ -50,8 +50,8 @@ func TestListAndStatGolden(t *testing.T) {
 	}
 
 	tests := map[string]struct {
-		args   []string
 		golden string
+		args   []string
 	}{
 		"list": {
 			args:   []string{"list", "--root", root, "--path", "/"},

@@ -11,8 +11,8 @@ import (
 // stampede of samplers never duplicates the work.
 type Cache struct {
 	cache    *hot.HotCache[struct{}, *Limits]
-	ttl      time.Duration
 	detector func() (*Limits, error)
+	ttl      time.Duration
 }
 
 // NewCache returns a cache that caches detection results for ttl using the

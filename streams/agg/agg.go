@@ -24,11 +24,11 @@ type Producer[T any] func(ctx context.Context, events chan<- T)
 type Config[T any] struct {
 	Writer            io.Writer
 	Flush             func()
+	MakeHeartbeat     func() T
+	Logger            *slog.Logger
+	Producers         []Producer[T]
 	Buffer            int
 	HeartbeatInterval time.Duration
-	MakeHeartbeat     func() T
-	Producers         []Producer[T]
-	Logger            *slog.Logger
 }
 
 // InvalidConfigError describes an invalid Run configuration.
@@ -248,6 +248,6 @@ type poller struct {
 type pollerSet[T any] struct {
 	ctx       context.Context
 	active    map[string]poller
-	wg        sync.WaitGroup
 	runPoller func(ctx context.Context, item T)
+	wg        sync.WaitGroup
 }

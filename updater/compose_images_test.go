@@ -15,10 +15,10 @@ import (
 )
 
 type recordingProjectImages struct {
-	fakeProjectUpdater
+	imageErr  error
 	changes   map[string]updatetypes.ServiceImageChange
 	projectID string
-	imageErr  error
+	fakeProjectUpdater
 }
 
 func (f *recordingProjectImages) UpdateServiceImages(_ context.Context, projectID string, changes map[string]updatetypes.ServiceImageChange) error {

@@ -11,9 +11,9 @@ func TestAsStringMap(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
 		value any
 		want  map[string]any
+		name  string
 		ok    bool
 	}{
 		{name: "nil"},

@@ -13,11 +13,11 @@ import (
 )
 
 type composeGroup struct {
-	images      map[string]types.ServiceImageChange
-	tagChanges  bool
 	err         error
+	images      map[string]types.ServiceImageChange
 	projectName string
 	services    []string
+	tagChanges  bool
 }
 
 // buildComposeGroups groups planned Compose containers by resolved project, flagging conflicting service targets.

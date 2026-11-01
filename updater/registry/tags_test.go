@@ -169,11 +169,11 @@ func TestFetchTagsDiscardsPartialListing(t *testing.T) {
 
 func TestFetchTagsCancellation(t *testing.T) {
 	for _, tt := range []struct {
+		want         error
+		secondPage   func(cancel context.CancelFunc)
 		name         string
 		timeout      time.Duration
 		cancelBefore bool
-		secondPage   func(cancel context.CancelFunc)
-		want         error
 	}{
 		{name: "before first page", cancelBefore: true, want: context.Canceled},
 		{name: "caller deadline expires during pagination", timeout: 100 * time.Millisecond, secondPage: func(context.CancelFunc) { time.Sleep(200 * time.Millisecond) }, want: context.DeadlineExceeded},
