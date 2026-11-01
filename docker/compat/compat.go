@@ -141,19 +141,29 @@ func ConnectContainerExtraNetworksForDockerAPI(ctx context.Context, dockerClient
 	return nil
 }
 
-// ContainerCreateWithCompatibility detects the daemon API version and creates
-// the container with the compatibility shims applied.
-func ContainerCreateWithCompatibility(ctx context.Context, dockerClient client.APIClient, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
-	return ContainerCreateWithCompatibilityForAPIVersion(ctx, dockerClient, options, DetectDockerAPIVersion(ctx, dockerClient))
+// CreateRequest is the container ContainerCreateWithCompatibility creates.
+type CreateRequest struct {
+	// Options are the create options before any compatibility shim is applied.
+	Options client.ContainerCreateOptions
+	// APIVersion is the daemon API version the shims target. Empty detects it
+	// with DetectDockerAPIVersion.
+	APIVersion string
 }
 
-// ContainerCreateWithCompatibilityForAPIVersion creates the container for an
-// already resolved API version, attaching withheld networks before returning
-// and removing the container when an attachment fails. The removal ignores
-// ctx cancellation, since an attachment that failed because ctx expired must
-// still not leave the half-connected container behind.
-func ContainerCreateWithCompatibilityForAPIVersion(ctx context.Context, dockerClient client.APIClient, options client.ContainerCreateOptions, apiVersion string) (client.ContainerCreateResult, error) {
-	adjusted, extra := PrepareContainerCreateOptionsForDockerAPI(options, apiVersion)
+func (r CreateRequest) apiVersion(ctx context.Context, dockerClient client.APIClient) string {
+	if r.APIVersion != "" {
+		return r.APIVersion
+	}
+	return DetectDockerAPIVersion(ctx, dockerClient)
+}
+
+// ContainerCreateWithCompatibility creates the container with the compatibility
+// shims for req's API version applied, attaching withheld networks before
+// returning and removing the container when an attachment fails. The removal
+// ignores ctx cancellation, since an attachment that failed because ctx expired
+// must still not leave the half-connected container behind.
+func ContainerCreateWithCompatibility(ctx context.Context, dockerClient client.APIClient, req CreateRequest) (client.ContainerCreateResult, error) {
+	adjusted, extra := PrepareContainerCreateOptionsForDockerAPI(req.Options, req.apiVersion(ctx, dockerClient))
 	result, err := dockerClient.ContainerCreate(ctx, adjusted)
 	if err != nil {
 		return client.ContainerCreateResult{}, err

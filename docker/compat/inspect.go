@@ -34,7 +34,7 @@ type compatibilityClient struct {
 }
 
 func (c *compatibilityClient) ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
-	return ContainerCreateWithCompatibility(ctx, c.APIClient, options)
+	return ContainerCreateWithCompatibility(ctx, c.APIClient, CreateRequest{Options: options})
 }
 
 func (c *compatibilityClient) ContainerInspect(ctx context.Context, containerID string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error) {

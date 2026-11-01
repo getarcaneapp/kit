@@ -188,13 +188,16 @@ func TestPrepareContainerCreateOptionsForDockerAPI(t *testing.T) {
 	})
 }
 
-func TestContainerCreateWithCompatibilityForAPIVersion(t *testing.T) {
+func TestContainerCreateWithCompatibility(t *testing.T) {
 	t.Parallel()
 
 	t.Run("uses provided api version without re-detecting it", func(t *testing.T) {
 		t.Parallel()
 		fake := &fakeClient{createResult: client.ContainerCreateResult{ID: "created"}}
-		result, err := ContainerCreateWithCompatibilityForAPIVersion(t.Context(), fake, client.ContainerCreateOptions{Config: &container.Config{Image: "nginx:latest"}}, "1.44")
+		result, err := ContainerCreateWithCompatibility(t.Context(), fake, CreateRequest{
+			Options:    client.ContainerCreateOptions{Config: &container.Config{Image: "nginx:latest"}},
+			APIVersion: "1.44",
+		})
 		if err != nil || result.ID != "created" {
 			t.Fatalf("result = %+v, err = %v", result, err)
 		}
@@ -206,10 +209,13 @@ func TestContainerCreateWithCompatibilityForAPIVersion(t *testing.T) {
 	t.Run("removes created container when a later network attach fails", func(t *testing.T) {
 		t.Parallel()
 		fake := &fakeClient{createResult: client.ContainerCreateResult{ID: "created-container"}, connectErrs: map[string]error{"cnet": errors.New("boom")}}
-		_, err := ContainerCreateWithCompatibilityForAPIVersion(t.Context(), fake, client.ContainerCreateOptions{
-			HostConfig:       &container.HostConfig{NetworkMode: "anet"},
-			NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{"anet": {}, "bnet": {}, "cnet": {}, "dnet": {}}},
-		}, "1.43")
+		_, err := ContainerCreateWithCompatibility(t.Context(), fake, CreateRequest{
+			Options: client.ContainerCreateOptions{
+				HostConfig:       &container.HostConfig{NetworkMode: "anet"},
+				NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{"anet": {}, "bnet": {}, "cnet": {}, "dnet": {}}},
+			},
+			APIVersion: "1.43",
+		})
 		if err == nil || !strings.Contains(err.Error(), "connect network cnet") {
 			t.Fatalf("err = %v, want connect network cnet", err)
 		}
@@ -229,10 +235,13 @@ func TestContainerCreateWithCompatibilityForAPIVersion(t *testing.T) {
 			connectErrs:  map[string]error{"bnet": connectErr},
 			removeErr:    removeErr,
 		}
-		_, err := ContainerCreateWithCompatibilityForAPIVersion(t.Context(), fake, client.ContainerCreateOptions{
-			HostConfig:       &container.HostConfig{NetworkMode: "anet"},
-			NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{"anet": {}, "bnet": {}}},
-		}, "1.43")
+		_, err := ContainerCreateWithCompatibility(t.Context(), fake, CreateRequest{
+			Options: client.ContainerCreateOptions{
+				HostConfig:       &container.HostConfig{NetworkMode: "anet"},
+				NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{"anet": {}, "bnet": {}}},
+			},
+			APIVersion: "1.43",
+		})
 		if !errors.Is(err, connectErr) || errors.Is(err, removeErr) {
 			t.Errorf("err = %v, want the connect error only", err)
 		}
