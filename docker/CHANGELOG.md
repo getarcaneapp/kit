@@ -1,3 +1,13 @@
+## docker/v0.3.0
+
+### New features
+
+* add CopyToContainer and CopyFromContainer archive helpers([86294c5](https://github.com/getarcaneapp/kit/commit/86294c58b0e6bdb42c2fd90501bfa81d1da2f222) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.2.0...docker/v0.3.0
+
 ## docker/v0.2.0
 
 ### New features
