@@ -1,3 +1,14 @@
+## sys/crypto/v0.3.4
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* take Config by value and Keys literal in New([a85d229](https://github.com/getarcaneapp/kit/commit/a85d2298d2ec08a964765b93312fa2ee09d74862) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/crypto/v0.3.3...sys/crypto/v0.3.4
+
 ## sys/crypto/v0.3.3
 
 ### Bug fixes
