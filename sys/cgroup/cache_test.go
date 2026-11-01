@@ -12,10 +12,13 @@ import (
 
 func TestCache_DeduplicatesRefreshAndCachesErrors(t *testing.T) {
 	var calls atomic.Int32
-	cache := NewCacheWithDetector(time.Minute, func() (*Limits, error) {
-		calls.Add(1)
-		time.Sleep(10 * time.Millisecond)
-		return &Limits{CPUCount: 2}, nil
+	cache := NewCache(CacheConfig{
+		Detector: func() (*Limits, error) {
+			calls.Add(1)
+			time.Sleep(10 * time.Millisecond)
+			return &Limits{CPUCount: 2}, nil
+		},
+		TTL: time.Minute,
 	})
 
 	const goroutines = 8
@@ -37,12 +40,20 @@ func TestCache_DeduplicatesRefreshAndCachesErrors(t *testing.T) {
 	}
 
 	// A failing detector yields nil, and the failure is cached for the TTL.
-	failing := NewCacheWithDetector(time.Minute, func() (*Limits, error) {
-		calls.Add(1)
-		return nil, errors.New("no cgroup")
+	failing := NewCache(CacheConfig{
+		Detector: func() (*Limits, error) {
+			calls.Add(1)
+			return nil, errors.New("no cgroup")
+		},
+		TTL: time.Minute,
 	})
 	calls.Store(0)
 	require.Nil(t, failing.Get())
 	require.Nil(t, failing.Get())
 	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestCache_ZeroValueDetectsWithoutCaching(t *testing.T) {
+	var cache Cache
+	require.NotPanics(t, func() { cache.Get() })
 }

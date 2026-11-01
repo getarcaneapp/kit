@@ -8,33 +8,35 @@ import (
 
 // Cache memoizes the result of cgroup limit detection for a configurable TTL.
 // A single in-flight refresh is shared across concurrent callers, so a
-// stampede of samplers never duplicates the work.
+// stampede of samplers never duplicates the work. The zero Cache is usable and
+// runs DetectLimits on every Get.
 type Cache struct {
 	cache    *hot.HotCache[struct{}, *Limits]
 	detector func() (*Limits, error)
 	ttl      time.Duration
 }
 
-// NewCache returns a cache that caches detection results for ttl using the
-// default DetectLimits detector.
-func NewCache(ttl time.Duration) *Cache {
-	return NewCacheWithDetector(ttl, DetectLimits)
+// CacheConfig configures a Cache. The zero value detects on every call with DetectLimits.
+type CacheConfig struct {
+	// Detector replaces DetectLimits, e.g. in tests that simulate failures. Nil uses DetectLimits.
+	Detector func() (*Limits, error)
+	// TTL is how long a detection result is reused. Zero or negative disables caching.
+	TTL time.Duration
 }
 
-// NewCacheWithDetector returns a cache backed by a custom detector. Useful when
-// callers (e.g. tests) need to control detection behaviour or simulate failures.
-func NewCacheWithDetector(ttl time.Duration, detector func() (*Limits, error)) *Cache {
+// NewCache returns a cache configured by cfg.
+func NewCache(cfg CacheConfig) *Cache {
 	return &Cache{
 		cache: func() *hot.HotCache[struct{}, *Limits] {
-			if ttl <= 0 {
+			if cfg.TTL <= 0 {
 				return nil
 			}
 			return hot.NewHotCache[struct{}, *Limits](hot.LRU, 1).
-				WithTTL(ttl).
+				WithTTL(cfg.TTL).
 				Build()
 		}(),
-		ttl:      ttl,
-		detector: detector,
+		detector: cfg.Detector,
+		ttl:      cfg.TTL,
 	}
 }
 
@@ -42,7 +44,7 @@ func NewCacheWithDetector(ttl time.Duration, detector func() (*Limits, error)) *
 // Returns nil when no cgroup limits have been detected (host is not running under cgroups).
 func (c *Cache) Get() *Limits {
 	if c.ttl <= 0 {
-		limits, err := c.detector()
+		limits, err := c.detect()
 		if err != nil {
 			return nil
 		}
@@ -50,7 +52,7 @@ func (c *Cache) Get() *Limits {
 	}
 
 	limits, _, err := c.cache.GetWithLoaders(struct{}{}, func(_ []struct{}) (map[struct{}]*Limits, error) {
-		detected, detectErr := c.detector()
+		detected, detectErr := c.detect()
 		if detectErr != nil {
 			// Cache the miss: a host without detectable cgroup limits should
 			// not re-run detection on every call.
@@ -62,4 +64,12 @@ func (c *Cache) Get() *Limits {
 		return nil
 	}
 	return limits
+}
+
+// detect runs the configured detector, falling back to DetectLimits for the zero Cache.
+func (c *Cache) detect() (*Limits, error) {
+	if c.detector == nil {
+		return DetectLimits()
+	}
+	return c.detector()
 }
