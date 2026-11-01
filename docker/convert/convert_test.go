@@ -97,7 +97,7 @@ func TestConvertDoesNotExecuteShellExpansion(t *testing.T) {
 }
 
 func TestBuildMergesExistingCompose(t *testing.T) {
-	commands, err := convert.Parse("docker run --name web nginx:alpine", converttypes.ParseOptions{})
+	commands, err := convert.Parse("docker run --name web nginx:alpine")
 	if err != nil {
 		t.Fatalf("Parse returned error: %v", err)
 	}

@@ -7,14 +7,17 @@ import (
 	composegotypes "github.com/compose-spec/compose-go/v2/types"
 )
 
+// Options configures Convert and Build. Its MarshalOptions are applied when
+// Convert renders the document.
 type Options struct {
+	// ExistingComposeYAML is a compose file the converted services are merged into.
 	ExistingComposeYAML []byte
-	RenderWarnings      bool
+	MarshalOptions
 }
 
-type ParseOptions struct{}
-
+// MarshalOptions configures Marshal.
 type MarshalOptions struct {
+	// RenderWarnings appends conversion warnings to the YAML as comments.
 	RenderWarnings bool
 }
 

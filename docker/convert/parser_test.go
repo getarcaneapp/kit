@@ -52,7 +52,7 @@ func TestParseSplitsStatements(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			commands, err := convert.Parse(tt.input, converttypes.ParseOptions{})
+			commands, err := convert.Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse returned error: %v", err)
 			}
@@ -73,7 +73,7 @@ func TestParseRejectsRedirectionsAndBadQuoting(t *testing.T) {
 		"docker run -e 'X=1 alpine",
 	} {
 		t.Run(input, func(t *testing.T) {
-			_, err := convert.Parse(input, converttypes.ParseOptions{})
+			_, err := convert.Parse(input)
 			if !errors.Is(err, converttypes.ErrParse) {
 				t.Fatalf("Parse error = %v, want ErrParse", err)
 			}

@@ -12,7 +12,7 @@ import (
 )
 
 func Convert(input string, opts types.Options) (*types.Result, error) {
-	commands, err := Parse(input, types.ParseOptions{})
+	commands, err := Parse(input)
 	if err != nil {
 		return nil, err
 	}
@@ -22,7 +22,7 @@ func Convert(input string, opts types.Options) (*types.Result, error) {
 		return nil, err
 	}
 
-	yamlData, err := Marshal(doc, types.MarshalOptions{RenderWarnings: opts.RenderWarnings})
+	yamlData, err := Marshal(doc, opts.MarshalOptions)
 	if err != nil {
 		return nil, err
 	}

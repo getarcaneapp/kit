@@ -71,7 +71,7 @@ var boolFlags = map[string]string{
 	"--oom-kill-disable": "oom_kill_disable",
 }
 
-func Parse(input string, opts types.ParseOptions) ([]types.RunCommand, error) {
+func Parse(input string) ([]types.RunCommand, error) {
 	normalized := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(input, "\r\n", "\n"), "\\\n", " "))
 	if normalized == "" {
 		return nil, types.NewParseError("docker command must be a non-empty string")
