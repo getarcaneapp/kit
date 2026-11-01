@@ -10,12 +10,12 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"go.getarcane.app/docker/compat"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/deps"
-	"go.getarcane.app/updater/pkg/utils/tagpolicy"
-	"go.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/internal/deps"
+	"kit.getarcane.app/updater/pkg/utils/tagpolicy"
+	"kit.getarcane.app/updater/refs"
 )
 
 type targetedRecord struct {

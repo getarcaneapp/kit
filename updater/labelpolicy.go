@@ -3,10 +3,10 @@ package updater
 import (
 	"strings"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/updater/labels"
-	"go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/labels"
+	"kit.getarcane.app/updater/types"
 )
 
 // LabelPolicy decides from a container's labels whether the updater may touch it, whether the host must

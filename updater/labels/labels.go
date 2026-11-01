@@ -5,7 +5,7 @@ package labels
 import (
 	"strings"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 const (

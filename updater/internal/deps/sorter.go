@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/updater/labels"
+	"kit.getarcane.app/updater/labels"
 )
 
 // ContainerWithDeps represents a container and its restart dependencies.

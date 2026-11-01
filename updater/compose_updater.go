@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/updater/internal/compose"
 )
 
 type dockerComposeProjectUpdater struct {

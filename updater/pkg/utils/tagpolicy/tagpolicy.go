@@ -9,8 +9,8 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"go.getarcane.app/updater/refs"
-	"go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/types"
 )
 
 // Resolve validates policy and picks its strategy: digest unless a constraint or tag pattern is set,

@@ -20,13 +20,13 @@ import (
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
-	"go.getarcane.app/docker/compat"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/compose"
-	"go.getarcane.app/updater/internal/digestcheck"
-	"go.getarcane.app/updater/refs"
-	updatetypes "go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/updater/internal/digestcheck"
+	"kit.getarcane.app/updater/refs"
+	updatetypes "kit.getarcane.app/updater/types"
 )
 
 // UpdateContainer updates a single Docker container by pulling its latest image and recreating it.

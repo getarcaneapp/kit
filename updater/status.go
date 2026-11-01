@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // Status returns a point-in-time updater status snapshot.

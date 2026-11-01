@@ -1,8 +1,8 @@
-module go.getarcane.app/updater
+module kit.getarcane.app/updater
 
 go 1.27
 
-replace go.getarcane.app/kit => ../
+replace kit.getarcane.app => ../kit
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
@@ -16,8 +16,8 @@ require (
 	github.com/moby/moby/client v0.6.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/samber/hot v0.13.1
-	go.getarcane.app/docker/compat v0.1.7
-	go.getarcane.app/kit v0.4.4
+	kit.getarcane.app v0.4.4
+	kit.getarcane.app/docker v0.1.4
 )
 
 require (
@@ -33,7 +33,6 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
@@ -53,4 +52,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace go.getarcane.app/docker/compat => ../docker/compat
+replace kit.getarcane.app/docker => ../docker

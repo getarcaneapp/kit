@@ -10,8 +10,8 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 
-	"go.getarcane.app/updater/internal/compose"
-	updatetypes "go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/internal/compose"
+	updatetypes "kit.getarcane.app/updater/types"
 )
 
 type recordingProjectImages struct {

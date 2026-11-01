@@ -5,7 +5,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 
-	"go.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/refs"
 )
 
 func TestResolveContainerImageMatchUsesInspectConfigImage(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"go.getarcane.app/updater/labels"
-	"go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/labels"
+	"kit.getarcane.app/updater/types"
 )
 
 type testTagLister struct {

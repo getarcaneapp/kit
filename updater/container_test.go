@@ -14,8 +14,8 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 
-	"go.getarcane.app/updater/labels"
-	"go.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/labels"
+	"kit.getarcane.app/updater/refs"
 )
 
 func TestClearPendingRecord(t *testing.T) {

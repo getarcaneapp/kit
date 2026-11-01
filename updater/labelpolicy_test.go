@@ -3,7 +3,7 @@ package updater
 import (
 	"testing"
 
-	"go.getarcane.app/updater/labels"
+	"kit.getarcane.app/updater/labels"
 )
 
 func TestDefaultLabelPolicy(t *testing.T) {

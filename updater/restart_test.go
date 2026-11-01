@@ -11,7 +11,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 
-	"go.getarcane.app/updater/labels"
+	"kit.getarcane.app/updater/labels"
 )
 
 func TestRestartContainersUsingOldImagesRestartsDependenciesInWatchtowerOrder(t *testing.T) {

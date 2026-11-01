@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/updater/digest"
-	"go.getarcane.app/updater/internal/compose"
-	"go.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/digest"
+	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/updater/refs"
 )
 
 // AppendImageUpdateRecordIDToOldIDs includes SHA-like update record IDs in the old-image match set.

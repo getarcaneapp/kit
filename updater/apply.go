@@ -8,12 +8,12 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
-	"go.getarcane.app/docker/compat"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/digestcheck"
-	"go.getarcane.app/updater/internal/match"
-	"go.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/internal/digestcheck"
+	"kit.getarcane.app/updater/internal/match"
+	"kit.getarcane.app/updater/refs"
 )
 
 // ApplyPending applies pending image updates from the configured PendingStore.

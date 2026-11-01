@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	"go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/types"
 )
 
 // Config configures a Service. Every field is optional: New fills in a Docker-backed default for

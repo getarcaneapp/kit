@@ -17,10 +17,10 @@ import (
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 
-	"go.getarcane.app/updater/internal/compose"
-	"go.getarcane.app/updater/internal/deps"
-	"go.getarcane.app/updater/labels"
-	updatetypes "go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/updater/internal/deps"
+	"kit.getarcane.app/updater/labels"
+	updatetypes "kit.getarcane.app/updater/types"
 )
 
 type targetedDocker struct {

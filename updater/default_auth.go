@@ -10,7 +10,7 @@ import (
 	dockerCliConfig "github.com/docker/cli/cli/config"
 	dockerregistry "github.com/moby/moby/api/types/registry"
 
-	"go.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/refs"
 )
 
 // defaultDockerConfigRegistryAuthConfig loads usable Docker config credentials for imageRef's registry,

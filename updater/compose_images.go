@@ -8,12 +8,12 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"go.getarcane.app/docker/compat"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/internal/compose"
-	"go.getarcane.app/updater/refs"
-	updatetypes "go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/updater/refs"
+	updatetypes "kit.getarcane.app/updater/types"
 )
 
 // preflightComposeImage resolves the Compose project a tag change to newRef must be persisted

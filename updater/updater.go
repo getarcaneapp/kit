@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/moby/moby/api/types/container"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // Service coordinates Docker image updates, container recreation, and the host adapters configured

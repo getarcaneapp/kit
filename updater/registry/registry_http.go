@@ -18,8 +18,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	kit "go.getarcane.app/kit/pkg"
-	kitregistry "go.getarcane.app/kit/pkg/registry"
+	"kit.getarcane.app"
+	kitregistry "kit.getarcane.app/registry"
 )
 
 const (

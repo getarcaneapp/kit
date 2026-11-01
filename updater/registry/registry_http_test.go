@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/authn"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

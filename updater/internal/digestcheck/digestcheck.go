@@ -13,10 +13,10 @@ import (
 
 	"github.com/moby/moby/client"
 	"github.com/samber/hot"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/updater/digest"
-	"go.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/digest"
+	"kit.getarcane.app/updater/refs"
 )
 
 // Resolver resolves a remote image digest without pulling. It is structural so

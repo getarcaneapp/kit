@@ -5,7 +5,7 @@
 Portable Docker auto-update orchestration for Go applications.
 
 <a href="https://github.com/getarcaneapp/updater/actions/workflows/ci.yml"><img src="https://github.com/getarcaneapp/updater/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-<a href="https://pkg.go.dev/go.getarcane.app/updater"><img src="https://pkg.go.dev/badge/go.getarcane.app/updater.svg" alt="Go Reference"></a>
+<a href="https://pkg.go.dev/kit.getarcane.app/updater"><img src="https://pkg.go.dev/badge/kit.getarcane.app/updater.svg" alt="Go Reference"></a>
 <a href="https://github.com/getarcaneapp/updater/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License"></a>
 
 </div>
@@ -20,7 +20,7 @@ It works out of the box against the local Docker environment. Persistence, notif
 ## Install
 
 ```sh
-go get go.getarcane.app/updater@latest
+go get kit.getarcane.app/updater@latest
 ```
 
 ## Quick start
@@ -28,7 +28,7 @@ go get go.getarcane.app/updater@latest
 Everything runs through a `Service`. The zero `Config` is valid:
 
 ```go
-import "go.getarcane.app/updater"
+import "kit.getarcane.app/updater"
 
 service, err := updater.New(updater.Config{})
 if err != nil {
@@ -225,8 +225,8 @@ if check.UpdateAvailable {
 }
 ```
 
-Import `go.getarcane.app/updater/refs` for reference parsing and
-`go.getarcane.app/updater/types` for check requests and policies. A host can
+Import `kit.getarcane.app/updater/refs` for reference parsing and
+`kit.getarcane.app/updater/types` for check requests and policies. A host can
 replace `Config.RegistryTagLister` to supply registry credentials or its own
 registry client. The default uses Docker configuration credentials and handles
 registry pagination, requesting 1000 tags per page and honoring the caller's

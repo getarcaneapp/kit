@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"slices"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/updater/internal/compose"
-	"go.getarcane.app/updater/internal/deps"
-	"go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/updater/internal/deps"
+	"kit.getarcane.app/updater/types"
 )
 
 type composeGroup struct {

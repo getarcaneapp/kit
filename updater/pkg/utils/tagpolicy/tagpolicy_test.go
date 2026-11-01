@@ -3,8 +3,8 @@ package tagpolicy_test
 import (
 	"testing"
 
-	"go.getarcane.app/updater/pkg/utils/tagpolicy"
-	"go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/pkg/utils/tagpolicy"
+	"kit.getarcane.app/updater/types"
 )
 
 func TestSelect(t *testing.T) {

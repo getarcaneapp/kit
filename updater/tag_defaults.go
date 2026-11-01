@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 
-	"go.getarcane.app/updater/refs"
-	"go.getarcane.app/updater/registry"
-	"go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/registry"
+	"kit.getarcane.app/updater/types"
 )
 
 type defaultRegistryTagLister struct{ httpClient *http.Client }

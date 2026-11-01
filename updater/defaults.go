@@ -14,8 +14,8 @@ import (
 	dockerauthconfig "github.com/moby/moby/api/pkg/authconfig"
 	"github.com/moby/moby/client"
 
-	"go.getarcane.app/updater/refs"
-	"go.getarcane.app/updater/registry"
+	"kit.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/registry"
 )
 
 // DockerClient is the built-in DockerClientProvider: it lazily opens one client, pings it on every

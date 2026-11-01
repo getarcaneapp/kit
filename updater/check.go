@@ -8,14 +8,14 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"go.getarcane.app/docker/compat"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker/compat"
 
-	"go.getarcane.app/updater/digest"
-	"go.getarcane.app/updater/internal/digestcheck"
-	"go.getarcane.app/updater/pkg/utils/tagpolicy"
-	"go.getarcane.app/updater/refs"
-	"go.getarcane.app/updater/types"
+	"kit.getarcane.app/updater/digest"
+	"kit.getarcane.app/updater/internal/digestcheck"
+	"kit.getarcane.app/updater/pkg/utils/tagpolicy"
+	"kit.getarcane.app/updater/refs"
+	"kit.getarcane.app/updater/types"
 )
 
 // CheckImageUpdate discovers an image update without pulling or changing state.

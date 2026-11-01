@@ -8,7 +8,7 @@ import (
 
 	ref "github.com/distribution/reference"
 	"github.com/opencontainers/go-digest"
-	"go.getarcane.app/kit/pkg/registry"
+	"kit.getarcane.app/registry"
 )
 
 // Reference is a normalized Docker image reference.

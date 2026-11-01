@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // Options configures an updater run.
