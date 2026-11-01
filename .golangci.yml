@@ -1,4 +1,3 @@
-# Slightly Modified Version of docker's golangci lint configuration to fit arcanes standards
 version: "2"
 
 run:
