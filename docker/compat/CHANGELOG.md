@@ -1,3 +1,14 @@
+## docker/compat/v0.1.7
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* merge create variants into one CreateRequest call([a79b4a9](https://github.com/getarcaneapp/kit/commit/a79b4a93d5a721678e1d29bea2d286998035c02f) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/compat/v0.1.6...docker/compat/v0.1.7
+
 ## docker/compat/v0.1.6
 
 ### Bug fixes
