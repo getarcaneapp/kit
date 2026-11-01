@@ -38,20 +38,19 @@ func TestBuildSample(t *testing.T) {
 }
 
 func TestStoreRecordCapsAndPreservesOrder(t *testing.T) {
-	store := NewStore(WithCapacity(3))
+	store := NewStore(StoreConfig{Capacity: 3})
 	baseTime := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 
 	for i := range 5 {
-		store.Record(
-			"container-1",
-			StatsHistorySample{
+		store.Record(RecordRequest{
+			RecordedAt:  baseTime.Add(time.Duration(i) * time.Second),
+			ContainerID: "container-1",
+			Sample: StatsHistorySample{
 				CPUTenths:        uint16(i),
 				MemoryTenths:     uint16(i + 100),
 				MemoryUsageBytes: uint64(i + 1000),
 			},
-			false,
-			baseTime.Add(time.Duration(i)*time.Second),
-		)
+		})
 	}
 
 	snapshot := store.History("container-1")
@@ -74,29 +73,30 @@ func TestStoreRecordCapsAndPreservesOrder(t *testing.T) {
 }
 
 func TestStoreRecordPrunesExpiredContainers(t *testing.T) {
-	store := NewStore(WithTTL(10*time.Minute), WithPruneInterval(time.Minute))
+	store := NewStore(StoreConfig{
+		TTL:           10 * time.Minute,
+		PruneInterval: time.Minute,
+	})
 	baseTime := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
 
-	store.Record(
-		"stale-container",
-		StatsHistorySample{
+	store.Record(RecordRequest{
+		RecordedAt:  baseTime,
+		ContainerID: "stale-container",
+		Sample: StatsHistorySample{
 			CPUTenths:        111,
 			MemoryTenths:     222,
 			MemoryUsageBytes: 333,
 		},
-		false,
-		baseTime,
-	)
-	store.Record(
-		"fresh-container",
-		StatsHistorySample{
+	})
+	store.Record(RecordRequest{
+		RecordedAt:  baseTime.Add(9 * time.Minute),
+		ContainerID: "fresh-container",
+		Sample: StatsHistorySample{
 			CPUTenths:        333,
 			MemoryTenths:     444,
 			MemoryUsageBytes: 555,
 		},
-		false,
-		baseTime.Add(9*time.Minute),
-	)
+	})
 
 	store.Prune(baseTime.Add(11 * time.Minute))
 
@@ -119,8 +119,12 @@ func TestStoreRecordPrunesExpiredContainers(t *testing.T) {
 }
 
 func TestRemoveEvictsHistory(t *testing.T) {
-	store := NewStore()
-	store.Record("container-1", StatsHistorySample{CPUTenths: 1}, false, time.Now())
+	store := NewStore(StoreConfig{})
+	store.Record(RecordRequest{
+		RecordedAt:  time.Now(),
+		ContainerID: "container-1",
+		Sample:      StatsHistorySample{CPUTenths: 1},
+	})
 	store.Remove("container-1")
 	if history := store.History("container-1"); history != nil {
 		t.Fatalf("history after remove = %#v, want nil", history)

@@ -31,34 +31,26 @@ type StatsStreamPayload struct {
 	CurrentHistorySample StatsHistorySample `json:"currentHistorySample"`
 }
 
-// Option configures a Store.
-type Option func(*Store)
-
-// WithCapacity sets the number of samples retained per container.
-func WithCapacity(capacity int) Option {
-	return func(s *Store) {
-		if capacity > 0 {
-			s.capacity = capacity
-		}
-	}
+// StoreConfig configures a Store. Zero or negative fields use the defaults.
+type StoreConfig struct {
+	// Capacity is the number of samples retained per container. Default 30.
+	Capacity int
+	// TTL is how long an inactive container history is retained. Default 10 minutes.
+	TTL time.Duration
+	// PruneInterval is the minimum time between automatic pruning passes. Default 1 minute.
+	PruneInterval time.Duration
 }
 
-// WithTTL sets how long inactive container histories are retained.
-func WithTTL(ttl time.Duration) Option {
-	return func(s *Store) {
-		if ttl > 0 {
-			s.ttl = ttl
-		}
-	}
-}
-
-// WithPruneInterval sets the minimum time between automatic pruning passes.
-func WithPruneInterval(interval time.Duration) Option {
-	return func(s *Store) {
-		if interval > 0 {
-			s.pruneInterval = interval
-		}
-	}
+// RecordRequest is one sample passed to Store.Record.
+type RecordRequest struct {
+	// RecordedAt timestamps the sample. Zero means now.
+	RecordedAt time.Time
+	// ContainerID selects the history the sample is appended to.
+	ContainerID string
+	// Sample is the value appended to the history.
+	Sample StatsHistorySample
+	// IncludeHistory makes Record return the history after appending.
+	IncludeHistory bool
 }
 
 // Store keeps bounded per-container stats history.
@@ -78,14 +70,14 @@ type historyBuffer struct {
 	count     int
 }
 
-// NewStore creates a configured Store.
-func NewStore(opts ...Option) *Store {
-	s := &Store{}
-	s.initLocked()
-	for _, opt := range opts {
-		opt(s)
+// NewStore creates a Store configured by cfg. The zero Store is also usable and
+// uses the defaults.
+func NewStore(cfg StoreConfig) *Store {
+	return &Store{
+		capacity:      cfg.Capacity,
+		ttl:           cfg.TTL,
+		pruneInterval: cfg.PruneInterval,
 	}
-	return s
 }
 
 // BuildSample converts a Docker stats response into Arcane's compact sample
@@ -114,25 +106,26 @@ func BuildSample(stats dockercontainer.StatsResponse) StatsHistorySample {
 	}
 }
 
-// Record appends sample and optionally returns the current history.
-func (s *Store) Record(containerID string, sample StatsHistorySample, includeHistory bool, recordedAt time.Time) []StatsHistorySample {
+// Record appends req.Sample and, when req.IncludeHistory is set, returns the
+// container's history.
+func (s *Store) Record(req RecordRequest) []StatsHistorySample {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.initLocked()
 
-	if s.lastPrune.IsZero() || kit.Ternary(recordedAt.IsZero(), time.Now(), recordedAt).Sub(s.lastPrune) >= s.pruneInterval {
-		s.pruneLocked(recordedAt)
+	if s.lastPrune.IsZero() || kit.Ternary(req.RecordedAt.IsZero(), time.Now(), req.RecordedAt).Sub(s.lastPrune) >= s.pruneInterval {
+		s.pruneLocked(req.RecordedAt)
 	}
 
-	buffer := s.histories[containerID]
+	buffer := s.histories[req.ContainerID]
 	if buffer == nil {
 		buffer = &historyBuffer{samples: make([]StatsHistorySample, s.capacity)}
-		s.histories[containerID] = buffer
+		s.histories[req.ContainerID] = buffer
 	}
 
-	buffer.append(sample, recordedAt)
+	buffer.append(req.Sample, req.RecordedAt)
 
-	if !includeHistory {
+	if !req.IncludeHistory {
 		return nil
 	}
 

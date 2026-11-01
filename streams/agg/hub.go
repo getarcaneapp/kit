@@ -12,7 +12,7 @@ import (
 // stops when the last subscriber detaches. Events fan out to each subscriber
 // through a latest-wins mailbox, so events must be states (snapshots, errors)
 // rather than deltas — a slow consumer skips straight to the newest one and
-// can never stall the runner or its peers.
+// can never stall the runner or its peers. The zero Hub is ready to use.
 type Hub[T any] struct {
 	entries map[string]*hubEntry[T]
 	mu      sync.Mutex
@@ -32,9 +32,9 @@ type hubSubscriber[T any] struct {
 	has    bool
 }
 
-// NewHub returns an empty Hub.
+// NewHub returns an empty Hub. It is equivalent to new(Hub[T]).
 func NewHub[T any]() *Hub[T] {
-	return &Hub[T]{entries: map[string]*hubEntry[T]{}}
+	return &Hub[T]{}
 }
 
 // Subscribe attaches to the shared runner for key, starting run when no
@@ -47,6 +47,9 @@ func (h *Hub[T]) Subscribe(ctx context.Context, key string, run func(ctx context
 	sub := &hubSubscriber[T]{wake: make(chan struct{}, 1)}
 
 	h.mu.Lock()
+	if h.entries == nil {
+		h.entries = map[string]*hubEntry[T]{}
+	}
 	entry, ok := h.entries[key]
 	if !ok {
 		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))

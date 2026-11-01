@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	kit "go.getarcane.app/kit/pkg"
 )
 
 // RemoteEnvironmentLister lists the remote environment IDs an aggregated stream
@@ -116,48 +118,53 @@ func Send[T any](ctx context.Context, events chan<- T, event T) bool {
 	}
 }
 
+// PollerConfig configures ReconcilePollersByKey.
+type PollerConfig[T any] struct {
+	// List returns the items that should each have a running poller.
+	List func(ctx context.Context) ([]T, error)
+	// Key identifies an item. Items with an empty key are skipped.
+	Key func(item T) string
+	// Version restarts an item's poller when it changes. Nil never restarts.
+	Version func(item T) string
+	// Run is the poller body; it must return when ctx is canceled.
+	Run func(ctx context.Context, item T)
+	// Label names the stream in log messages.
+	Label string
+	// Interval is how often List is re-checked. Zero or negative means one minute.
+	Interval time.Duration
+}
+
+// EnvironmentPollerConfig configures ReconcileEnvironmentPollers.
+type EnvironmentPollerConfig struct {
+	// Lister returns the remote environments that should each have a poller.
+	Lister RemoteEnvironmentLister
+	// Run is the poller body; it must return when ctx is canceled.
+	Run func(ctx context.Context, environmentID string)
+	// Label names the stream in log messages.
+	Label string
+	// Interval is how often Lister is re-checked. Zero or negative means one minute.
+	Interval time.Duration
+}
+
 // ReconcileEnvironmentPollers keeps one poller goroutine per enabled remote
-// environment.
-func ReconcileEnvironmentPollers(
-	ctx context.Context,
-	lister RemoteEnvironmentLister,
-	reconcileInterval time.Duration,
-	streamLabel string,
-	runPoller func(ctx context.Context, environmentID string),
-) {
-	ReconcilePollersByKey(ctx,
-		func(ctx context.Context) ([]string, error) {
-			return lister.ListRemoteEnvironmentIDs(ctx)
-		},
-		func(environmentID string) string {
-			return environmentID
-		},
-		nil,
-		reconcileInterval,
-		streamLabel,
-		runPoller,
-	)
+// environment until ctx is canceled.
+func ReconcileEnvironmentPollers(ctx context.Context, cfg EnvironmentPollerConfig) {
+	ReconcilePollersByKey(ctx, PollerConfig[string]{
+		List:     cfg.Lister.ListRemoteEnvironmentIDs,
+		Key:      func(environmentID string) string { return environmentID },
+		Run:      cfg.Run,
+		Label:    cfg.Label,
+		Interval: cfg.Interval,
+	})
 }
 
 // ReconcilePollersByKey keeps one poller goroutine per listed item, keyed by a
-// stable item ID.
-func ReconcilePollersByKey[T any](
-	ctx context.Context,
-	listItems func(context.Context) ([]T, error),
-	keyFunc func(T) string,
-	versionFunc func(T) string,
-	reconcileInterval time.Duration,
-	streamLabel string,
-	runPoller func(ctx context.Context, item T),
-) {
-	if reconcileInterval <= 0 {
-		reconcileInterval = time.Minute
-	}
-
+// stable item ID, until ctx is canceled.
+func ReconcilePollersByKey[T any](ctx context.Context, cfg PollerConfig[T]) {
 	set := pollerSet[T]{
 		ctx:       ctx,
 		active:    make(map[string]poller),
-		runPoller: runPoller,
+		runPoller: cfg.Run,
 	}
 	defer set.wg.Wait()
 	defer func() {
@@ -167,10 +174,10 @@ func ReconcilePollersByKey[T any](
 	}()
 
 	reconcile := func() {
-		items, err := listItems(ctx)
+		items, err := cfg.List(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
-				slog.Default().WarnContext(ctx, "failed to list environments", "stream", streamLabel, "error", err)
+				slog.Default().WarnContext(ctx, "failed to list environments", "stream", cfg.Label, "error", err)
 			}
 			return
 		}
@@ -178,13 +185,13 @@ func ReconcilePollersByKey[T any](
 		// Start, restart, and stop pollers so the set matches items exactly.
 		current := make(map[string]struct{}, len(items))
 		for _, item := range items {
-			key := keyFunc(item)
+			key := cfg.Key(item)
 			if key == "" {
 				continue
 			}
 			version := ""
-			if versionFunc != nil {
-				version = versionFunc(item)
+			if cfg.Version != nil {
+				version = cfg.Version(item)
 			}
 			current[key] = struct{}{}
 
@@ -225,7 +232,7 @@ func ReconcilePollersByKey[T any](
 
 	reconcile()
 
-	ticker := time.NewTicker(reconcileInterval)
+	ticker := time.NewTicker(kit.Ternary(cfg.Interval > 0, cfg.Interval, time.Minute))
 	defer ticker.Stop()
 
 	for {

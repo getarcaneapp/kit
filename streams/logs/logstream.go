@@ -10,6 +10,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	kit "go.getarcane.app/kit/pkg"
+
+	"go.getarcane.app/streams/internal/buffer"
 )
 
 const (
@@ -25,16 +29,14 @@ type Entry struct {
 	Message string         `json:"message"`
 }
 
-// Option configures a Broadcaster.
-type Option func(*Broadcaster)
-
-// WithSubscriberBuffer sets the per-subscriber channel buffer.
-func WithSubscriberBuffer(size int) Option {
-	return func(b *Broadcaster) {
-		if size >= 0 {
-			b.subscriberBuffer = size
-		}
-	}
+// Config configures a Broadcaster. The zero value uses the defaults.
+type Config struct {
+	// SubscriberBuffer is the per-subscriber channel buffer. Nil or negative
+	// uses the default of 256; new(0) makes subscriber channels unbuffered.
+	SubscriberBuffer *int
+	// Capacity is the number of recent entries retained. Zero or negative uses
+	// the default of 1000.
+	Capacity int
 }
 
 // Broadcaster keeps a bounded ring buffer of recent log entries and fans new
@@ -54,20 +56,15 @@ type logSubscriberSnapshot struct {
 	subscribers []chan Entry
 }
 
-// New returns a Broadcaster retaining up to capacity recent entries.
-func New(capacity int, opts ...Option) *Broadcaster {
-	if capacity <= 0 {
-		capacity = defaultRingCapacity
-	}
+// New returns a Broadcaster configured by cfg.
+func New(cfg Config) *Broadcaster {
+	capacity := kit.Ternary(cfg.Capacity > 0, cfg.Capacity, defaultRingCapacity)
 	b := &Broadcaster{
 		buf:              make([]Entry, capacity),
 		capN:             capacity,
-		subscriberBuffer: defaultSubscriberBuffer,
+		subscriberBuffer: buffer.Size(cfg.SubscriberBuffer, defaultSubscriberBuffer),
 	}
 	b.subscribers.Store(&logSubscriberSnapshot{})
-	for _, opt := range opts {
-		opt(b)
-	}
 	return b
 }
 

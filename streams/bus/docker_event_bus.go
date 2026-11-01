@@ -8,35 +8,24 @@ import (
 	"sync/atomic"
 
 	"github.com/moby/moby/api/types/events"
+
+	"go.getarcane.app/streams/internal/buffer"
 )
 
 const defaultSubscriberBuffer = 16
 
-// Option configures a DockerEventBus.
-type Option func(*DockerEventBus)
-
-// SubscribeOption configures one subscription.
-type SubscribeOption func(*subscribeConfig)
-
-type subscribeConfig struct {
-	buffer int
+// Config configures a DockerEventBus. The zero value is valid.
+type Config struct {
+	// OnDrop observes messages that could not be delivered to a full
+	// subscriber channel. Nil ignores drops.
+	OnDrop func(events.Message)
 }
 
-// WithDroppedEventCallback observes messages that could not be delivered to a
-// full subscriber channel.
-func WithDroppedEventCallback(callback func(events.Message)) Option {
-	return func(b *DockerEventBus) {
-		b.onDrop = callback
-	}
-}
-
-// WithSubscriberBuffer sets a subscription channel buffer size.
-func WithSubscriberBuffer(size int) SubscribeOption {
-	return func(cfg *subscribeConfig) {
-		if size >= 0 {
-			cfg.buffer = size
-		}
-	}
+// SubscribeOptions configures one subscription. The zero value is valid.
+type SubscribeOptions struct {
+	// Buffer is the subscription channel buffer. Nil or negative uses the
+	// default of 16; new(0) makes the channel unbuffered.
+	Buffer *int
 }
 
 // DockerEventBus is an in-process fan-out point for Docker daemon events.
@@ -51,25 +40,18 @@ type dockerEventBusState struct {
 	closed      bool
 }
 
-// NewDockerEventBus creates an empty Docker event bus.
-func NewDockerEventBus(opts ...Option) *DockerEventBus {
-	b := &DockerEventBus{}
+// NewDockerEventBus creates an empty Docker event bus configured by cfg.
+func NewDockerEventBus(cfg Config) *DockerEventBus {
+	b := &DockerEventBus{onDrop: cfg.OnDrop}
 	b.state.Store(&dockerEventBusState{
 		subscribers: make(map[events.Type][]chan events.Message),
 	})
-	for _, opt := range opts {
-		opt(b)
-	}
 	return b
 }
 
 // Subscribe registers for messages of eventType. Delivery is non-blocking.
-func (b *DockerEventBus) Subscribe(eventType events.Type, opts ...SubscribeOption) (<-chan events.Message, func()) {
-	cfg := subscribeConfig{buffer: defaultSubscriberBuffer}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	ch := make(chan events.Message, cfg.buffer)
+func (b *DockerEventBus) Subscribe(eventType events.Type, opts SubscribeOptions) (<-chan events.Message, func()) {
+	ch := make(chan events.Message, buffer.Size(opts.Buffer, defaultSubscriberBuffer))
 	if b == nil {
 		close(ch)
 		return ch, func() {}

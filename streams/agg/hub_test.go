@@ -81,3 +81,21 @@ func TestHubSharesRunnerAcrossSubscribersAndReplaysLast(t *testing.T) {
 		t.Fatalf("runner started %d times after resubscribe, want 2", got)
 	}
 }
+
+func TestZeroHubSubscribes(t *testing.T) {
+	var hub Hub[int]
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	var got int
+	hub.Subscribe(ctx, "key", func(ctx context.Context, publish func(int)) {
+		publish(7)
+		<-ctx.Done()
+	}, func(v int) bool {
+		got = v
+		return false
+	})
+	if got != 7 {
+		t.Fatalf("delivered %d, want 7", got)
+	}
+}

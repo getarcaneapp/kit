@@ -12,7 +12,7 @@ import (
 )
 
 func TestSlogHandlerNormalizesGroupedAttrs(t *testing.T) {
-	b := New(10)
+	b := New(Config{Capacity: 10})
 	h := NewSlogHandler(slog.DiscardHandler, b)
 	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelInfo, "Incoming request", 0)
 	record.AddAttrs(
@@ -49,7 +49,7 @@ func TestSlogHandlerNormalizesGroupedAttrs(t *testing.T) {
 }
 
 func TestSlogHandlerNormalizesErrors(t *testing.T) {
-	b := New(10)
+	b := New(Config{Capacity: 10})
 	h := NewSlogHandler(slog.DiscardHandler, b)
 	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelError, "request failed", 0)
 	record.AddAttrs(slog.Any("error", fmt.Errorf("request: %w", errors.New("connection refused"))))
@@ -71,7 +71,7 @@ func TestSlogHandlerNormalizesErrors(t *testing.T) {
 }
 
 func TestSlogHandlerPreservesBoundAttrsAndGroups(t *testing.T) {
-	b := New(10)
+	b := New(Config{Capacity: 10})
 	h := NewSlogHandler(slog.DiscardHandler, b).
 		WithAttrs([]slog.Attr{slog.String("component", "diagnostics")}).
 		WithGroup("request").
@@ -98,7 +98,7 @@ func TestSlogHandlerPreservesBoundAttrsAndGroups(t *testing.T) {
 }
 
 func TestSubscribeUsesConfiguredBuffer(t *testing.T) {
-	b := New(10, WithSubscriberBuffer(1))
+	b := New(Config{Capacity: 10, SubscriberBuffer: new(1)})
 	ch, cancel := b.Subscribe()
 	defer cancel()
 
@@ -117,7 +117,7 @@ func TestSubscribeUsesConfiguredBuffer(t *testing.T) {
 }
 
 func TestRecentCapsAndPreservesOrder(t *testing.T) {
-	b := New(3)
+	b := New(Config{Capacity: 3})
 	for _, message := range []string{"one", "two", "three", "four", "five"} {
 		b.Append(Entry{Message: message})
 	}
@@ -134,7 +134,7 @@ func TestRecentCapsAndPreservesOrder(t *testing.T) {
 }
 
 func TestCancelClosesSubscription(t *testing.T) {
-	b := New(10)
+	b := New(Config{Capacity: 10})
 	ch, cancel := b.Subscribe()
 	cancel()
 	cancel()
@@ -145,7 +145,7 @@ func TestCancelClosesSubscription(t *testing.T) {
 }
 
 func TestConcurrentAppendCancelAndRecent(t *testing.T) {
-	b := New(32, WithSubscriberBuffer(1))
+	b := New(Config{Capacity: 32, SubscriberBuffer: new(1)})
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 
@@ -197,7 +197,7 @@ func BenchmarkBroadcasterAppend(b *testing.B) {
 }
 
 func benchmarkBroadcasterAppend(b *testing.B, subscriberCount int) {
-	broadcaster := New(1000, WithSubscriberBuffer(0))
+	broadcaster := New(Config{Capacity: 1000, SubscriberBuffer: new(0)})
 	for range subscriberCount {
 		_, _ = broadcaster.Subscribe()
 	}

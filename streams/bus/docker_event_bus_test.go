@@ -9,8 +9,8 @@ import (
 )
 
 func TestPublishCannotPanicAfterUnsubscribe(t *testing.T) {
-	b := NewDockerEventBus()
-	ch, unsubscribe := b.Subscribe(events.ImageEventType)
+	b := NewDockerEventBus(Config{})
+	ch, unsubscribe := b.Subscribe(events.ImageEventType, SubscribeOptions{})
 	unsubscribe()
 
 	select {
@@ -27,10 +27,10 @@ func TestPublishCannotPanicAfterUnsubscribe(t *testing.T) {
 
 func TestPublishReportsDroppedEvents(t *testing.T) {
 	var dropped atomic.Int64
-	b := NewDockerEventBus(WithDroppedEventCallback(func(events.Message) {
+	b := NewDockerEventBus(Config{OnDrop: func(events.Message) {
 		dropped.Add(1)
-	}))
-	ch, unsubscribe := b.Subscribe(events.ImageEventType, WithSubscriberBuffer(1))
+	}})
+	ch, unsubscribe := b.Subscribe(events.ImageEventType, SubscribeOptions{Buffer: new(1)})
 	defer unsubscribe()
 
 	b.Publish(events.Message{Type: events.ImageEventType, Action: "one"})
@@ -45,12 +45,12 @@ func TestPublishReportsDroppedEvents(t *testing.T) {
 
 func TestPublishReportsEachDroppedSubscriber(t *testing.T) {
 	var dropped atomic.Int64
-	b := NewDockerEventBus(WithDroppedEventCallback(func(events.Message) {
+	b := NewDockerEventBus(Config{OnDrop: func(events.Message) {
 		dropped.Add(1)
-	}))
+	}})
 	channels := make([]<-chan events.Message, 3)
 	for i := range channels {
-		ch, unsubscribe := b.Subscribe(events.ImageEventType, WithSubscriberBuffer(1))
+		ch, unsubscribe := b.Subscribe(events.ImageEventType, SubscribeOptions{Buffer: new(1)})
 		channels[i] = ch
 		t.Cleanup(unsubscribe)
 	}
@@ -67,8 +67,8 @@ func TestPublishReportsEachDroppedSubscriber(t *testing.T) {
 }
 
 func TestCloseIsIdempotent(t *testing.T) {
-	b := NewDockerEventBus()
-	ch, _ := b.Subscribe(events.ImageEventType)
+	b := NewDockerEventBus(Config{})
+	ch, _ := b.Subscribe(events.ImageEventType, SubscribeOptions{})
 
 	b.Close()
 	b.Close()
@@ -80,10 +80,10 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 
 func TestPublishOnlyDeliversMatchingEventType(t *testing.T) {
-	b := NewDockerEventBus()
-	imageEvents, unsubscribeImages := b.Subscribe(events.ImageEventType, WithSubscriberBuffer(1))
+	b := NewDockerEventBus(Config{})
+	imageEvents, unsubscribeImages := b.Subscribe(events.ImageEventType, SubscribeOptions{Buffer: new(1)})
 	defer unsubscribeImages()
-	containerEvents, unsubscribeContainers := b.Subscribe(events.ContainerEventType, WithSubscriberBuffer(1))
+	containerEvents, unsubscribeContainers := b.Subscribe(events.ContainerEventType, SubscribeOptions{Buffer: new(1)})
 	defer unsubscribeContainers()
 
 	b.Publish(events.Message{Type: events.ImageEventType, Action: "pull"})
@@ -104,10 +104,10 @@ func TestPublishOnlyDeliversMatchingEventType(t *testing.T) {
 }
 
 func TestSubscribeAfterCloseReturnsClosedChannel(t *testing.T) {
-	b := NewDockerEventBus()
+	b := NewDockerEventBus(Config{})
 	b.Close()
 
-	ch, unsubscribe := b.Subscribe(events.ImageEventType)
+	ch, unsubscribe := b.Subscribe(events.ImageEventType, SubscribeOptions{})
 	unsubscribe()
 
 	if _, ok := <-ch; ok {
@@ -118,11 +118,11 @@ func TestSubscribeAfterCloseReturnsClosedChannel(t *testing.T) {
 func TestDroppedEventCallbackCanCloseBus(t *testing.T) {
 	var dropped atomic.Int64
 	var b *DockerEventBus
-	b = NewDockerEventBus(WithDroppedEventCallback(func(events.Message) {
+	b = NewDockerEventBus(Config{OnDrop: func(events.Message) {
 		dropped.Add(1)
 		b.Close()
-	}))
-	ch, unsubscribe := b.Subscribe(events.ImageEventType, WithSubscriberBuffer(1))
+	}})
+	ch, unsubscribe := b.Subscribe(events.ImageEventType, SubscribeOptions{Buffer: new(1)})
 	defer unsubscribe()
 
 	b.Publish(events.Message{Type: events.ImageEventType, Action: "one"})
@@ -140,12 +140,12 @@ func TestDroppedEventCallbackCanCloseBus(t *testing.T) {
 }
 
 func TestConcurrentPublishAndUnsubscribe(t *testing.T) {
-	b := NewDockerEventBus()
+	b := NewDockerEventBus(Config{})
 	const subscriberCount = 64
 	channels := make([]<-chan events.Message, subscriberCount)
 	unsubscribes := make([]func(), subscriberCount)
 	for i := range subscriberCount {
-		channels[i], unsubscribes[i] = b.Subscribe(events.ImageEventType, WithSubscriberBuffer(1))
+		channels[i], unsubscribes[i] = b.Subscribe(events.ImageEventType, SubscribeOptions{Buffer: new(1)})
 	}
 
 	start := make(chan struct{})
@@ -177,8 +177,8 @@ func TestConcurrentPublishAndUnsubscribe(t *testing.T) {
 }
 
 func TestConcurrentPublishAndClose(t *testing.T) {
-	b := NewDockerEventBus()
-	ch, _ := b.Subscribe(events.ImageEventType, WithSubscriberBuffer(1))
+	b := NewDockerEventBus(Config{})
+	ch, _ := b.Subscribe(events.ImageEventType, SubscribeOptions{Buffer: new(1)})
 
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -203,7 +203,7 @@ func TestConcurrentPublishAndClose(t *testing.T) {
 }
 
 func TestConcurrentSubscribeAndClose(t *testing.T) {
-	b := NewDockerEventBus()
+	b := NewDockerEventBus(Config{})
 	const subscriberCount = 64
 	channels := make([]<-chan events.Message, subscriberCount)
 
@@ -214,7 +214,7 @@ func TestConcurrentSubscribeAndClose(t *testing.T) {
 		go func(index int) {
 			defer wg.Done()
 			<-start
-			channels[index], _ = b.Subscribe(events.ImageEventType)
+			channels[index], _ = b.Subscribe(events.ImageEventType, SubscribeOptions{})
 		}(i)
 	}
 	wg.Go(func() {
@@ -241,11 +241,11 @@ func BenchmarkDockerEventBusPublish(b *testing.B) {
 }
 
 func benchmarkDockerEventBusPublish(b *testing.B, subscriberCount int) {
-	eventBus := NewDockerEventBus()
+	eventBus := NewDockerEventBus(Config{})
 	defer eventBus.Close()
 
 	for range subscriberCount {
-		_, _ = eventBus.Subscribe(events.ImageEventType, WithSubscriberBuffer(0))
+		_, _ = eventBus.Subscribe(events.ImageEventType, SubscribeOptions{Buffer: new(0)})
 	}
 
 	message := events.Message{Type: events.ImageEventType, Action: "benchmark"}

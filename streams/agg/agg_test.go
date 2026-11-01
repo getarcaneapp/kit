@@ -67,8 +67,8 @@ func TestReconcilePollersWaitsForReplacementToExit(t *testing.T) {
 	calls := 0
 	items := [][]string{{"v1"}, {"v2"}}
 
-	go ReconcilePollersByKey(ctx,
-		func(context.Context) ([]string, error) {
+	go ReconcilePollersByKey(ctx, PollerConfig[string]{
+		List: func(context.Context) ([]string, error) {
 			if calls >= len(items) {
 				cancel()
 				return nil, nil
@@ -77,17 +77,17 @@ func TestReconcilePollersWaitsForReplacementToExit(t *testing.T) {
 			calls++
 			return out, nil
 		},
-		func(string) string { return "same" },
-		func(version string) string { return version },
-		10*time.Millisecond,
-		"test stream",
-		func(ctx context.Context, item string) {
+		Key:     func(string) string { return "same" },
+		Version: func(version string) string { return version },
+		Run: func(ctx context.Context, item string) {
 			started <- item
 			if item == "v1" {
 				<-releaseFirst
 			}
 		},
-	)
+		Label:    "test stream",
+		Interval: 10 * time.Millisecond,
+	})
 
 	first := <-started
 	if first != "v1" {
