@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // NormalizeSet trims every entry, drops blanks and duplicates, and returns

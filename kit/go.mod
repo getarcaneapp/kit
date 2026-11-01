@@ -1,4 +1,4 @@
-module go.getarcane.app/kit
+module kit.getarcane.app
 
 go 1.27
 

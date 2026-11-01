@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // ErrInvalidPath indicates that a logical workspace path is malformed.

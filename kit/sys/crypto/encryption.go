@@ -15,14 +15,14 @@ import (
 	"strings"
 	"sync/atomic"
 
-	atomicwriter "go.getarcane.app/acfs/atomic"
+	atomicwriter "kit.getarcane.app/fs/atomic"
 )
 
 const (
 	// KeySize is the AES-256 key size used by Encryptor.
 	KeySize = 32
 
-	keyDerivationContext = "go.getarcane.app/sys/crypto aes-gcm key"
+	keyDerivationContext = "kit.getarcane.app/sys/crypto aes-gcm key"
 )
 
 var (

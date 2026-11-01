@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 )
 
 // DefaultDomain is the canonical Docker Hub registry domain.
