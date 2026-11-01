@@ -4,7 +4,7 @@
 
 Docker run command to Docker Compose conversion for Go applications.
 
-<a href="https://pkg.go.dev/go.getarcane.app/docker/convert"><img src="https://pkg.go.dev/badge/go.getarcane.app/docker/convert.svg" alt="Go Reference"></a>
+<a href="https://pkg.go.dev/kit.getarcane.app/docker/convert"><img src="https://pkg.go.dev/badge/kit.getarcane.app/docker/convert.svg" alt="Go Reference"></a>
 <a href="https://github.com/getarcaneapp/docker/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License"></a>
 
 </div>
@@ -45,7 +45,7 @@ reported as warnings.
 ## Getting started
 
 ```sh
-go get go.getarcane.app/docker/convert@latest
+go get kit.getarcane.app/docker/convert@latest
 ```
 
 ```go
@@ -55,8 +55,8 @@ import (
 	"fmt"
 	"log"
 
-	"go.getarcane.app/docker/convert"
-	converttypes "go.getarcane.app/docker/convert/types"
+	"kit.getarcane.app/docker/convert"
+	converttypes "kit.getarcane.app/docker/convert/types"
 )
 
 func main() {

@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"go.getarcane.app/docker/convert"
-	converttypes "go.getarcane.app/docker/convert/types"
+	"kit.getarcane.app/docker/convert"
+	converttypes "kit.getarcane.app/docker/convert/types"
 )
 
 func buildWithFlag(t *testing.T, name, value string) (*converttypes.Document, error) {

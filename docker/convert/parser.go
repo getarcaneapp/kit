@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/mattn/go-shellwords"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/docker/convert/types"
+	"kit.getarcane.app/docker/convert/types"
 )
 
 var valueFlags = map[string]string{

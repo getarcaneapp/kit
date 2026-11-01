@@ -6,9 +6,9 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	compose "github.com/compose-spec/compose-go/v2/types"
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/docker/convert/types"
+	"kit.getarcane.app/docker/convert/types"
 )
 
 func Convert(input string, opts types.Options) (*types.Result, error) {

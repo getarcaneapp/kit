@@ -11,10 +11,10 @@ import (
 	"github.com/compose-spec/compose-go/v2/format"
 	compose "github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/go-units"
-	kit "go.getarcane.app/kit/pkg"
 	"go.yaml.in/yaml/v4"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/docker/convert/types"
+	"kit.getarcane.app/docker/convert/types"
 )
 
 var serviceNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
