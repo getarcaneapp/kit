@@ -22,18 +22,20 @@ func (l defaultRegistryTagLister) ListTags(ctx context.Context, imageRef string)
 	if err != nil {
 		return nil, err
 	}
-	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
+	// With no usable credential this is the zero AuthConfig, which registry treats as anonymous.
+	authConfig, _, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
 	if err != nil {
 		return nil, fmt.Errorf("registry auth: %w", err)
 	}
-	var credential *authn.AuthConfig
-	if ok {
-		credential = &authn.AuthConfig{
+	return registry.FetchTags(ctx, registry.Request{
+		Credential: &authn.AuthConfig{
 			Username:      authConfig.Username,
 			Password:      authConfig.Password,
 			IdentityToken: authConfig.IdentityToken,
 			RegistryToken: authConfig.RegistryToken,
-		}
-	}
-	return registry.FetchTags(ctx, parsed.RegistryHost, parsed.Repository, credential, l.httpClient)
+		},
+		HTTPClient: l.httpClient,
+		Host:       parsed.RegistryHost,
+		Repository: parsed.Repository,
+	})
 }

@@ -3,6 +3,8 @@ package updater
 import (
 	"strings"
 
+	kit "go.getarcane.app/kit/pkg"
+
 	"go.getarcane.app/updater/labels"
 	"go.getarcane.app/updater/types"
 )
@@ -21,7 +23,8 @@ type LabelPolicy struct {
 }
 
 // DefaultLabelPolicy returns the Arcane-compatible label behavior New uses for
-// any field a caller leaves nil.
+// any field a caller leaves nil. It sets no UnmanagedReasonFunc, so by default
+// no container is reported as managed by another tool.
 func DefaultLabelPolicy() LabelPolicy {
 	return LabelPolicy{
 		TagPolicyFunc: func(l map[string]string) types.Policy {
@@ -37,6 +40,21 @@ func DefaultLabelPolicy() LabelPolicy {
 		IsServerFunc:           labels.IsArcaneServerContainer,
 		IsSwarmTaskFunc:        labels.IsSwarmTask,
 		StopSignalFunc:         labels.StopSignal,
+	}
+}
+
+// Merge returns p with every non-nil func from o laid over it. Neither p nor o is changed,
+// so DefaultLabelPolicy().Merge(custom) overrides only the behaviors custom sets.
+func (p LabelPolicy) Merge(o LabelPolicy) LabelPolicy {
+	return LabelPolicy{
+		TagPolicyFunc:          kit.Ternary(o.TagPolicyFunc == nil, p.TagPolicyFunc, o.TagPolicyFunc),
+		IsUpdateDisabledFunc:   kit.Ternary(o.IsUpdateDisabledFunc == nil, p.IsUpdateDisabledFunc, o.IsUpdateDisabledFunc),
+		IsSelfUpdateTargetFunc: kit.Ternary(o.IsSelfUpdateTargetFunc == nil, p.IsSelfUpdateTargetFunc, o.IsSelfUpdateTargetFunc),
+		IsAgentFunc:            kit.Ternary(o.IsAgentFunc == nil, p.IsAgentFunc, o.IsAgentFunc),
+		IsServerFunc:           kit.Ternary(o.IsServerFunc == nil, p.IsServerFunc, o.IsServerFunc),
+		IsSwarmTaskFunc:        kit.Ternary(o.IsSwarmTaskFunc == nil, p.IsSwarmTaskFunc, o.IsSwarmTaskFunc),
+		StopSignalFunc:         kit.Ternary(o.StopSignalFunc == nil, p.StopSignalFunc, o.StopSignalFunc),
+		UnmanagedReasonFunc:    kit.Ternary(o.UnmanagedReasonFunc == nil, p.UnmanagedReasonFunc, o.UnmanagedReasonFunc),
 	}
 }
 

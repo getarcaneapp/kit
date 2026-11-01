@@ -27,13 +27,20 @@ type restartScan struct {
 	containers       []deps.ContainerWithDeps
 }
 
-// RestartContainersUsingOldImages restarts running containers matching old image IDs or refs, plus
-// their dependents. A dependency cycle falls back to discovery order.
-func (s *Service) RestartContainersUsingOldImages(ctx context.Context, oldIDToNewRef, oldRefToNewRef map[string]string) ([]ResourceResult, error) {
-	return s.restartContainersUsingOldImages(ctx, oldIDToNewRef, oldRefToNewRef, enforceSettingsExclusions)
+// RestartTargets selects the running containers RestartContainersUsingOldImages restarts.
+type RestartTargets struct {
+	// ByOldID maps a replaced image ID to the ref its containers move to.
+	ByOldID map[string]string
+	// ByOldRef maps a replaced image ref to the ref its containers move to.
+	ByOldRef map[string]string
+	// IgnoreSettingsExclusions restarts matching containers despite a settings exclusion or updater
+	// opt-out label, as Options.IgnoreSettingsExclusions does for a run.
+	IgnoreSettingsExclusions bool
 }
 
-func (s *Service) restartContainersUsingOldImages(ctx context.Context, oldIDToNewRef, oldRefToNewRef map[string]string, exclusions exclusionPolicy) ([]ResourceResult, error) {
+// RestartContainersUsingOldImages restarts running containers matching targets' old image IDs or refs,
+// plus their dependents. A dependency cycle falls back to discovery order.
+func (s *Service) RestartContainersUsingOldImages(ctx context.Context, targets RestartTargets) ([]ResourceResult, error) {
 	dockerClient, err := s.dockerClient(ctx)
 	if err != nil {
 		return nil, err
@@ -48,7 +55,7 @@ func (s *Service) restartContainersUsingOldImages(ctx context.Context, oldIDToNe
 	}
 	proxy := dockerProxyContainerName(dockerClient.DaemonHost())
 
-	updatedNorm := refs.NormalizeImageUpdateRefMapKeys(oldRefToNewRef)
+	updatedNorm := refs.NormalizeImageUpdateRefMapKeys(targets.ByOldRef)
 	targetImageIDs := digestcheck.NewRefIDCache(digestcheck.NewChecker(dockerClient, nil))
 	policy := s.config.LabelPolicy
 	plansByName, markedForRestart := map[string]*restartPlan{}, map[string]bool{}
@@ -56,7 +63,7 @@ func (s *Service) restartContainersUsingOldImages(ctx context.Context, oldIDToNe
 	for _, summary := range listResult.Items {
 		optedOut := isExcluded(excluded, summary.ID, summary.Names...) || policy.IsUpdateDisabled(summary.Labels)
 		name := containerSummaryName(summary)
-		if (proxy != "" && isExcluded(map[string]bool{proxy: true}, summary.ID, summary.Names...)) || (optedOut && exclusions == enforceSettingsExclusions) ||
+		if (proxy != "" && isExcluded(map[string]bool{proxy: true}, summary.ID, summary.Names...)) || (optedOut && !targets.IgnoreSettingsExclusions) ||
 			policy.UnmanagedReason(summary.Labels) != "" ||
 			(policy.IsSwarmTask(summary.Labels) && !policy.IsSelfUpdateTarget(summary.Labels)) {
 			continue
@@ -64,11 +71,11 @@ func (s *Service) restartContainersUsingOldImages(ctx context.Context, oldIDToNe
 
 		// Inspect only when the summary alone cannot settle the match.
 		var inspected *container.InspectResponse
-		newRef, matchValue := match.ResolveContainerImageMatch(summary, nil, oldIDToNewRef, updatedNorm)
+		newRef, matchValue := match.ResolveContainerImageMatch(summary, nil, targets.ByOldID, updatedNorm)
 		if newRef == "" && match.ShouldInspectUnmatchedContainerForImageMatch(summary) {
 			if inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, summary.ID, client.ContainerInspectOptions{}); inspectErr == nil {
 				inspected = &inspectResult.Container
-				newRef, matchValue = match.ResolveContainerImageMatch(summary, inspected, oldIDToNewRef, updatedNorm)
+				newRef, matchValue = match.ResolveContainerImageMatch(summary, inspected, targets.ByOldID, updatedNorm)
 			}
 		}
 		currentImageID := match.CurrentContainerImageID(summary, inspected)

@@ -119,7 +119,13 @@ func TestFetchDigestUsesHeadWithTokenAuth(t *testing.T) {
 				}
 				return manifestResponse(r, "{}", testDigest)
 			})
-			digest, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", tt.credential, client)
+			digest, err := FetchDigest(t.Context(), Request{
+				Credential: tt.credential,
+				HTTPClient: client,
+				Host:       "registry.test",
+				Repository: "team/app",
+				Tag:        "1.2.3",
+			})
 			if err != nil || digest != testDigest {
 				t.Fatalf("FetchDigest = %q, %v", digest, err)
 			}
@@ -133,7 +139,12 @@ func TestFetchDigestFallsBackToGetWithoutDigestHeader(t *testing.T) {
 	client := fakeRegistry(t, "https://auth.test/token", func(*http.Request) {}, func(r *http.Request) *http.Response {
 		return manifestResponse(r, body, "")
 	})
-	digest, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client)
+	digest, err := FetchDigest(t.Context(), Request{
+		HTTPClient: client,
+		Host:       "registry.test",
+		Repository: "team/app",
+		Tag:        "1.2.3",
+	})
 	if want := "sha256:" + hex.EncodeToString(sum[:]); err != nil || digest != want {
 		t.Fatalf("FetchDigest = %q, %v; want %q", digest, err, want)
 	}
@@ -146,7 +157,12 @@ func TestFetchDigestDoesNotFallBackOnRegistryError(t *testing.T) {
 		}
 		return tagsResponse(r, http.StatusNotFound, "")
 	})
-	if _, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client); err == nil {
+	if _, err := FetchDigest(t.Context(), Request{
+		HTTPClient: client,
+		Host:       "registry.test",
+		Repository: "team/app",
+		Tag:        "1.2.3",
+	}); err == nil {
 		t.Fatal("FetchDigest returned nil error")
 	}
 }
@@ -157,7 +173,12 @@ func TestFetchDigestRejectsNonHTTPSAuthRealm(t *testing.T) {
 	}, func(r *http.Request) *http.Response {
 		return manifestResponse(r, "{}", testDigest)
 	})
-	if _, err := FetchDigest(t.Context(), "registry.test", "team/app", "1.2.3", nil, client); err == nil {
+	if _, err := FetchDigest(t.Context(), Request{
+		HTTPClient: client,
+		Host:       "registry.test",
+		Repository: "team/app",
+		Tag:        "1.2.3",
+	}); err == nil {
 		t.Fatal("FetchDigest returned nil error")
 	}
 }
@@ -177,7 +198,13 @@ func TestFetchRegistryRateLimitUsesHead(t *testing.T) {
 			resp.Header.Set("RateLimit-Remaining", "90;w=21600")
 			return resp
 		})
-		limit, err := FetchRegistryRateLimit(t.Context(), "registry.test", "team/app", "1.2.3", credential, client)
+		limit, err := FetchRegistryRateLimit(t.Context(), Request{
+			Credential: credential,
+			HTTPClient: client,
+			Host:       "registry.test",
+			Repository: "team/app",
+			Tag:        "1.2.3",
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

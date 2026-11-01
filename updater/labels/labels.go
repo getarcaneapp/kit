@@ -43,18 +43,32 @@ func IsArcaneServerContainer(labels map[string]string) bool {
 	return (hasTruthyLabel(labels, LabelArcane) || hasTruthyLabel(labels, LabelArcaneLegacyServer)) && !IsArcaneAgentContainer(labels)
 }
 
+// RedeployCheck describes the container ShouldDisableArcaneServerRedeploy checks and the
+// lookup of the container the caller itself runs in.
+type RedeployCheck struct {
+	// CurrentErr is the error from looking up CurrentContainerID, if any.
+	CurrentErr error
+	// Labels are the checked container's labels.
+	Labels map[string]string
+	// ContainerID is the checked container's ID or ID prefix.
+	ContainerID string
+	// CurrentContainerID is the ID or ID prefix of the container the caller runs in.
+	CurrentContainerID string
+}
+
 // ShouldDisableArcaneServerRedeploy reports whether redeploy or edit should be
-// blocked because the container is the running Arcane server or agent.
-func ShouldDisableArcaneServerRedeploy(labels map[string]string, containerID, currentContainerID string, currentErr error) bool {
-	if !IsArcaneContainer(labels) {
+// blocked because the container is the running Arcane server or agent. An Arcane
+// container is blocked whenever the current container cannot be identified.
+func ShouldDisableArcaneServerRedeploy(check RedeployCheck) bool {
+	if !IsArcaneContainer(check.Labels) {
 		return false
 	}
 
-	current := strings.TrimSpace(currentContainerID)
-	if currentErr != nil || current == "" {
+	current := strings.TrimSpace(check.CurrentContainerID)
+	if check.CurrentErr != nil || current == "" {
 		return true
 	}
-	containerID = strings.TrimSpace(containerID)
+	containerID := strings.TrimSpace(check.ContainerID)
 	return containerID != "" && (strings.HasPrefix(containerID, current) || strings.HasPrefix(current, containerID))
 }
 

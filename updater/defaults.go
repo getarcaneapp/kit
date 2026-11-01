@@ -155,18 +155,21 @@ func (r defaultRegistryDigestResolver) ImageDigest(ctx context.Context, imageRef
 	if err != nil {
 		return "", err
 	}
-	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
+	// With no usable credential this is the zero AuthConfig, which registry treats as anonymous.
+	authConfig, _, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
 	if err != nil {
 		return "", fmt.Errorf("registry auth: %w", err)
 	}
-	var credential *authn.AuthConfig
-	if ok {
-		credential = &authn.AuthConfig{
+	return registry.FetchDigest(ctx, registry.Request{
+		Credential: &authn.AuthConfig{
 			Username:      authConfig.Username,
 			Password:      authConfig.Password,
 			IdentityToken: authConfig.IdentityToken,
 			RegistryToken: authConfig.RegistryToken,
-		}
-	}
-	return registry.FetchDigest(ctx, parsed.RegistryHost, parsed.Repository, parsed.Tag, credential, r.httpClient)
+		},
+		HTTPClient: r.httpClient,
+		Host:       parsed.RegistryHost,
+		Repository: parsed.Repository,
+		Tag:        parsed.Tag,
+	})
 }

@@ -33,8 +33,12 @@ func Normalize(value any) error {
 	return normalizeValue(v, p, make(map[any]bool))
 }
 
+// TextOptions selects the normalizations Text applies. The zero value returns
+// the input unchanged.
 type TextOptions struct {
+	// Trim removes leading and trailing whitespace.
 	Trim bool
+	// NFC converts the text to Unicode Normalization Form C.
 	NFC bool
 }
 

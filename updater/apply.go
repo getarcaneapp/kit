@@ -98,7 +98,11 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 	// the pull; container-scoped and tag records go through applyTargetedRecords, one unit at a time.
 	var restarted []ResourceResult
 	if len(oldIDToNewRef) > 0 || len(oldRefToNewRef) > 0 {
-		restarted, err = s.restartContainersUsingOldImages(ctx, oldIDToNewRef, oldRefToNewRef, exclusionPolicy(!opts.IgnoreSettingsExclusions))
+		restarted, err = s.RestartContainersUsingOldImages(ctx, RestartTargets{
+			ByOldID:                  oldIDToNewRef,
+			ByOldRef:                 oldRefToNewRef,
+			IgnoreSettingsExclusions: opts.IgnoreSettingsExclusions,
+		})
 		for _, item := range restarted {
 			s.appendRecordedResult(ctx, out, item)
 		}

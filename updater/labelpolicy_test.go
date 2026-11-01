@@ -66,3 +66,23 @@ func TestNewFillsLabelPolicyPerField(t *testing.T) {
 		t.Fatalf("StopSignalFunc was not filled in from the defaults: StopSignal() = %q", got)
 	}
 }
+
+func TestLabelPolicyMergeOverridesOnlySetFuncs(t *testing.T) {
+	merged := DefaultLabelPolicy().Merge(LabelPolicy{
+		IsUpdateDisabledFunc: func(map[string]string) bool { return true },
+		UnmanagedReasonFunc:  func(map[string]string) string { return "managed elsewhere" },
+	})
+
+	if !merged.IsUpdateDisabled(nil) {
+		t.Fatal("override IsUpdateDisabledFunc was not used")
+	}
+	if got := merged.UnmanagedReason(nil); got != "managed elsewhere" {
+		t.Fatalf("UnmanagedReason() = %q, want override", got)
+	}
+	if !merged.IsSelfUpdateTarget(map[string]string{labels.LabelArcane: "true"}) {
+		t.Fatal("unset IsSelfUpdateTargetFunc did not keep the default")
+	}
+	if got := DefaultLabelPolicy().Merge(LabelPolicy{}).UnmanagedReason(nil); got != "" {
+		t.Fatalf("default UnmanagedReason() = %q, want empty", got)
+	}
+}

@@ -37,6 +37,21 @@ type RateLimitInfo struct {
 	Source        string `json:"source,omitempty"`
 }
 
+// Request identifies the registry repository, and for digest and rate-limit lookups the tag, that a
+// Fetch function queries.
+type Request struct {
+	// Credential authenticates the request; nil or empty is anonymous.
+	Credential *authn.AuthConfig
+	// HTTPClient supplies the base transport; nil uses http.DefaultTransport.
+	HTTPClient *http.Client
+	// Host is the registry host; "docker.io" resolves to Docker Hub's registry.
+	Host string
+	// Repository is the repository path within Host.
+	Repository string
+	// Tag is the image tag. FetchTags ignores it.
+	Tag string
+}
+
 // IsFallbackEligibleDaemonError reports whether a daemon registry error should use direct HTTP fallback.
 func IsFallbackEligibleDaemonError(err error) bool {
 	if err == nil {
@@ -66,25 +81,25 @@ func IsFallbackEligibleDaemonError(err error) bool {
 }
 
 // FetchRegistryRateLimit fetches registry pull rate-limit information.
-func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag string, credential *authn.AuthConfig, httpClient *http.Client) (*RateLimitInfo, error) {
+func FetchRegistryRateLimit(ctx context.Context, req Request) (*RateLimitInfo, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	repo, err := parseRepository(registryHost, repository)
+	repo, err := parseRepository(req.Host, req.Repository)
 	if err != nil {
 		return nil, err
 	}
-	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(tag))
+	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(req.Tag))
 	if err != nil {
 		return nil, fmt.Errorf("parse image tag: %w", err)
 	}
-	authorized, err := transport.NewWithContext(requestCtx, repo.Registry, authenticator(credential), baseTransport(httpClient), []string{repo.Scope(transport.PullScope)})
+	authorized, err := transport.NewWithContext(requestCtx, repo.Registry, authenticator(req.Credential), baseTransport(req.HTTPClient), []string{repo.Scope(transport.PullScope)})
 	if err != nil {
 		return nil, fmt.Errorf("authorize registry: %w", err)
 	}
 
 	// HEAD reads the rate-limit headers without counting as a pull.
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodHead, (&url.URL{
+	headReq, err := http.NewRequestWithContext(requestCtx, http.MethodHead, (&url.URL{
 		Scheme: repo.Scheme(),
 		Host:   repo.RegistryStr(),
 		Path:   "/v2/" + repo.RepositoryStr() + "/manifests/" + ref.TagStr(),
@@ -92,13 +107,13 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", strings.Join([]string{
+	headReq.Header.Set("Accept", strings.Join([]string{
 		string(types.OCIImageIndex),
 		string(types.OCIManifestSchema1),
 		string(types.DockerManifestList),
 		string(types.DockerManifestSchema2),
 	}, ", "))
-	resp, err := (&http.Client{Transport: authorized}).Do(req)
+	resp, err := (&http.Client{Transport: authorized}).Do(headReq)
 	if err != nil {
 		return nil, err
 	}
@@ -124,19 +139,19 @@ func FetchRegistryRateLimit(ctx context.Context, registryHost, repository, tag s
 }
 
 // FetchDigest fetches the manifest digest for a registry image reference.
-func FetchDigest(ctx context.Context, registryHost, repository, tag string, credential *authn.AuthConfig, httpClient *http.Client) (string, error) {
+func FetchDigest(ctx context.Context, req Request) (string, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	repo, err := parseRepository(registryHost, repository)
+	repo, err := parseRepository(req.Host, req.Repository)
 	if err != nil {
 		return "", err
 	}
-	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(tag))
+	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(req.Tag))
 	if err != nil {
 		return "", fmt.Errorf("parse image tag: %w", err)
 	}
-	options := []remote.Option{remote.WithContext(requestCtx), remote.WithAuth(authenticator(credential)), remote.WithTransport(baseTransport(httpClient))}
+	options := []remote.Option{remote.WithContext(requestCtx), remote.WithAuth(authenticator(req.Credential)), remote.WithTransport(baseTransport(req.HTTPClient))}
 
 	// HEAD does not count as a pull. Fall back to GET only when the registry
 	// answered without a digest header, since GET computes it from the manifest.

@@ -26,8 +26,8 @@ type Config struct {
 	// ProjectUpdater updates Docker Compose services. Defaults to
 	// NewDockerComposeProjectUpdater(DockerClientProvider), which runs the docker compose CLI.
 	ProjectUpdater ProjectUpdater
-	// LabelPolicy decides which containers the updater may touch. Each nil func
-	// is filled in from DefaultLabelPolicy.
+	// LabelPolicy decides which containers the updater may touch. New merges it over
+	// DefaultLabelPolicy, so each nil func keeps the default; UnmanagedReasonFunc has none.
 	LabelPolicy LabelPolicy
 
 	// RunRecorder is optional; when nil, per-resource results are not recorded.

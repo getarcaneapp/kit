@@ -90,7 +90,12 @@ func TestShouldDisableArcaneServerRedeploy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ShouldDisableArcaneServerRedeploy(tt.labels, tt.containerID, tt.currentContainerID, tt.currentErr)
+			got := ShouldDisableArcaneServerRedeploy(RedeployCheck{
+				CurrentErr:         tt.currentErr,
+				Labels:             tt.labels,
+				ContainerID:        tt.containerID,
+				CurrentContainerID: tt.currentContainerID,
+			})
 			if got != tt.want {
 				t.Fatalf("ShouldDisableArcaneServerRedeploy() = %v, want %v", got, tt.want)
 			}

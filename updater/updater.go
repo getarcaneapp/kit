@@ -39,34 +39,32 @@ type restartPlan struct {
 }
 
 // New constructs an updater service; the zero Config is valid and uses the local Docker environment.
-// Nil ports get their Docker-backed defaults and nil LabelPolicy funcs come from DefaultLabelPolicy.
+// Nil ports get their Docker-backed defaults and Config.LabelPolicy is merged over DefaultLabelPolicy.
 func New(config Config) (*Service, error) {
 	if config.OperationTimeout < 0 {
 		return nil, &ConfigError{Field: "OperationTimeout", Reason: errors.New("must not be negative")}
 	}
 	owned := kit.Ternary(config.DockerClientProvider == nil, NewDockerClientProvider(), nil)
-	defaults := DefaultLabelPolicy()
-	// keep: by-value copy of the caller's Config; a full 17-field literal reads worse
-	config.DockerClientProvider = cmp.Or[DockerClientProvider](config.DockerClientProvider, owned)
-	config.ImagePuller = cmp.Or(config.ImagePuller, NewImagePuller(config.DockerClientProvider))
-	config.PendingStore = cmp.Or(config.PendingStore, NewMemoryPendingStore())
-	config.RegistryDigestResolver = cmp.Or(config.RegistryDigestResolver, NewRegistryDigestResolver())
-	config.RegistryTagLister = cmp.Or(config.RegistryTagLister, NewRegistryTagLister())
-	config.ProjectUpdater = cmp.Or(config.ProjectUpdater, NewDockerComposeProjectUpdater(config.DockerClientProvider))
-	// Fill every nil func in the policy from DefaultLabelPolicy, field by field, so overriding one behavior
-	// keeps the defaults for the rest.
-	config.LabelPolicy = LabelPolicy{
-		TagPolicyFunc:          kit.Ternary(config.LabelPolicy.TagPolicyFunc == nil, defaults.TagPolicyFunc, config.LabelPolicy.TagPolicyFunc),
-		IsUpdateDisabledFunc:   kit.Ternary(config.LabelPolicy.IsUpdateDisabledFunc == nil, defaults.IsUpdateDisabledFunc, config.LabelPolicy.IsUpdateDisabledFunc),
-		IsSelfUpdateTargetFunc: kit.Ternary(config.LabelPolicy.IsSelfUpdateTargetFunc == nil, defaults.IsSelfUpdateTargetFunc, config.LabelPolicy.IsSelfUpdateTargetFunc),
-		IsAgentFunc:            kit.Ternary(config.LabelPolicy.IsAgentFunc == nil, defaults.IsAgentFunc, config.LabelPolicy.IsAgentFunc),
-		IsServerFunc:           kit.Ternary(config.LabelPolicy.IsServerFunc == nil, defaults.IsServerFunc, config.LabelPolicy.IsServerFunc),
-		IsSwarmTaskFunc:        kit.Ternary(config.LabelPolicy.IsSwarmTaskFunc == nil, defaults.IsSwarmTaskFunc, config.LabelPolicy.IsSwarmTaskFunc),
-		StopSignalFunc:         kit.Ternary(config.LabelPolicy.StopSignalFunc == nil, defaults.StopSignalFunc, config.LabelPolicy.StopSignalFunc),
-		UnmanagedReasonFunc:    config.LabelPolicy.UnmanagedReasonFunc,
-	}
+	provider := cmp.Or[DockerClientProvider](config.DockerClientProvider, owned)
 	service := &Service{
-		config:            config,
+		config: Config{
+			DockerClientProvider:   provider,
+			ImagePuller:            cmp.Or(config.ImagePuller, NewImagePuller(provider)),
+			PendingStore:           cmp.Or(config.PendingStore, NewMemoryPendingStore()),
+			RegistryDigestResolver: cmp.Or(config.RegistryDigestResolver, NewRegistryDigestResolver()),
+			RegistryTagLister:      cmp.Or(config.RegistryTagLister, NewRegistryTagLister()),
+			ProjectUpdater:         cmp.Or(config.ProjectUpdater, NewDockerComposeProjectUpdater(provider)),
+			LabelPolicy:            DefaultLabelPolicy().Merge(config.LabelPolicy),
+			RunRecorder:            config.RunRecorder,
+			Settings:               config.Settings,
+			SelfUpdater:            config.SelfUpdater,
+			Notifier:               config.Notifier,
+			EventRecorder:          config.EventRecorder,
+			UsedImageCollector:     config.UsedImageCollector,
+			Logger:                 config.Logger,
+			SelfContainerID:        config.SelfContainerID,
+			OperationTimeout:       config.OperationTimeout,
+		},
 		logger:            cmp.Or(config.Logger, slog.Default()),
 		ownedDockerClient: owned,
 	}

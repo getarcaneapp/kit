@@ -53,7 +53,12 @@ func TestFetchTagsPaginationAndAuthentication(t *testing.T) {
 		}
 		return resp, nil
 	})}
-	tags, err := FetchTags(t.Context(), "registry.test", "team/app", &authn.AuthConfig{Username: "user", Password: "password"}, client)
+	tags, err := FetchTags(t.Context(), Request{
+		Credential: &authn.AuthConfig{Username: "user", Password: "password"},
+		HTTPClient: client,
+		Host:       "registry.test",
+		Repository: "team/app",
+	})
 	if err != nil || !reflect.DeepEqual(tags, []string{"1.0.0", "1.0.1", "1.1.0"}) {
 		t.Fatalf("FetchTags = %v, %v", tags, err)
 	}
@@ -88,7 +93,12 @@ func TestFetchTagsRequestsChallengeScope(t *testing.T) {
 		resp.Header.Set("WWW-Authenticate", challenge)
 		return resp, nil
 	})}
-	tags, err := FetchTags(t.Context(), "registry.test", "team/app", &authn.AuthConfig{Username: "user", Password: "password"}, client)
+	tags, err := FetchTags(t.Context(), Request{
+		Credential: &authn.AuthConfig{Username: "user", Password: "password"},
+		HTTPClient: client,
+		Host:       "registry.test",
+		Repository: "team/app",
+	})
 	if err != nil || !reflect.DeepEqual(tags, []string{"1.1.1-1"}) {
 		t.Fatalf("FetchTags = %v, %v", tags, err)
 	}
@@ -120,7 +130,11 @@ func TestFetchTagsFailures(t *testing.T) {
 				}
 				return resp, nil
 			})}
-			tags, err := FetchTags(t.Context(), "registry.test", "team/app", nil, client)
+			tags, err := FetchTags(t.Context(), Request{
+				HTTPClient: client,
+				Host:       "registry.test",
+				Repository: "team/app",
+			})
 			if err == nil || tags != nil {
 				t.Fatalf("expected failure without partial tags, got %v, %v", tags, err)
 			}
@@ -142,7 +156,11 @@ func TestFetchTagsDockerHubAndEmpty(t *testing.T) {
 			}
 			return tagsResponse(r, http.StatusOK, body), nil
 		})}
-		tags, err := FetchTags(t.Context(), "docker.io", "library/alpine", nil, client)
+		tags, err := FetchTags(t.Context(), Request{
+			HTTPClient: client,
+			Host:       "docker.io",
+			Repository: "library/alpine",
+		})
 		if err != nil || len(tags) != 0 {
 			t.Fatalf("expected empty list: %v, %v", tags, err)
 		}
@@ -161,7 +179,11 @@ func TestFetchTagsDiscardsPartialListing(t *testing.T) {
 		resp.Header.Set("Link", `<?last=1.0.0&n=1000>; rel="next"`)
 		return resp, nil
 	})}
-	tags, err := FetchTags(t.Context(), "registry.test", "team/app", nil, client)
+	tags, err := FetchTags(t.Context(), Request{
+		HTTPClient: client,
+		Host:       "registry.test",
+		Repository: "team/app",
+	})
 	if err == nil || tags != nil {
 		t.Fatalf("partial listing escaped: %v, %v", tags, err)
 	}
@@ -203,7 +225,11 @@ func TestFetchTagsCancellation(t *testing.T) {
 				}
 				return resp, nil
 			})}
-			tags, err := FetchTags(ctx, "registry.test", "team/app", nil, client)
+			tags, err := FetchTags(ctx, Request{
+				HTTPClient: client,
+				Host:       "registry.test",
+				Repository: "team/app",
+			})
 			if !errors.Is(err, tt.want) || tags != nil {
 				t.Fatalf("tags = %v, err = %v, want %v", tags, err, tt.want)
 			}
@@ -237,7 +263,11 @@ func TestFetchTagsHonorsCallerDeadline(t *testing.T) {
 				}
 				return tagsResponse(r, http.StatusOK, `{"tags":["1.0.0"]}`), nil
 			})}
-			if _, err := FetchTags(ctx, "registry.test", "team/app", nil, client); err != nil {
+			if _, err := FetchTags(ctx, Request{
+				HTTPClient: client,
+				Host:       "registry.test",
+				Repository: "team/app",
+			}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -261,7 +291,12 @@ func TestFetchTagsFollowsRedirectsWithoutForwardingCredentials(t *testing.T) {
 			resp.Header.Set("Location", "https://mirror.test/v2/mirror/team/app/tags/list")
 			return resp, nil
 		})}
-		tags, err := FetchTags(t.Context(), "registry.test", "team/app", credential, client)
+		tags, err := FetchTags(t.Context(), Request{
+			Credential: credential,
+			HTTPClient: client,
+			Host:       "registry.test",
+			Repository: "team/app",
+		})
 		if err != nil || !reflect.DeepEqual(tags, []string{"1.0.0", "1.1.0"}) {
 			t.Fatalf("credential=%v: FetchTags = %v, %v", credential != nil, tags, err)
 		}
