@@ -1,3 +1,14 @@
+## sys/cgroup/v0.2.7
+
+### Bug fixes
+
+* realign structs([58ba675](https://github.com/getarcaneapp/kit/commit/58ba675f6a8a1b6b2eb7338a5d8ff1050620248c) by @kmendell)
+* configure Cache with a CacheConfig literal([ac19458](https://github.com/getarcaneapp/kit/commit/ac194587d08306d2d058c1a51ccc6e8d9a36a0d2) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.2.6...sys/cgroup/v0.2.7
+
 ## sys/cgroup/v0.2.6
 
 ### Performance improvements
