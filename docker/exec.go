@@ -6,12 +6,33 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
 	kit "go.getarcane.app/kit/pkg"
 )
+
+// streamEndErrors are the typed errors that mark an ordinary end of a Docker
+// attach/log stream.
+var streamEndErrors = []error{
+	io.EOF,
+	net.ErrClosed,
+	context.Canceled,
+	syscall.EPIPE,
+	syscall.ECONNRESET,
+}
+
+// streamEndMessages match the same conditions once an error has crossed a
+// boundary that flattened it to text, such as the Docker API.
+var streamEndMessages = []string{
+	"use of closed network connection",
+	"context canceled",
+	"broken pipe",
+	"connection reset by peer",
+}
 
 // IsExpectedStreamEndError reports whether err is the ordinary way a Docker
 // attach/log stream ends rather than a real failure.
@@ -19,16 +40,15 @@ func IsExpectedStreamEndError(err error) bool {
 	if err == nil {
 		return false
 	}
-
-	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
+	if slices.ContainsFunc(streamEndErrors, func(target error) bool {
+		return errors.Is(err, target)
+	}) {
 		return true
 	}
-
-	errMsg := strings.ToLower(err.Error())
-	return strings.Contains(errMsg, "use of closed network connection") ||
-		strings.Contains(errMsg, "context canceled") ||
-		strings.Contains(errMsg, "broken pipe") ||
-		strings.Contains(errMsg, "connection reset by peer")
+	msg := strings.ToLower(err.Error())
+	return slices.ContainsFunc(streamEndMessages, func(part string) bool {
+		return strings.Contains(msg, part)
+	})
 }
 
 // StartStdCopy demultiplexes a Docker stream into stdout/stderr on a goroutine
@@ -49,11 +69,23 @@ func WaitStdCopy(done <-chan error) error {
 	return kit.Ternary(err == nil || IsExpectedStreamEndError(err), nil, err)
 }
 
-// ExecInContainer runs an exec in containerID, demultiplexing its output into
-// stdout and stderr, and returns the exec's exit code. A non-zero exit code is
-// not an error — callers decide how to report it.
-func ExecInContainer(ctx context.Context, dockerClient *client.Client, containerID string, opts client.ExecCreateOptions, stdout, stderr io.Writer) (int, error) {
-	execResp, err := dockerClient.ExecCreate(ctx, containerID, opts)
+// ExecRequest describes one exec run by ExecInContainer.
+type ExecRequest struct {
+	// Stdout receives the exec's demultiplexed standard output.
+	Stdout io.Writer
+	// Stderr receives the exec's demultiplexed standard error.
+	Stderr io.Writer
+	// ContainerID is the container the exec runs in.
+	ContainerID string
+	// Options configures the exec, e.g. its command and environment.
+	Options client.ExecCreateOptions
+}
+
+// ExecInContainer runs req in its container, demultiplexing output into
+// req.Stdout and req.Stderr, and returns the exec's exit code. A non-zero exit
+// code is not an error — callers decide how to report it.
+func ExecInContainer(ctx context.Context, dockerClient *client.Client, req ExecRequest) (int, error) {
+	execResp, err := dockerClient.ExecCreate(ctx, req.ContainerID, req.Options)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create exec: %w", err)
 	}
@@ -66,7 +98,7 @@ func ExecInContainer(ctx context.Context, dockerClient *client.Client, container
 	stopClose := context.AfterFunc(ctx, attachResp.Close)
 	defer stopClose()
 
-	copyErr := WaitStdCopy(StartStdCopy(attachResp.Reader, stdout, stderr))
+	copyErr := WaitStdCopy(StartStdCopy(attachResp.Reader, req.Stdout, req.Stderr))
 	if errErr := ctx.Err(); errErr != nil {
 		return 0, fmt.Errorf("failed to read exec output: %w", errErr)
 	}

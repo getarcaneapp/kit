@@ -74,7 +74,7 @@ func SelectDockerHostReachableNetworkMode(ctx context.Context, dockerClient *cli
 	fallback := SelectAutoNetworkMode(inspect)
 
 	parsed, err := url.Parse(strings.TrimSpace(dockerHost))
-	if err != nil || parsed.Hostname() == "" || dockerClient == nil || inspect == nil || len(kit.FromPtr(inspect.NetworkSettings).Networks) == 0 {
+	if err != nil || parsed.Hostname() == "" || inspect == nil || len(kit.FromPtr(inspect.NetworkSettings).Networks) == 0 {
 		return fallback
 	}
 

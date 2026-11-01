@@ -19,7 +19,7 @@ func TestStreamContainerLogsNonTTYFollowDemultiplexesStdoutAndStderr(t *testing.
 
 	logsChan := make(chan string, 4)
 
-	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, true, false)
+	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, LogOptions{Follow: true})
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, []string{"stdout line", "[STDERR] stderr line"}, drainLogLines(logsChan))
@@ -28,7 +28,7 @@ func TestStreamContainerLogsNonTTYFollowDemultiplexesStdoutAndStderr(t *testing.
 func TestStreamContainerLogsTTYFollowStreamsRawOutput(t *testing.T) {
 	logsChan := make(chan string, 4)
 
-	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader("first line\nsecond line")), logsChan, true, true)
+	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader("first line\nsecond line")), logsChan, LogOptions{Follow: true, TTY: true})
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"first line", "second line"}, drainLogLines(logsChan))
@@ -41,7 +41,7 @@ func TestStreamContainerLogsNonTTYSnapshotDemultiplexesStdoutAndStderr(t *testin
 
 	logsChan := make(chan string, 4)
 
-	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, false, false)
+	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, LogOptions{})
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"stdout snapshot", "[STDERR] stderr snapshot"}, drainLogLines(logsChan))
@@ -50,7 +50,7 @@ func TestStreamContainerLogsNonTTYSnapshotDemultiplexesStdoutAndStderr(t *testin
 func TestStreamContainerLogsTTYSnapshotStreamsRawOutput(t *testing.T) {
 	logsChan := make(chan string, 4)
 
-	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader("snapshot line\ntrailing line")), logsChan, false, true)
+	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader("snapshot line\ntrailing line")), logsChan, LogOptions{TTY: true})
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"snapshot line", "trailing line"}, drainLogLines(logsChan))
@@ -60,7 +60,7 @@ func TestStreamContainerLogsTTYHandlesLongLinesAndPartialEOF(t *testing.T) {
 	longLine := strings.Repeat("a", 70*1024)
 	logsChan := make(chan string, 4)
 
-	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader(longLine+"\npartial tail")), logsChan, true, true)
+	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader(longLine+"\npartial tail")), logsChan, LogOptions{Follow: true, TTY: true})
 	require.NoError(t, err)
 
 	require.Equal(t, []string{longLine, "partial tail"}, drainLogLines(logsChan))
@@ -73,8 +73,7 @@ func TestStreamContainerLogsTTYPythonLikeFollowDoesNotReturnEmptyLogs(t *testing
 		t.Context(),
 		io.NopCloser(strings.NewReader("2026-03-22 10:15:00 - INFO - Starting miner\n2026-03-22 10:15:01 - INFO - Connected")),
 		logsChan,
-		true,
-		true,
+		LogOptions{Follow: true, TTY: true},
 	)
 	require.NoError(t, err)
 

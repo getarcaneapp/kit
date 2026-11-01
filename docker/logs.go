@@ -15,13 +15,21 @@ import (
 	kit "go.getarcane.app/kit/pkg"
 )
 
+// LogOptions describes the log stream StreamContainerLogs reads.
+type LogOptions struct {
+	// Follow streams logs until the reader ends instead of reading a snapshot.
+	Follow bool
+	// TTY marks a raw TTY stream; otherwise the stream is stdout/stderr multiplexed.
+	TTY bool
+}
+
 // StreamContainerLogs streams Docker container logs, handling TTY raw streams
 // and non-TTY multiplexed stdout/stderr streams.
-func StreamContainerLogs(ctx context.Context, logs io.ReadCloser, logsChan chan<- string, follow, isTTY bool) error {
-	if isTTY {
+func StreamContainerLogs(ctx context.Context, logs io.ReadCloser, logsChan chan<- string, opts LogOptions) error {
+	if opts.TTY {
 		return ReadLogLines(ctx, logs, logsChan, "")
 	}
-	if follow {
+	if opts.Follow {
 		return StreamMultiplexedLogs(ctx, logs, logsChan)
 	}
 	return ReadAllLogs(ctx, logs, logsChan)

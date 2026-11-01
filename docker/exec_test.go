@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,8 @@ func TestIsExpectedStreamEndError(t *testing.T) {
 		{name: "closed network connection", err: errors.New("read tcp 127.0.0.1:1234->127.0.0.1:5678: use of closed network connection"), want: true},
 		{name: "broken pipe", err: errors.New("write: broken pipe"), want: true},
 		{name: "connection reset by peer", err: errors.New("read: connection reset by peer"), want: true},
+		{name: "wrapped epipe", err: fmt.Errorf("write: %w", syscall.EPIPE), want: true},
+		{name: "wrapped econnreset", err: fmt.Errorf("read: %w", syscall.ECONNRESET), want: true},
 		{name: "unexpected", err: errors.New("some other error")},
 	}
 
