@@ -22,7 +22,7 @@ const (
 	// KeySize is the AES-256 key size used by Encryptor.
 	KeySize = 32
 
-	keyDerivationContext = "kit.getarcane.app/sys/crypto aes-gcm key"
+	keyDerivationContext = "go.getarcane.app/sys/crypto aes-gcm key"
 )
 
 var (

@@ -23,6 +23,16 @@ func TestParseKeyDerivesRawPassphrasesWithoutTruncating(t *testing.T) {
 	}
 }
 
+func TestParseKeyDerivesKnownAnswer(t *testing.T) {
+	key, err := ParseKey("arcane-dev-key")
+	if err != nil {
+		t.Fatalf("ParseKey returned error: %v", err)
+	}
+	if got, want := hex.EncodeToString(key), "6ddac35b24941c08f9ab1db710a18129ae91a1418b8f9afb9f8cd80131605467"; got != want {
+		t.Fatalf("ParseKey derived %s, want %s", got, want)
+	}
+}
+
 func TestParseKeyPrefersRawForHexLookalikePassphrase(t *testing.T) {
 	hexLookalike := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	key, err := ParseKey(hexLookalike)
