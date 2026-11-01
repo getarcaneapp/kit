@@ -1,3 +1,13 @@
+## docker/convert/v0.3.8
+
+### Bug fixes
+
+* drop unused ParseOptions and dedupe RenderWarnings([a098b4a](https://github.com/getarcaneapp/kit/commit/a098b4a461ce8789f5b12487d4c952c2be7e4070) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.3.7...docker/convert/v0.3.8
+
 ## docker/convert/v0.3.7
 
 ### Bug fixes
