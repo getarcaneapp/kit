@@ -1,3 +1,13 @@
+## kit/v0.5.1
+
+### Bug fixes
+
+* restore key derivation context([a5d3081](https://github.com/getarcaneapp/kit/commit/a5d30816c484f1a56b926e78ab2a290731fe7f25) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/kit/v0.5.0...kit/v0.5.1
+
 ## kit/v0.5.0
 
 ### New features
