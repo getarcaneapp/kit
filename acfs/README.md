@@ -5,7 +5,7 @@
 Root-confined filesystem operations for Arcane and other Go applications.
 
 <a href="https://github.com/getarcaneapp/acfs/actions/workflows/ci.yml"><img src="https://github.com/getarcaneapp/acfs/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-<a href="https://pkg.go.dev/go.getarcane.app/acfs"><img src="https://pkg.go.dev/badge/go.getarcane.app/acfs.svg" alt="Go Reference"></a>
+<a href="https://pkg.go.dev/kit.getarcane.app/acfs"><img src="https://pkg.go.dev/badge/kit.getarcane.app/acfs.svg" alt="Go Reference"></a>
 <a href="https://github.com/getarcaneapp/acfs/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License"></a>
 
 </div>
@@ -22,7 +22,7 @@ symlinks.
 ## Getting started
 
 ```sh
-go get go.getarcane.app/acfs@latest
+go get kit.getarcane.app/acfs@latest
 ```
 
 ```go

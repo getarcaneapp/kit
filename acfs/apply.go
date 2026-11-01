@@ -12,9 +12,9 @@ import (
 	"strings"
 	"syscall"
 
-	kitfs "go.getarcane.app/kit/pkg/fs"
+	kitfs "kit.getarcane.app/fs"
 
-	acfstypes "go.getarcane.app/acfs/types"
+	acfstypes "kit.getarcane.app/acfs/types"
 )
 
 const (

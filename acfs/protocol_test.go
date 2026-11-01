@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	acfstypes "go.getarcane.app/acfs/types"
+	acfstypes "kit.getarcane.app/acfs/types"
 )
 
 func TestStreamHeader(t *testing.T) {

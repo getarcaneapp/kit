@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"go.getarcane.app/acfs"
-	acfstypes "go.getarcane.app/acfs/types"
+	"kit.getarcane.app/acfs"
+	acfstypes "kit.getarcane.app/acfs/types"
 )
 
 var (

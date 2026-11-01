@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	kitfs "go.getarcane.app/kit/pkg/fs"
+	kitfs "kit.getarcane.app/fs"
 )
 
 // Rename moves sourceLogical onto targetLogical within a single workspace

@@ -3,7 +3,7 @@ package acfs
 import (
 	"errors"
 
-	kitfs "go.getarcane.app/kit/pkg/fs"
+	kitfs "kit.getarcane.app/fs"
 )
 
 var (

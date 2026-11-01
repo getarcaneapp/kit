@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"go.getarcane.app/acfs/internal/cli"
+	"kit.getarcane.app/acfs/internal/cli"
 )
 
 func main() {

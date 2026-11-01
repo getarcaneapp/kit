@@ -17,11 +17,11 @@ import (
 	"strings"
 	"syscall"
 
-	kit "go.getarcane.app/kit/pkg"
+	"kit.getarcane.app"
 
-	"go.getarcane.app/acfs"
-	"go.getarcane.app/acfs/internal/version"
-	acfstypes "go.getarcane.app/acfs/types"
+	"kit.getarcane.app/acfs"
+	"kit.getarcane.app/acfs/internal/version"
+	acfstypes "kit.getarcane.app/acfs/types"
 )
 
 const (

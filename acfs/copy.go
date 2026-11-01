@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	acfstypes "go.getarcane.app/acfs/types"
+	acfstypes "kit.getarcane.app/acfs/types"
 )
 
 const copyDirectoryMode = 0o755

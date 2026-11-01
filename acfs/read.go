@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 
-	kit "go.getarcane.app/kit/pkg"
-	kitfs "go.getarcane.app/kit/pkg/fs"
+	"kit.getarcane.app"
+	kitfs "kit.getarcane.app/fs"
 )
 
 type contextReadCloser struct {

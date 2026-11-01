@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"testing"
 
-	acfstypes "go.getarcane.app/acfs/types"
+	acfstypes "kit.getarcane.app/acfs/types"
 )
 
 func writeFixtureFile(t *testing.T, filename, contents string, mode os.FileMode) {

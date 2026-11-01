@@ -1,7 +1,7 @@
-module go.getarcane.app/acfs
+module kit.getarcane.app/acfs
 
 go 1.27
 
-replace go.getarcane.app/kit => ../
+replace kit.getarcane.app => ../kit
 
-require go.getarcane.app/kit v0.4.4
+require kit.getarcane.app v0.4.4

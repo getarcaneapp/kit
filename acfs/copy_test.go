@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	acfstypes "go.getarcane.app/acfs/types"
+	acfstypes "kit.getarcane.app/acfs/types"
 )
 
 func TestCopyDirSkipsSymlinksAndRecordsUncopyableEntries(t *testing.T) {
