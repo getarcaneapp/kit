@@ -170,10 +170,6 @@ func (b *Service) buildSolveOpt(ctx context.Context, req types.BuildRequest, pro
 			return exports, nil, nil
 		}
 
-		if b.dockerClientProvider == nil {
-			return nil, nil, &types.BuildDockerServiceUnavailableError{}
-		}
-
 		dockerClient, clientErr := b.dockerClientProvider.GetClient(ctx)
 		if clientErr != nil {
 			return nil, nil, fmt.Errorf("failed to connect to Docker: %w", clientErr)

@@ -37,10 +37,6 @@ func (p *depotBuildKitProvider) Name() string {
 }
 
 func (p *depotBuildKitProvider) NewSession(ctx context.Context, req types.BuildRequest) (*buildSession, error) {
-	if p.settings == nil {
-		return nil, &types.BuildSettingsProviderUnavailableError{}
-	}
-
 	settings := p.settings.BuildSettings()
 	projectID := strings.TrimSpace(settings.DepotProjectID)
 	token := strings.TrimSpace(settings.DepotToken)

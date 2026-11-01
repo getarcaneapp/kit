@@ -30,8 +30,15 @@ type Service struct {
 	providers            map[string]any
 }
 
-// NewService constructs a build service.
-func NewService(cfg Config) *Service {
+// NewService constructs a build service. SettingsProvider and DockerClientProvider
+// are required; RegistryAuthProvider and Logger are optional.
+func NewService(cfg Config) (*Service, error) {
+	if cfg.SettingsProvider == nil {
+		return nil, &types.BuildSettingsProviderUnavailableError{}
+	}
+	if cfg.DockerClientProvider == nil {
+		return nil, &types.BuildDockerServiceUnavailableError{}
+	}
 	return &Service{
 		settings:             cfg.SettingsProvider,
 		dockerClientProvider: cfg.DockerClientProvider,
@@ -40,23 +47,10 @@ func NewService(cfg Config) *Service {
 		providers: map[string]any{
 			"depot": &depotBuildKitProvider{settings: cfg.SettingsProvider},
 		},
-	}
-}
-
-// NewBuilder constructs a build service from the legacy positional dependencies.
-func NewBuilder(settings types.SettingsProvider, dockerClientProvider types.DockerClientProvider, registryAuthProvider types.RegistryAuthProvider) *Service {
-	return NewService(Config{
-		SettingsProvider:     settings,
-		DockerClientProvider: dockerClientProvider,
-		RegistryAuthProvider: registryAuthProvider,
-	})
+	}, nil
 }
 
 func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progressWriter io.Writer, _ string) (*types.BuildResult, error) {
-	if b.settings == nil {
-		return nil, &types.BuildSettingsProviderUnavailableError{}
-	}
-
 	if strings.TrimSpace(req.ContextDir) == "" {
 		return nil, &types.BuildContextDirRequiredError{}
 	}
@@ -94,10 +88,6 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 		}
 		if !requiresDirectBuildkitSession {
 			return b.buildWithDocker(buildCtx, req, progressWriter)
-		}
-
-		if b.dockerClientProvider == nil {
-			return nil, &types.BuildDockerServiceUnavailableError{}
 		}
 
 		dockerClient, clientErr := b.dockerClientProvider.GetClient(buildCtx)

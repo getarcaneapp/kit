@@ -115,7 +115,19 @@ func (testSettingsProvider) BuildSettings() types.BuildSettings {
 }
 
 func TestNewServiceReturnsBuildEngine(t *testing.T) {
-	service := NewService(Config{SettingsProvider: testSettingsProvider{}})
+	service, err := NewService(Config{
+		SettingsProvider:     testSettingsProvider{},
+		DockerClientProvider: testDockerClientProvider{},
+	})
+	require.NoError(t, err)
 
 	var _ types.Builder = service
+}
+
+func TestNewServiceRequiresProviders(t *testing.T) {
+	_, err := NewService(Config{DockerClientProvider: testDockerClientProvider{}})
+	require.ErrorAs(t, err, new(*types.BuildSettingsProviderUnavailableError))
+
+	_, err = NewService(Config{SettingsProvider: testSettingsProvider{}})
+	require.ErrorAs(t, err, new(*types.BuildDockerServiceUnavailableError))
 }

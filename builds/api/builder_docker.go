@@ -403,10 +403,6 @@ func buildDockerImageOptions(
 }
 
 func (b *Service) buildWithDocker(ctx context.Context, req types.BuildRequest, progressWriter io.Writer) (*types.BuildResult, error) {
-	if b.dockerClientProvider == nil {
-		return nil, &types.BuildDockerServiceUnavailableError{}
-	}
-
 	dockerClient, err := b.dockerClientProvider.GetClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
