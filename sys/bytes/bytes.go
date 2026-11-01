@@ -62,12 +62,12 @@ var units = [...]struct {
 	Suffix byte
 	Size   uint64
 }{
-	{'E', uint64(Exabyte)},
-	{'P', uint64(Petabyte)},
-	{'T', uint64(Terabyte)},
-	{'G', uint64(Gigabyte)},
-	{'M', uint64(Megabyte)},
-	{'K', uint64(Kilobyte)},
+	{Suffix: 'E', Size: uint64(Exabyte)},
+	{Suffix: 'P', Size: uint64(Petabyte)},
+	{Suffix: 'T', Size: uint64(Terabyte)},
+	{Suffix: 'G', Size: uint64(Gigabyte)},
+	{Suffix: 'M', Size: uint64(Megabyte)},
+	{Suffix: 'K', Size: uint64(Kilobyte)},
 }
 
 // unitMapDecimal holds the base 10 (SI) suffixes, e.g. "G" for Gigabyte.
