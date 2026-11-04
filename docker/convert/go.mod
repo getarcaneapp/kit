@@ -8,7 +8,7 @@ require (
 	github.com/compose-spec/compose-go/v2 v2.16.2
 	github.com/docker/go-units v0.5.0
 	github.com/mattn/go-shellwords v1.0.16
-	go.yaml.in/yaml/v4 v4.0.0-rc.6
+	go.yaml.in/yaml/v4 v4.0.0-rc.7
 	kit.getarcane.app v0.5.0
 )
 
