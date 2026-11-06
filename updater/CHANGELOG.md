@@ -1,3 +1,13 @@
+## updater/v0.12.1
+
+### Bug fixes
+
+* bump kit to v0.6.0 and merge replace directives([5213156](https://github.com/getarcaneapp/kit/commit/5213156aca57ca1fb76ed97b28d83751f406c0aa) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.12.0...updater/v0.12.1
+
 ## updater/v0.12.0
 
 ### New features
