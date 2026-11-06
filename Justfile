@@ -116,9 +116,12 @@ deps action *args:
             if [ "${#dependencies[@]}" -gt 0 ]; then
                 go get "${dependencies[@]}"
             fi
-            go mod tidy
         )
-        go work sync
+    done
+    go work sync
+    for module in {{ modules }}; do
+        echo "Tidying $module..."
+        (cd "$module" && GOWORK=off go mod tidy)
     done
 
 [group('test')]
