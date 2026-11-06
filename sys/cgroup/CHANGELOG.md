@@ -1,3 +1,13 @@
+## sys/cgroup/v0.3.1
+
+### Bug fixes
+
+* bump gopsutil to v4.26.10([4b2aa7e](https://github.com/getarcaneapp/kit/commit/4b2aa7ede3fd48f5b7a0aae9ea064b84ef7ecf16) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.3.0...sys/cgroup/v0.3.1
+
 ## sys/cgroup/v0.3.0
 
 ### New features
