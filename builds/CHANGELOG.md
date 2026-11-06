@@ -1,3 +1,13 @@
+## builds/v0.5.1
+
+### Bug fixes
+
+* bump depot-go, docker cli, buildkit and fsutil([9c86eaf](https://github.com/getarcaneapp/kit/commit/9c86eaf3cbc3d931a10835e039bcf2ed8440333d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.5.0...builds/v0.5.1
+
 ## builds/v0.5.0
 
 ### New features
