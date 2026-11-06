@@ -1,3 +1,13 @@
+## docker/convert/v0.4.1
+
+### Bug fixes
+
+* bump go.yaml.in/yaml/v4 to v4.0.0([2333958](https://github.com/getarcaneapp/kit/commit/2333958e9c32dd7397508bcd2eaf980ecb1ff2ac) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.4.0...docker/convert/v0.4.1
+
 ## docker/convert/v0.4.0
 
 ### New features
