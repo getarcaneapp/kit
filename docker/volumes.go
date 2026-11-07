@@ -13,16 +13,16 @@ import (
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/volume"
 	"github.com/moby/moby/client"
-	"github.com/samber/hot"
 	"github.com/samber/mo"
 	"kit.getarcane.app"
+	"kit.getarcane.app/cache"
 )
 
-var volumeUsageCache = hot.NewHotCache[string, []volume.Volume](hot.LRU, 16).
-	WithTTL(volumeUsageCacheTTL).
-	WithCopyOnRead(cloneVolumeUsage).
-	WithCopyOnWrite(cloneVolumeUsage).
-	Build()
+var volumeUsageCache = &cache.Cache[string, []volume.Volume]{
+	Capacity: 16,
+	TTL:      volumeUsageCacheTTL,
+	Clone:    cloneVolumeUsage,
+}
 
 const (
 	volumeUsageCacheTTL               = 30 * time.Second
@@ -53,12 +53,9 @@ func GetVolumeUsageData(ctx context.Context, dockerClient *client.Client) ([]vol
 	refreshCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), kit.Ternary(hasDeadline, deadline, time.Now().Add(volumeUsageRefreshFallbackTimeout)))
 	go func() {
 		defer cancel()
-		volumes, found, err := volumeUsageCache.GetWithLoaders(key, func(_ []string) (map[string][]volume.Volume, error) {
+		volumes, found, err := volumeUsageCache.GetOrLoad(key, func(string) ([]volume.Volume, bool, error) {
 			loaded, loadErr := FetchVolumeUsageData(refreshCtx, dockerClient)
-			if loadErr != nil {
-				return nil, loadErr
-			}
-			return map[string][]volume.Volume{key: loaded}, nil
+			return loaded, loadErr == nil, loadErr
 		})
 		result <- refreshResult{
 			volumes: volumes,
@@ -117,12 +114,9 @@ func GetVolumeUsageDataStaleWhileRevalidate(ctx context.Context, dockerClient *c
 	refreshCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), kit.Ternary(hasDeadline, deadline, time.Now().Add(volumeUsageRefreshFallbackTimeout)))
 	go func() {
 		defer cancel()
-		_, _, err := volumeUsageCache.GetWithLoaders(key, func(_ []string) (map[string][]volume.Volume, error) {
+		_, _, err := volumeUsageCache.GetOrLoad(key, func(string) ([]volume.Volume, bool, error) {
 			loaded, loadErr := FetchVolumeUsageData(refreshCtx, dockerClient)
-			if loadErr != nil {
-				return nil, loadErr
-			}
-			return map[string][]volume.Volume{key: loaded}, nil
+			return loaded, loadErr == nil, loadErr
 		})
 		if err != nil {
 			slog.WarnContext(refreshCtx, "failed to refresh volume usage cache", "error", err, "dockerHost", key)

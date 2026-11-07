@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/volume"
 	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
+	"kit.getarcane.app/cache"
 )
 
 func TestVolumeUsageCacheBehavior(t *testing.T) {
@@ -88,7 +90,11 @@ func TestVolumeUsageCacheBehavior(t *testing.T) {
 		key := volumeUsageCacheKey(dockerClient)
 		cached, found := volumeUsageCache.Peek(key)
 		require.True(t, found)
-		volumeUsageCache.SetWithTTL(key, cached, time.Nanosecond)
+		volumeUsageCache.Set(cache.Entry[string, []volume.Volume]{
+			Key:   key,
+			Value: cached,
+			TTL:   time.Nanosecond,
+		})
 		time.Sleep(time.Millisecond)
 
 		startedAt := time.Now()

@@ -3,7 +3,7 @@ package cgroup
 import (
 	"time"
 
-	"github.com/samber/hot"
+	"kit.getarcane.app/cache"
 )
 
 // Cache memoizes the result of cgroup limit detection for a configurable TTL.
@@ -11,7 +11,7 @@ import (
 // stampede of samplers never duplicates the work. The zero Cache is usable and
 // runs DetectLimits on every Get.
 type Cache struct {
-	cache    *hot.HotCache[struct{}, *Limits]
+	cache    *cache.Cache[struct{}, *Limits]
 	detector func() (*Limits, error)
 	ttl      time.Duration
 }
@@ -27,14 +27,10 @@ type CacheConfig struct {
 // NewCache returns a cache configured by cfg.
 func NewCache(cfg CacheConfig) *Cache {
 	return &Cache{
-		cache: func() *hot.HotCache[struct{}, *Limits] {
-			if cfg.TTL <= 0 {
-				return nil
-			}
-			return hot.NewHotCache[struct{}, *Limits](hot.LRU, 1).
-				WithTTL(cfg.TTL).
-				Build()
-		}(),
+		cache: &cache.Cache[struct{}, *Limits]{
+			Capacity: 1,
+			TTL:      cfg.TTL,
+		},
 		detector: cfg.Detector,
 		ttl:      cfg.TTL,
 	}
@@ -51,14 +47,14 @@ func (c *Cache) Get() *Limits {
 		return limits
 	}
 
-	limits, _, err := c.cache.GetWithLoaders(struct{}{}, func(_ []struct{}) (map[struct{}]*Limits, error) {
+	limits, _, err := c.cache.GetOrLoad(struct{}{}, func(struct{}) (*Limits, bool, error) {
 		detected, detectErr := c.detect()
 		if detectErr != nil {
 			// Cache the miss: a host without detectable cgroup limits should
 			// not re-run detection on every call.
 			detected = nil
 		}
-		return map[struct{}]*Limits{{}: detected}, nil
+		return detected, true, nil
 	})
 	if err != nil {
 		return nil

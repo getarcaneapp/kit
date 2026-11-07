@@ -7,13 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"slices"
 	"strings"
 
 	"github.com/moby/moby/client"
-	"github.com/samber/hot"
 	"kit.getarcane.app"
+	"kit.getarcane.app/cache"
 
 	"kit.getarcane.app/updater/digest"
 	"kit.getarcane.app/updater/refs"
@@ -178,7 +177,7 @@ func (c *Checker) GetImageIDsForRef(ctx context.Context, ref string) ([]string, 
 // RefIDCache memoizes Checker.GetImageIDsForRef lookups by image reference.
 type RefIDCache struct {
 	checker *Checker
-	ids     *hot.HotCache[string, []string]
+	ids     *cache.Cache[string, []string]
 }
 
 // NewRefIDCache creates a memoizing image-ID lookup around checker.
@@ -186,9 +185,7 @@ func NewRefIDCache(checker *Checker) *RefIDCache {
 	return &RefIDCache{
 		checker: checker,
 		// Never evict: repeated lookups for one ref must see one Docker snapshot.
-		ids: hot.NewHotCache[string, []string](hot.LRU, math.MaxInt).
-			WithoutLocking().
-			Build(),
+		ids: &cache.Cache[string, []string]{},
 	}
 }
 
@@ -199,6 +196,9 @@ func (c *RefIDCache) IDsForRef(ctx context.Context, ref string) []string {
 		return ids
 	}
 	ids, _ := c.checker.GetImageIDsForRef(ctx, ref)
-	c.ids.Set(ref, ids)
+	c.ids.Set(cache.Entry[string, []string]{
+		Key:   ref,
+		Value: ids,
+	})
 	return ids
 }
