@@ -1,3 +1,13 @@
+## kit/v0.7.0
+
+### New features
+
+* add minimal cache package([3d8d155](https://github.com/getarcaneapp/kit/commit/3d8d15507a540f1edb6ef02d010b50eea0f5bbb1) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/kit/v0.6.0...kit/v0.7.0
+
 ## kit/v0.6.0
 
 ### New features
