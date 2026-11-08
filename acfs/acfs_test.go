@@ -119,6 +119,51 @@ func TestListEmptyDirectory(t *testing.T) {
 	}
 }
 
+func TestListBounded(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, name := range []string{"c", "a", "b"} {
+		writeFixtureFile(t, filepath.Join(root, name), name, 0o600)
+	}
+	writeFixtureFile(t, filepath.Join(root, temporaryWritePrefix+"pending"), "", 0o600)
+
+	tests := map[string]struct {
+		want      []string
+		limit     int
+		truncated bool
+	}{
+		"unlimited":      {limit: 0, want: []string{"a", "b", "c"}},
+		"below count":    {limit: 2, want: []string{"a", "b"}, truncated: true},
+		"equal to count": {limit: 3, want: []string{"a", "b", "c"}},
+		"above count":    {limit: 10, want: []string{"a", "b", "c"}},
+		"single entry":   {limit: 1, want: []string{"a"}, truncated: true},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			entries, result, err := Root{Path: root}.ListBounded(t.Context(), "/", acfstypes.ListOptions{Limit: test.limit})
+			if err != nil {
+				t.Fatalf("ListBounded: %v", err)
+			}
+			names := make([]string, 0, len(entries))
+			for _, entry := range entries {
+				names = append(names, entry.Name)
+			}
+			if !slices.Equal(names, test.want) {
+				t.Errorf("names = %q, want %q", names, test.want)
+			}
+			if result.Count != len(test.want) || result.Truncated != test.truncated {
+				t.Errorf("result = %#v, want count %d, truncated %t", result, len(test.want), test.truncated)
+			}
+		})
+	}
+
+	if _, _, err := (Root{Path: root}).ListBounded(t.Context(), "/", acfstypes.ListOptions{Limit: -1}); err == nil {
+		t.Error("ListBounded accepted a negative limit")
+	}
+}
+
 func TestReadToResolvesOnlyInternalSymlinks(t *testing.T) {
 	t.Parallel()
 

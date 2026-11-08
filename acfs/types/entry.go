@@ -25,9 +25,11 @@ type Entry struct {
 }
 
 // ListResponse is the versioned response emitted by the list command.
+// Truncated reports that a --limit omitted entries; it is absent otherwise.
 type ListResponse struct {
-	Entries []Entry `json:"entries"`
-	Version int     `json:"version"`
+	Entries   []Entry `json:"entries"`
+	Truncated bool    `json:"truncated,omitempty"`
+	Version   int     `json:"version"`
 }
 
 // StatResponse is the versioned response emitted by the stat command.
@@ -52,6 +54,20 @@ type StatOptions struct {
 	// then the fully resolved logical path, so Stat doubles as a root-confined
 	// symlink resolver.
 	FollowFinal bool
+}
+
+// ListOptions bounds a directory listing. The zero value is unlimited.
+type ListOptions struct {
+	// Limit is the maximum number of entries to visit; zero is unlimited.
+	Limit int
+}
+
+// ListResult summarizes a bounded directory listing.
+type ListResult struct {
+	// Count is the number of visited entries.
+	Count int
+	// Truncated reports that Limit omitted at least one entry.
+	Truncated bool
 }
 
 // WalkOptions bounds a recursive traversal. Zero values are unlimited.

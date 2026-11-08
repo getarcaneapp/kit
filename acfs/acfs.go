@@ -23,31 +23,44 @@ const directoryReadBatchSize = 256
 // ListEach visits the direct children of a root-confined directory in
 // deterministic name order without retaining all metadata in memory.
 func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfstypes.Entry) error) error {
+	_, err := r.ListEachBounded(ctx, logicalPath, acfstypes.ListOptions{}, visit)
+	return err
+}
+
+// ListEachBounded is ListEach with options.Limit capping the number of visited
+// entries. Every name is still read and sorted to keep the order
+// deterministic, but only the visited entries and one more, to report
+// truncation, are inspected.
+func (r Root) ListEachBounded(ctx context.Context, logicalPath string, options acfstypes.ListOptions, visit func(acfstypes.Entry) error) (acfstypes.ListResult, error) {
+	var result acfstypes.ListResult
 	if visit == nil {
-		return errors.New("visit callback is required")
+		return result, errors.New("visit callback is required")
+	}
+	if options.Limit < 0 {
+		return result, errors.New("list limit must be non-negative")
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return result, err
 	}
 
 	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
-		return err
+		return result, err
 	}
 	err = rejectReservedPath(relativePath)
 	if err != nil {
-		return err
+		return result, err
 	}
 
 	root, err := os.OpenRoot(r.Path)
 	if err != nil {
-		return fmt.Errorf("open workspace root: %w", err)
+		return result, fmt.Errorf("open workspace root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
 
 	resolvedPath, err := resolvePath(root, relativePath, true)
 	if err != nil {
-		return err
+		return result, err
 	}
 
 	names, err := func() ([]string, error) {
@@ -77,7 +90,7 @@ func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfst
 		return names, nil
 	}()
 	if err != nil {
-		return err
+		return result, err
 	}
 
 	for _, name := range names {
@@ -86,7 +99,7 @@ func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfst
 		}
 		err = ctx.Err()
 		if err != nil {
-			return err
+			return result, err
 		}
 
 		entryPath := path.Join(resolvedPath, name)
@@ -95,8 +108,13 @@ func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfst
 		if errors.Is(statErr, fs.ErrNotExist) {
 			continue
 		}
+		if options.Limit > 0 && result.Count >= options.Limit {
+			// The child still exists, so the limit omitted at least one entry.
+			result.Truncated = true
+			return result, nil
+		}
 		if statErr != nil {
-			return fmt.Errorf("stat %q: %w", kitfs.LogicalPath(entryPath), statErr)
+			return result, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(entryPath), statErr)
 		}
 
 		entry, entryErr := entryFromInfo(root, entryPath, info)
@@ -104,27 +122,35 @@ func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfst
 			continue
 		}
 		if entryErr != nil {
-			return entryErr
+			return result, entryErr
 		}
 		err = visit(entry)
 		if err != nil {
-			return fmt.Errorf("visit %q: %w", entry.Path, err)
+			return result, fmt.Errorf("visit %q: %w", entry.Path, err)
 		}
+		result.Count++
 	}
-	return nil
+	return result, nil
 }
 
 // List returns the direct children of a root-confined directory.
 func (r Root) List(ctx context.Context, logicalPath string) ([]acfstypes.Entry, error) {
+	entries, _, err := r.ListBounded(ctx, logicalPath, acfstypes.ListOptions{})
+	return entries, err
+}
+
+// ListBounded is List with options.Limit capping the number of returned
+// entries. The result reports whether the limit omitted any entries.
+func (r Root) ListBounded(ctx context.Context, logicalPath string, options acfstypes.ListOptions) ([]acfstypes.Entry, acfstypes.ListResult, error) {
 	entries := make([]acfstypes.Entry, 0)
-	err := r.ListEach(ctx, logicalPath, func(entry acfstypes.Entry) error {
+	result, err := r.ListEachBounded(ctx, logicalPath, options, func(entry acfstypes.Entry) error {
 		entries = append(entries, entry)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, acfstypes.ListResult{}, err
 	}
-	return entries, nil
+	return entries, result, nil
 }
 
 // Stat returns metadata for a root-confined path. By default the final symbolic

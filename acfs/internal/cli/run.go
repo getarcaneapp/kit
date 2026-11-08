@@ -123,6 +123,7 @@ func encodeJSON(destination io.Writer, value any) error {
 func runList(ctx context.Context, args []string, stdout io.Writer) error {
 	flags := newFlagSet("list")
 	values := addPathFlags(flags)
+	limit := flags.Int("limit", 0, "maximum entries to emit; zero is unlimited")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -131,6 +132,9 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	if err := validatePathFlags(values); err != nil {
 		return err
+	}
+	if *limit < 0 {
+		return errors.New("--limit must be non-negative")
 	}
 	temporaryOutput, err := os.CreateTemp("", "acfs-list-*")
 	if err != nil {
@@ -147,7 +151,7 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 	var encodedEntry bytes.Buffer
 	entryEncoder := json.NewEncoder(&encodedEntry)
 	entryEncoder.SetEscapeHTML(false)
-	err = acfs.Root{Path: values.root}.ListEach(ctx, values.path, func(entry acfstypes.Entry) error {
+	result, err := acfs.Root{Path: values.root}.ListEachBounded(ctx, values.path, acfstypes.ListOptions{Limit: *limit}, func(entry acfstypes.Entry) error {
 		if !started {
 			if _, writeErr := io.WriteString(bufferedOutput, `{"entries":[`); writeErr != nil {
 				return fmt.Errorf("write list prefix: %w", writeErr)
@@ -180,7 +184,13 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 			return fmt.Errorf("write list prefix: %w", err)
 		}
 	}
-	_, err = fmt.Fprintf(bufferedOutput, `],"version":%d}`+"\n", acfstypes.ProtocolVersion)
+	// Keep the response byte-identical to earlier releases unless entries were
+	// omitted, so callers that predate the limit see no change.
+	suffix := `],"version":%d}` + "\n"
+	if result.Truncated {
+		suffix = `],"truncated":true,"version":%d}` + "\n"
+	}
+	_, err = fmt.Fprintf(bufferedOutput, suffix, acfstypes.ProtocolVersion)
 	if err != nil {
 		return fmt.Errorf("write list suffix: %w", err)
 	}

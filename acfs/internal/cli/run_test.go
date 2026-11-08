@@ -77,6 +77,59 @@ func TestListAndStatGolden(t *testing.T) {
 	}
 }
 
+func TestListLimit(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, name := range []string{"b", "a"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := map[string]struct {
+		limit     string
+		want      []string
+		truncated bool
+	}{
+		"truncated":     {limit: "1", want: []string{"a"}, truncated: true},
+		"not truncated": {limit: "2", want: []string{"a", "b"}},
+		"unlimited":     {limit: "0", want: []string{"a", "b"}},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			exitCode, stdout, stderr := runCommand(t, []string{
+				"list", "--root", root, "--path", "/", "--limit", test.limit,
+			}, "")
+			if exitCode != exitSuccess || stderr != "" {
+				t.Fatalf("Run = (exit %d, stderr %q), want success", exitCode, stderr)
+			}
+			var response acfstypes.ListResponse
+			if err := json.Unmarshal(stdout, &response); err != nil {
+				t.Fatalf("decode %q: %v", stdout, err)
+			}
+			names := make([]string, 0, len(response.Entries))
+			for _, entry := range response.Entries {
+				names = append(names, entry.Name)
+			}
+			if strings.Join(names, ",") != strings.Join(test.want, ",") || response.Truncated != test.truncated {
+				t.Fatalf("response = %s, want names %q, truncated %t", stdout, test.want, test.truncated)
+			}
+			if !test.truncated && bytes.Contains(stdout, []byte(`"truncated"`)) {
+				t.Fatalf("untruncated response mentions truncation: %s", stdout)
+			}
+		})
+	}
+
+	exitCode, stdout, stderr := runCommand(t, []string{
+		"list", "--root", root, "--path", "/", "--limit", "-1",
+	}, "")
+	if exitCode != exitFailure || len(stdout) != 0 || !strings.Contains(stderr, "--limit must be non-negative") {
+		t.Fatalf("Run = (exit %d, stdout %q, stderr %q), want limit error", exitCode, stdout, stderr)
+	}
+}
+
 func TestReadFramingAndLimit(t *testing.T) {
 	t.Parallel()
 
