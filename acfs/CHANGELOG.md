@@ -1,3 +1,13 @@
+## acfs/v0.9.0
+
+### New features
+
+* add --limit to list([56634e5](https://github.com/getarcaneapp/kit/commit/56634e5673bb766c5187e415fc127b0c8a4d73d5) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/acfs/v0.8.0...acfs/v0.9.0
+
 ## acfs/v0.8.0
 
 ### New features
