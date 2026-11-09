@@ -15,21 +15,30 @@ import (
 // A dir is opened inside the root without following links, so a mutation naming
 // one of its entries cannot be redirected.
 
-// Test hooks run after a mutation opens a directory and around publishing a
-// staged file.
+type (
+	// mutationRoot is a workspace root opened for mutations: root resolves links
+	// inside it and top is the same directory as a dir.
+	mutationRoot struct {
+		root *os.Root
+		top  *dir
+		path string
+	}
+
+	// dirOptions configures openDir.
+	dirOptions struct {
+		// Mode is the permission set of directories created by Create.
+		Mode   os.FileMode
+		Create bool
+	}
+)
+
 var (
+	// Test hooks run after a mutation opens a directory and around publishing a
+	// staged file.
 	afterOpenDir  func(relativePath string)
 	beforePublish func(temporaryName string)
 	afterPublish  func()
 )
-
-// mutationRoot is a workspace root opened for mutations: root resolves links
-// inside it and top is the same directory as a dir.
-type mutationRoot struct {
-	root *os.Root
-	top  *dir
-	path string
-}
 
 func (m *mutationRoot) Close() error {
 	if m.root == nil {
@@ -48,13 +57,6 @@ func (m *mutationRoot) workspace() (*os.Root, error) {
 		m.root = root
 	}
 	return m.root, nil
-}
-
-// dirOptions configures openDir.
-type dirOptions struct {
-	// Mode is the permission set of directories created by Create.
-	Mode   os.FileMode
-	Create bool
 }
 
 // openDir opens relativePath beneath d without following symbolic links. A link

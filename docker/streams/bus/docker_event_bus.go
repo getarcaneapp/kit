@@ -12,33 +12,37 @@ import (
 	"kit.getarcane.app/docker/streams/internal/buffer"
 )
 
-const defaultSubscriberBuffer = 16
+type (
+	// Config configures a DockerEventBus. The zero value is valid.
+	Config struct {
+		// OnDrop observes messages that could not be delivered to a full
+		// subscriber channel. Nil ignores drops.
+		OnDrop func(events.Message)
+	}
 
-// Config configures a DockerEventBus. The zero value is valid.
-type Config struct {
-	// OnDrop observes messages that could not be delivered to a full
-	// subscriber channel. Nil ignores drops.
-	OnDrop func(events.Message)
-}
+	// SubscribeOptions configures one subscription. The zero value is valid.
+	SubscribeOptions struct {
+		// Buffer is the subscription channel buffer. Nil or negative uses the
+		// default of 16; new(0) makes the channel unbuffered.
+		Buffer *int
+	}
 
-// SubscribeOptions configures one subscription. The zero value is valid.
-type SubscribeOptions struct {
-	// Buffer is the subscription channel buffer. Nil or negative uses the
-	// default of 16; new(0) makes the channel unbuffered.
-	Buffer *int
-}
+	// DockerEventBus is an in-process fan-out point for Docker daemon events.
+	DockerEventBus struct {
+		state      atomic.Pointer[dockerEventBusState]
+		onDrop     func(events.Message)
+		deliveryMu sync.RWMutex
+	}
 
-// DockerEventBus is an in-process fan-out point for Docker daemon events.
-type DockerEventBus struct {
-	state      atomic.Pointer[dockerEventBusState]
-	onDrop     func(events.Message)
-	deliveryMu sync.RWMutex
-}
+	dockerEventBusState struct {
+		subscribers map[events.Type][]chan events.Message
+		closed      bool
+	}
+)
 
-type dockerEventBusState struct {
-	subscribers map[events.Type][]chan events.Message
-	closed      bool
-}
+const (
+	defaultSubscriberBuffer = 16
+)
 
 // NewDockerEventBus creates an empty Docker event bus configured by cfg.
 func NewDockerEventBus(cfg Config) *DockerEventBus {

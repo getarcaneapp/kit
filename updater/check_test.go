@@ -11,11 +11,13 @@ import (
 	"kit.getarcane.app/updater/types"
 )
 
-type testTagLister struct {
-	err   error
-	tags  []string
-	calls int
-}
+type (
+	testTagLister struct {
+		err   error
+		tags  []string
+		calls int
+	}
+)
 
 func (l *testTagLister) ListTags(ctx context.Context, _ string) ([]string, error) {
 	l.calls++

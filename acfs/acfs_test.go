@@ -16,6 +16,14 @@ import (
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
+type (
+	failingReader struct {
+		remaining int
+	}
+
+	zeroReader struct{}
+)
+
 func writeFixtureFile(t testing.TB, filename, contents string, mode os.FileMode) {
 	t.Helper()
 	if err := os.WriteFile(filename, []byte(contents), mode); err != nil {
@@ -122,10 +130,6 @@ func TestWalkReportsExactTruncation(t *testing.T) {
 	if result.Truncated {
 		t.Fatal("empty directory at the depth boundary was incorrectly reported as truncated")
 	}
-}
-
-type failingReader struct {
-	remaining int
 }
 
 func (r *failingReader) Read(buffer []byte) (int, error) {
@@ -690,8 +694,6 @@ func BenchmarkOpenRead(b *testing.B) {
 		}
 	}
 }
-
-type zeroReader struct{}
 
 func (zeroReader) Read(buffer []byte) (int, error) {
 	clear(buffer)

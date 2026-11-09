@@ -13,12 +13,19 @@ import (
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
-// testFS pairs an FS with the mapping from a logical path under its directory
-// to the path that FS expects.
-type testFS struct {
-	fs   FS
-	path func(logicalPath string) string
-	name string
+type (
+	// testFS pairs an FS with the mapping from a logical path under its directory
+	// to the path that FS expects.
+	testFS struct {
+		fs   FS
+		path func(logicalPath string) string
+		name string
+	}
+)
+
+var conformanceSentinels = []error{
+	ErrInvalidPath, ErrOutsideRoot, ErrIsDirectory, ErrNotFile, ErrNotDirectory, ErrNotEmpty,
+	ErrAlreadyExists, ErrSymlink, ErrRootRemoval, ErrSizeMismatch, fs.ErrNotExist, fs.ErrExist,
 }
 
 // testFilesystems returns a Root and a Host over dir.
@@ -39,11 +46,6 @@ func testFilesystems(dir string) []testFS {
 			},
 		},
 	}
-}
-
-var conformanceSentinels = []error{
-	ErrInvalidPath, ErrOutsideRoot, ErrIsDirectory, ErrNotFile, ErrNotDirectory, ErrNotEmpty,
-	ErrAlreadyExists, ErrSymlink, ErrRootRemoval, ErrSizeMismatch, fs.ErrNotExist, fs.ErrExist,
 }
 
 // classifyError renders the sentinels err matches, so Root and Host errors can
@@ -189,5 +191,51 @@ func TestRootAndHostConform(t *testing.T) {
 				t.Errorf("%s diverges from root:\n got %s\nwant %s", filesystem.name, got, want)
 			}
 		}
+	}
+}
+
+func TestExclusiveWrite(t *testing.T) {
+	t.Parallel()
+
+	for index, named := range testFilesystems("") {
+		t.Run(named.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			filesystem := testFilesystems(dir)[index]
+			ctx := t.Context()
+
+			err := filesystem.fs.Write(ctx, filesystem.path("/config"), []byte("first"), WriteOptions{Mode: 0o600, Exclusive: true})
+			if err != nil {
+				t.Fatalf("Write absent: %v", err)
+			}
+			err = filesystem.fs.Write(ctx, filesystem.path("/config"), []byte("second"), WriteOptions{Mode: 0o600, Exclusive: true})
+			if !errors.Is(err, ErrAlreadyExists) || !errors.Is(err, fs.ErrExist) {
+				t.Fatalf("Write existing = %v, want ErrAlreadyExists and fs.ErrExist", err)
+			}
+			_, err = filesystem.fs.WriteFrom(ctx, filesystem.path("/config"), strings.NewReader("third"), WriteFromOptions{Size: 5, Mode: 0o600, Exclusive: true})
+			if !errors.Is(err, ErrAlreadyExists) || !errors.Is(err, fs.ErrExist) {
+				t.Fatalf("WriteFrom existing = %v, want ErrAlreadyExists and fs.ErrExist", err)
+			}
+			_, err = filesystem.fs.WriteFrom(ctx, filesystem.path("/streamed"), strings.NewReader("data"), WriteFromOptions{Size: 4, Mode: 0o600, Exclusive: true})
+			if err != nil {
+				t.Fatalf("WriteFrom absent: %v", err)
+			}
+			err = filesystem.fs.Write(ctx, filesystem.path("/other"), []byte("x"), WriteOptions{Mode: 0o600, Exclusive: true, InPlace: true})
+			if !errors.Is(err, ErrInvalidWriteOptions) {
+				t.Fatalf("Write Exclusive+InPlace = %v, want ErrInvalidWriteOptions", err)
+			}
+
+			content, err := os.ReadFile(filepath.Join(dir, "config"))
+			if err != nil || string(content) != "first" {
+				t.Fatalf("config = %q (%v), want first", content, err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 2 {
+				t.Fatalf("directory holds %d entries, want config and streamed only", len(entries))
+			}
+		})
 	}
 }

@@ -12,37 +12,41 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-const sep = string(os.PathSeparator)
+type (
+	// tree tracks which directories are subscribed and how real paths map back
+	// to logical paths under the root. It is owned by one goroutine at a time and
+	// is not safe for concurrent use.
+	tree struct {
+		// aliases maps a followed symlink target (real dir) to the logical dir
+		// where the link lives. Only symlink points are stored; everything below
+		// them resolves by walking up to the nearest alias.
+		aliases  map[string]string
+		skip     func(name string) bool
+		log      *slog.Logger
+		root     string
+		prefix   string // root with a trailing separator
+		maxDepth int
+		follow   bool
+	}
 
-// tree tracks which directories are subscribed and how real paths map back
-// to logical paths under the root. It is owned by one goroutine at a time and
-// is not safe for concurrent use.
-type tree struct {
-	// aliases maps a followed symlink target (real dir) to the logical dir
-	// where the link lives. Only symlink points are stored; everything below
-	// them resolves by walking up to the nearest alias.
-	aliases  map[string]string
-	skip     func(name string) bool
-	log      *slog.Logger
-	root     string
-	prefix   string // root with a trailing separator
-	maxDepth int
-	follow   bool
-}
+	// frame is one directory waiting to be walked.
+	frame struct {
+		dir     string
+		logical string
+		depth   int
+		// link marks a followed symlink target; it becomes an alias once the
+		// walk knows it isn't a cycle.
+		link bool
+	}
 
-// frame is one directory waiting to be walked.
-type frame struct {
-	dir     string
-	logical string
-	depth   int
-	// link marks a followed symlink target; it becomes an alias once the
-	// walk knows it isn't a cycle.
-	link bool
-}
+	// emitFunc receives the non-directory entries found while walking a newly
+	// created directory, so files written before the watch landed aren't lost.
+	emitFunc func(realPath, logical string)
+)
 
-// emitFunc receives the non-directory entries found while walking a newly
-// created directory, so files written before the watch landed aren't lost.
-type emitFunc func(realPath, logical string)
+const (
+	sep = string(os.PathSeparator)
+)
 
 // logical maps a real path to its logical path under the root. It costs one
 // map lookup per path component, independent of how many dirs are watched.

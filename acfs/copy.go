@@ -17,7 +17,9 @@ import (
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
-const copyDirectoryMode = 0o755
+const (
+	copyDirectoryMode = 0o755
+)
 
 // CopyTo copies r into destination, which may not nest with r. Links are skipped
 // and sockets, FIFOs, and devices are recorded in CopyResult.Skipped.

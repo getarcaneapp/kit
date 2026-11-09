@@ -11,13 +11,15 @@ import (
 	"kit.getarcane.app/registry"
 )
 
-// Reference is a normalized Docker image reference.
-type Reference struct {
-	NormalizedRef string
-	RegistryHost  string
-	Repository    string
-	Tag           string
-}
+type (
+	// Reference is a normalized Docker image reference.
+	Reference struct {
+		NormalizedRef string
+		RegistryHost  string
+		Repository    string
+		Tag           string
+	}
+)
 
 // NormalizeReference parses and canonicalizes an image reference.
 func NormalizeReference(imageRef string) (*Reference, error) {

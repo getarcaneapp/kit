@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// errAnyFailure marks a test expectation that accepts any non-nil error.
+var errAnyFailure = errors.New("any failure")
+
 // newSymlinkFixture builds a tree with a file, a directory, internal symbolic
 // links, and a link escaping to a directory outside it.
 func newSymlinkFixture(t *testing.T) (dir, outside string) {
@@ -224,9 +227,6 @@ func TestRootAttributeChangesRejectEscapes(t *testing.T) {
 		t.Fatalf("Chmod escape error = %v, want ErrInvalidPath or ErrOutsideRoot", err)
 	}
 }
-
-// errAnyFailure marks a test expectation that accepts any non-nil error.
-var errAnyFailure = errors.New("any failure")
 
 // assertError fails unless err matches want; a nil want requires success.
 func assertError(t *testing.T, label string, err, want error) {

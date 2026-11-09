@@ -5,6 +5,16 @@ import (
 	"fmt"
 )
 
+type (
+	// ConfigError reports a Config field that New could not accept.
+	ConfigError struct {
+		// Reason is the underlying cause.
+		Reason error
+		// Field is the Config field at fault, as written in Go source.
+		Field string
+	}
+)
+
 var (
 	// ErrDockerClientProviderRequired is returned when no Docker client
 	// provider is configured.
@@ -28,14 +38,6 @@ var (
 	// exist. Use errors.Is to detect it; the returned error names the container.
 	ErrContainerNotFound = errors.New("container not found")
 )
-
-// ConfigError reports a Config field that New could not accept.
-type ConfigError struct {
-	// Reason is the underlying cause.
-	Reason error
-	// Field is the Config field at fault, as written in Go source.
-	Field string
-}
 
 // Error implements error.
 func (e *ConfigError) Error() string {

@@ -18,6 +18,7 @@ import (
 var (
 	modTimePattern         = regexp.MustCompile(`"modTime":"[^"]+"`)
 	modTimeUnixNanoPattern = regexp.MustCompile(`"modTimeUnixNano":\d+`)
+	identityPattern        = regexp.MustCompile(`"(device|inode|uid|gid)":\d+`)
 )
 
 func runCommand(t *testing.T, args []string, stdin string) (int, []byte, string) {
@@ -70,6 +71,7 @@ func TestListAndStatGolden(t *testing.T) {
 			}
 			normalized := modTimePattern.ReplaceAllString(string(stdout), `"modTime":"<modtime>"`)
 			normalized = modTimeUnixNanoPattern.ReplaceAllString(normalized, `"modTimeUnixNano":<modtime-ns>`)
+			normalized = identityPattern.ReplaceAllString(normalized, `"$1":<$1>`)
 			if normalized != readGolden(t, test.golden) {
 				t.Fatalf("output:\n%s\nwant:\n%s", normalized, readGolden(t, test.golden))
 			}

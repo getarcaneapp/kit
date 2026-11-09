@@ -5,7 +5,9 @@ import (
 	"testing"
 )
 
-type namedIDs []int
+type (
+	namedIDs []int
+)
 
 func TestUnique(t *testing.T) {
 	t.Parallel()

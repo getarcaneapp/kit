@@ -11,32 +11,34 @@ import (
 	"kit.getarcane.app"
 )
 
-// Service coordinates Docker image updates, container recreation, and the host adapters configured
-// through Config. A Service is safe for concurrent use.
-type Service struct {
-	logger *slog.Logger
-	// ownedDockerClient is the default provider New built, the only one Close may shut down.
-	ownedDockerClient  *DockerClient
-	updatingContainers atomic.Pointer[[]string]
-	updatingProjects   atomic.Pointer[[]string]
-	config             Config
-}
+type (
+	// Service coordinates Docker image updates, container recreation, and the host adapters configured
+	// through Config. A Service is safe for concurrent use.
+	Service struct {
+		logger *slog.Logger
+		// ownedDockerClient is the default provider New built, the only one Close may shut down.
+		ownedDockerClient  *DockerClient
+		updatingContainers atomic.Pointer[[]string]
+		updatingProjects   atomic.Pointer[[]string]
+		config             Config
+	}
 
-type updatePlan struct {
-	record ImageUpdateRecord
-	oldRef string
-	newRef string
-	oldIDs []string
-	pulled bool
-}
+	updatePlan struct {
+		record ImageUpdateRecord
+		oldRef string
+		newRef string
+		oldIDs []string
+		pulled bool
+	}
 
-type restartPlan struct {
-	inspect  *container.InspectResponse
-	newRef   string
-	match    string
-	cnt      container.Summary
-	implicit bool
-}
+	restartPlan struct {
+		inspect  *container.InspectResponse
+		newRef   string
+		match    string
+		cnt      container.Summary
+		implicit bool
+	}
+)
 
 // New constructs an updater service; the zero Config is valid and uses the local Docker environment.
 // Nil ports get their Docker-backed defaults and Config.LabelPolicy is merged over DefaultLabelPolicy.

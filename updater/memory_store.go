@@ -9,10 +9,12 @@ import (
 	"sync"
 )
 
-type memoryPendingStore struct {
-	records map[string]ImageUpdateRecord
-	mu      sync.Mutex
-}
+type (
+	memoryPendingStore struct {
+		records map[string]ImageUpdateRecord
+		mu      sync.Mutex
+	}
+)
 
 // NewMemoryPendingStore returns an in-memory pending update store.
 func NewMemoryPendingStore(records ...ImageUpdateRecord) PendingStore {

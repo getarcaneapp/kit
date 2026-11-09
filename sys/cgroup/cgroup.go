@@ -25,27 +25,134 @@ import (
 	"github.com/shirou/gopsutil/v4/host"
 )
 
-const unrestricted = 9223372036854771712
+type (
+	// Limits holds the detected cgroup resource limits. Fields are -1 when the
+	// corresponding limit is absent or unrestricted.
+	Limits struct {
+		MemoryLimit int64
+		MemoryUsage int64
+		CPUQuota    int64
+		CPUPeriod   int64
+		CPUCount    int
+	}
+)
 
-// cgroupV1MemoryRoot is the mount point of the cgroup v1 memory controller.
-const cgroupV1MemoryRoot = "/sys/fs/cgroup/memory"
+const (
+	unrestricted = 9223372036854771712
 
-// Limits holds the detected cgroup resource limits. Fields are -1 when the
-// corresponding limit is absent or unrestricted.
-type Limits struct {
-	MemoryLimit int64
-	MemoryUsage int64
-	CPUQuota    int64
-	CPUPeriod   int64
-	CPUCount    int
-}
+	// cgroupV1MemoryRoot is the mount point of the cgroup v1 memory controller.
+	cgroupV1MemoryRoot = "/sys/fs/cgroup/memory"
+)
 
-// Container ID detection patterns for cgroup v1 and v2
 var (
+	// Container ID detection patterns for cgroup v1 and v2
 	// cgroup v1: "12:memory:/docker/abc123..." or "12:memory:/kubepods/.../docker/abc123..."
 	cgroupV1ContainerPattern = regexp.MustCompile(`/docker/([a-f0-9]{64})`)
 	// cgroup v2: "0::/system.slice/docker-abc123.scope"
 	cgroupV2ContainerPattern = regexp.MustCompile(`docker-([a-f0-9]{64})\.scope`)
+
+	// IsDockerContainer reports whether the current process is running inside a
+	// Docker container (as opposed to an LXC container, a VM, or bare metal).
+	//
+	// The distinction matters for host resource stats: in Docker the cgroup
+	// limits (--cpus / --memory) are artificial constraints set by the operator
+	// and should NOT be used as the host resource totals shown in a dashboard.
+	// In LXC, by contrast, the cgroup limits represent the real hardware budget
+	// assigned to the container — gopsutil reads the host's /proc values which are
+	// higher, so the cgroup limits must be applied to show correct figures.
+	//
+	// Detection: Docker always creates /.dockerenv inside every container it
+	// starts.  LXC does not.  We fall back to a /proc/self/cgroup pattern check
+	// as a secondary signal.
+	IsDockerContainer = sync.OnceValue(func() bool {
+		if _, err := os.Stat("/.dockerenv"); err == nil {
+			return true
+		}
+		data, err := os.ReadFile("/proc/self/cgroup")
+		if err != nil {
+			return false
+		}
+		return cgroupV1ContainerPattern.Match(data) || cgroupV2ContainerPattern.Match(data)
+	})
+
+	// CurrentContainerID detects the current container ID using multiple detection methods.
+	// It tries cgroup, mountinfo, and hostname in that order.
+	CurrentContainerID = sync.OnceValues(func() (string, error) {
+		// Try cgroup first (works on cgroup v1 and cgroupns=host mode)
+		if id, err := func() (string, error) {
+			// tries to extract container ID from /proc/self/cgroup
+			data, err := os.ReadFile("/proc/self/cgroup")
+			if err != nil {
+				return "", err
+			}
+
+			// Try cgroup v1 pattern
+			if matches := cgroupV1ContainerPattern.FindStringSubmatch(string(data)); len(matches) >= 2 {
+				return matches[1], nil
+			}
+
+			// Try cgroup v2 pattern
+			if matches := cgroupV2ContainerPattern.FindStringSubmatch(string(data)); len(matches) >= 2 {
+				return matches[1], nil
+			}
+
+			return "", errors.New("no container ID found in cgroup")
+		}(); err == nil {
+			slog.DebugContext(context.Background(), "CurrentContainerID: found via cgroup", "containerId", id)
+			return id, nil
+		}
+
+		// Try mountinfo (works when cgroup namespace is private)
+		if id, err := func() (string, error) {
+			// tries to extract container ID from /proc/self/mountinfo
+			// This works even when cgroup namespace is private (cgroupns=private)
+			data, err := os.ReadFile("/proc/self/mountinfo")
+			if err != nil {
+				return "", err
+			}
+
+			for line := range strings.SplitSeq(string(data), "\n") {
+				// Look for Docker container paths in mountinfo
+				_, after, ok := strings.Cut(line, "/docker/containers/")
+				if id, _, _ := strings.Cut(after, "/"); ok && len(id) >= 12 {
+					return id[:min(len(id), 64)], nil
+				}
+			}
+
+			return "", errors.New("no container ID found in mountinfo")
+		}(); err == nil {
+			slog.DebugContext(context.Background(), "CurrentContainerID: found via mountinfo", "containerId", id)
+			return id, nil
+		}
+
+		// Try hostname (Docker often sets hostname to container ID)
+		if id, err := func() (string, error) {
+			// tries to use hostname as container ID
+			// Docker often sets the hostname to the container ID (12 or 64 hex chars)
+			hostname, err := os.Hostname()
+			if err != nil {
+				return "", err
+			}
+
+			// Docker often sets hostname to the short container ID (12 chars) or full ID (64 chars)
+			if len(hostname) == 12 || len(hostname) == 64 {
+				// Verify it looks like a hex string
+				for _, c := range hostname {
+					if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+						return "", errors.New("hostname doesn't match container ID pattern")
+					}
+				}
+				return hostname, nil
+			}
+
+			return "", errors.New("hostname doesn't match expected container ID length")
+		}(); err == nil {
+			slog.DebugContext(context.Background(), "CurrentContainerID: found via hostname", "containerId", id)
+			return id, nil
+		}
+
+		return "", errors.New("no container ID found via cgroup, mountinfo, or hostname")
+	})
 )
 
 // DetectLimits detects the cgroup (v1 or v2) CPU and memory limits applied to
@@ -135,109 +242,6 @@ func DetectLimits() (*Limits, error) {
 	}
 	return limits, nil
 }
-
-// IsDockerContainer reports whether the current process is running inside a
-// Docker container (as opposed to an LXC container, a VM, or bare metal).
-//
-// The distinction matters for host resource stats: in Docker the cgroup
-// limits (--cpus / --memory) are artificial constraints set by the operator
-// and should NOT be used as the host resource totals shown in a dashboard.
-// In LXC, by contrast, the cgroup limits represent the real hardware budget
-// assigned to the container — gopsutil reads the host's /proc values which are
-// higher, so the cgroup limits must be applied to show correct figures.
-//
-// Detection: Docker always creates /.dockerenv inside every container it
-// starts.  LXC does not.  We fall back to a /proc/self/cgroup pattern check
-// as a secondary signal.
-var IsDockerContainer = sync.OnceValue(func() bool {
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		return true
-	}
-	data, err := os.ReadFile("/proc/self/cgroup")
-	if err != nil {
-		return false
-	}
-	return cgroupV1ContainerPattern.Match(data) || cgroupV2ContainerPattern.Match(data)
-})
-
-// CurrentContainerID detects the current container ID using multiple detection methods.
-// It tries cgroup, mountinfo, and hostname in that order.
-var CurrentContainerID = sync.OnceValues(func() (string, error) {
-	// Try cgroup first (works on cgroup v1 and cgroupns=host mode)
-	if id, err := func() (string, error) {
-		// tries to extract container ID from /proc/self/cgroup
-		data, err := os.ReadFile("/proc/self/cgroup")
-		if err != nil {
-			return "", err
-		}
-
-		// Try cgroup v1 pattern
-		if matches := cgroupV1ContainerPattern.FindStringSubmatch(string(data)); len(matches) >= 2 {
-			return matches[1], nil
-		}
-
-		// Try cgroup v2 pattern
-		if matches := cgroupV2ContainerPattern.FindStringSubmatch(string(data)); len(matches) >= 2 {
-			return matches[1], nil
-		}
-
-		return "", errors.New("no container ID found in cgroup")
-	}(); err == nil {
-		slog.DebugContext(context.Background(), "CurrentContainerID: found via cgroup", "containerId", id)
-		return id, nil
-	}
-
-	// Try mountinfo (works when cgroup namespace is private)
-	if id, err := func() (string, error) {
-		// tries to extract container ID from /proc/self/mountinfo
-		// This works even when cgroup namespace is private (cgroupns=private)
-		data, err := os.ReadFile("/proc/self/mountinfo")
-		if err != nil {
-			return "", err
-		}
-
-		for line := range strings.SplitSeq(string(data), "\n") {
-			// Look for Docker container paths in mountinfo
-			_, after, ok := strings.Cut(line, "/docker/containers/")
-			if id, _, _ := strings.Cut(after, "/"); ok && len(id) >= 12 {
-				return id[:min(len(id), 64)], nil
-			}
-		}
-
-		return "", errors.New("no container ID found in mountinfo")
-	}(); err == nil {
-		slog.DebugContext(context.Background(), "CurrentContainerID: found via mountinfo", "containerId", id)
-		return id, nil
-	}
-
-	// Try hostname (Docker often sets hostname to container ID)
-	if id, err := func() (string, error) {
-		// tries to use hostname as container ID
-		// Docker often sets the hostname to the container ID (12 or 64 hex chars)
-		hostname, err := os.Hostname()
-		if err != nil {
-			return "", err
-		}
-
-		// Docker often sets hostname to the short container ID (12 chars) or full ID (64 chars)
-		if len(hostname) == 12 || len(hostname) == 64 {
-			// Verify it looks like a hex string
-			for _, c := range hostname {
-				if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-					return "", errors.New("hostname doesn't match container ID pattern")
-				}
-			}
-			return hostname, nil
-		}
-
-		return "", errors.New("hostname doesn't match expected container ID length")
-	}(); err == nil {
-		slog.DebugContext(context.Background(), "CurrentContainerID: found via hostname", "containerId", id)
-		return id, nil
-	}
-
-	return "", errors.New("no container ID found via cgroup, mountinfo, or hostname")
-})
 
 // ZFSARCReclaimable returns the number of bytes of ZFS ARC (Adaptive
 // Replacement Cache) that the kernel counts as used memory but that can be

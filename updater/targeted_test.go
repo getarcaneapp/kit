@@ -23,12 +23,29 @@ import (
 	updatetypes "kit.getarcane.app/updater/types"
 )
 
-type targetedDocker struct {
-	created    map[string]string
-	containers []container.InspectResponse
-	mutations  int
-	mu         sync.Mutex
-}
+type (
+	targetedDocker struct {
+		created    map[string]string
+		containers []container.InspectResponse
+		mutations  int
+		mu         sync.Mutex
+	}
+
+	targetedComposeAdapter struct {
+		fixture *targetedDocker
+		changes map[string]updatetypes.ServiceImageChange
+		fakeProjectUpdater
+		calls int
+		fail  bool
+	}
+
+	selectiveTargetPuller struct{ failedRef string }
+
+	cancelOnNotify struct {
+		cancel context.CancelFunc
+		once   sync.Once
+	}
+)
 
 func newTargetedContainer(id, constraint string) container.InspectResponse {
 	return container.InspectResponse{
@@ -194,14 +211,6 @@ func TestApplyPendingTargetedRetainsRejected(t *testing.T) {
 	}
 }
 
-type targetedComposeAdapter struct {
-	fixture *targetedDocker
-	changes map[string]updatetypes.ServiceImageChange
-	fakeProjectUpdater
-	calls int
-	fail  bool
-}
-
 func (f *targetedComposeAdapter) UpdateServiceImages(_ context.Context, projectID string, changes map[string]updatetypes.ServiceImageChange) error {
 	f.calls++
 	f.changes = changes
@@ -301,8 +310,6 @@ func TestApplyPendingTargetedScopedClearing(t *testing.T) {
 		t.Fatalf("already configured target recreated: mutations=%d", fixture.mutations)
 	}
 }
-
-type selectiveTargetPuller struct{ failedRef string }
 
 func (p selectiveTargetPuller) PullImage(_ context.Context, ref string, _ io.Writer) error {
 	if ref == p.failedRef {
@@ -491,11 +498,6 @@ func TestApplyPendingAutomaticTagPolicy(t *testing.T) {
 			}
 		})
 	}
-}
-
-type cancelOnNotify struct {
-	cancel context.CancelFunc
-	once   sync.Once
 }
 
 func (n *cancelOnNotify) Notify(context.Context, Notification) error {

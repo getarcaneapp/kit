@@ -14,9 +14,39 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// eventBuffer sizes the fsnotify event channel so bursts don't back up into
-// the kernel queue while the loop is busy attaching a new directory.
-const eventBuffer = 1024
+type (
+	// Watcher watches a directory tree and delivers debounced batches of keys.
+	// Create one with [New]. A Watcher runs once: after Stop it cannot restart.
+	Watcher[K comparable] struct {
+		closeErr error
+		ready    map[K]struct{}
+		wake     chan struct{}
+		done     chan struct{}
+		cancel   context.CancelFunc
+		root     string
+		cfg      Config[K]
+		delivery sync.WaitGroup
+		stopOnce sync.Once
+		lifeMu   sync.Mutex
+		readyMu  sync.Mutex
+		resync   bool
+		started  bool
+		stopped  bool
+	}
+
+	// pending is the batch being debounced. It lives on the run goroutine.
+	pending[K comparable] struct {
+		keys   map[K]struct{}
+		first  time.Time
+		resync bool
+	}
+)
+
+const (
+	// eventBuffer sizes the fsnotify event channel so bursts don't back up into
+	// the kernel queue while the loop is busy attaching a new directory.
+	eventBuffer = 1024
+)
 
 var (
 	// ErrNoKey is returned by [New] when [Config.Key] is nil.
@@ -26,25 +56,6 @@ var (
 	// ErrStopped is returned by [Watcher.Start] after Stop or a failed Start.
 	ErrStopped = errors.New("tripwire: watcher stopped")
 )
-
-// Watcher watches a directory tree and delivers debounced batches of keys.
-// Create one with [New]. A Watcher runs once: after Stop it cannot restart.
-type Watcher[K comparable] struct {
-	closeErr error
-	ready    map[K]struct{}
-	wake     chan struct{}
-	done     chan struct{}
-	cancel   context.CancelFunc
-	root     string
-	cfg      Config[K]
-	delivery sync.WaitGroup
-	stopOnce sync.Once
-	lifeMu   sync.Mutex
-	readyMu  sync.Mutex
-	resync   bool
-	started  bool
-	stopped  bool
-}
 
 // New returns a watcher for root. It does not touch the filesystem until
 // [Watcher.Start].
@@ -136,13 +147,6 @@ func (w *Watcher[K]) open(ctx context.Context, t *tree) (*fsnotify.Watcher, erro
 		w.cfg.Logger.WarnContext(ctx, "tripwire: failed to watch some directories", "path", w.root, "error", walkErr)
 	}
 	return fsw, nil
-}
-
-// pending is the batch being debounced. It lives on the run goroutine.
-type pending[K comparable] struct {
-	keys   map[K]struct{}
-	first  time.Time
-	resync bool
 }
 
 // run owns the subscription, the tree, and the debounce timer. Nothing else

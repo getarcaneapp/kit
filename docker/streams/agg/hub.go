@@ -7,30 +7,32 @@ import (
 	"sync"
 )
 
-// Hub deduplicates poll loops across stream subscribers: the first subscriber
-// for a key starts the runner, later subscribers attach to it, and the runner
-// stops when the last subscriber detaches. Events fan out to each subscriber
-// through a latest-wins mailbox, so events must be states (snapshots, errors)
-// rather than deltas — a slow consumer skips straight to the newest one and
-// can never stall the runner or its peers. The zero Hub is ready to use.
-type Hub[T any] struct {
-	entries map[string]*hubEntry[T]
-	mu      sync.Mutex
-}
+type (
+	// Hub deduplicates poll loops across stream subscribers: the first subscriber
+	// for a key starts the runner, later subscribers attach to it, and the runner
+	// stops when the last subscriber detaches. Events fan out to each subscriber
+	// through a latest-wins mailbox, so events must be states (snapshots, errors)
+	// rather than deltas — a slow consumer skips straight to the newest one and
+	// can never stall the runner or its peers. The zero Hub is ready to use.
+	Hub[T any] struct {
+		entries map[string]*hubEntry[T]
+		mu      sync.Mutex
+	}
 
-type hubEntry[T any] struct {
-	cancel      context.CancelFunc
-	subscribers map[*hubSubscriber[T]]struct{}
-	last        T
-	hasLast     bool
-}
+	hubEntry[T any] struct {
+		cancel      context.CancelFunc
+		subscribers map[*hubSubscriber[T]]struct{}
+		last        T
+		hasLast     bool
+	}
 
-type hubSubscriber[T any] struct {
-	latest T
-	wake   chan struct{}
-	mu     sync.Mutex
-	has    bool
-}
+	hubSubscriber[T any] struct {
+		latest T
+		wake   chan struct{}
+		mu     sync.Mutex
+		has    bool
+	}
+)
 
 // Subscribe attaches to the shared runner for key, starting run when no
 // runner exists yet, and blocks until ctx is done or deliver returns false.

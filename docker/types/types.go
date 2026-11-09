@@ -2,6 +2,8 @@
 // docker package.
 package types
 
-// ProgressWriterKey is the context key for an io.Writer that receives
-// operation progress output, such as a writer wrapping an HTTP response.
-type ProgressWriterKey struct{}
+type (
+	// ProgressWriterKey is the context key for an io.Writer that receives
+	// operation progress output, such as a writer wrapping an HTTP response.
+	ProgressWriterKey struct{}
+)

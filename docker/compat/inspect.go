@@ -20,6 +20,12 @@ import (
 	"kit.getarcane.app"
 )
 
+type (
+	compatibilityClient struct {
+		client.APIClient
+	}
+)
+
 // WrapDockerAPIClientForInspectCompatibility wraps a client so create, inspect,
 // and list calls apply the daemon compatibility shims transparently.
 func WrapDockerAPIClientForInspectCompatibility(apiClient client.APIClient) client.APIClient {
@@ -27,10 +33,6 @@ func WrapDockerAPIClientForInspectCompatibility(apiClient client.APIClient) clie
 		return apiClient
 	}
 	return &compatibilityClient{APIClient: apiClient}
-}
-
-type compatibilityClient struct {
-	client.APIClient
 }
 
 func (c *compatibilityClient) ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {

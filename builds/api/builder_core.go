@@ -20,15 +20,19 @@ import (
 	"kit.getarcane.app/builds/types"
 )
 
-const defaultBuildTimeout = 30 * time.Minute
+type (
+	Service struct {
+		settings             types.SettingsProvider
+		dockerClientProvider types.DockerClientProvider
+		registryAuthProvider types.RegistryAuthProvider
+		logger               *slog.Logger
+		providers            map[string]any
+	}
+)
 
-type Service struct {
-	settings             types.SettingsProvider
-	dockerClientProvider types.DockerClientProvider
-	registryAuthProvider types.RegistryAuthProvider
-	logger               *slog.Logger
-	providers            map[string]any
-}
+const (
+	defaultBuildTimeout = 30 * time.Minute
+)
 
 // NewService constructs a build service. SettingsProvider and DockerClientProvider
 // are required; RegistryAuthProvider and Logger are optional.

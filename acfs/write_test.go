@@ -11,6 +11,18 @@ import (
 	"testing"
 )
 
+type (
+	// relocatingReader moves the directory holding the write aside after the
+	// first read, then returns the rest of the content or fails.
+	relocatingReader struct {
+		t         *testing.T
+		from, to  string
+		remaining string
+		fail      bool
+		moved     bool
+	}
+)
+
 func TestWriteFromRejectsReplacedTemporaryFile(t *testing.T) {
 	for index, named := range testFilesystems("") {
 		t.Run(named.name, func(t *testing.T) {
@@ -54,16 +66,6 @@ func TestWriteFromRejectsReplacedDestination(t *testing.T) {
 			}
 		})
 	}
-}
-
-// relocatingReader moves the directory holding the write aside after the
-// first read, then returns the rest of the content or fails.
-type relocatingReader struct {
-	t         *testing.T
-	from, to  string
-	remaining string
-	fail      bool
-	moved     bool
 }
 
 func (r *relocatingReader) Read(buffer []byte) (int, error) {

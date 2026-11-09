@@ -11,27 +11,29 @@ import (
 	"sync"
 )
 
-type fieldPlan struct {
-	plan      *plan
-	name      string
-	index     int
-	minLength int
-	maxLength int
-	inline    bool
-	text      TextOptions
-}
+type (
+	fieldPlan struct {
+		plan      *plan
+		name      string
+		index     int
+		minLength int
+		maxLength int
+		inline    bool
+		text      TextOptions
+	}
 
-type plan struct {
-	element  *plan
-	fields   []fieldPlan
-	kind     reflect.Kind
-	hasRules bool
-}
+	plan struct {
+		element  *plan
+		fields   []fieldPlan
+		kind     reflect.Kind
+		hasRules bool
+	}
 
-type cachedPlan struct {
-	plan *plan
-	err  error
-}
+	cachedPlan struct {
+		plan *plan
+		err  error
+	}
+)
 
 var plans = struct {
 	values map[reflect.Type]cachedPlan

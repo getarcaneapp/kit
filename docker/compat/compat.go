@@ -16,6 +16,17 @@ import (
 	"kit.getarcane.app"
 )
 
+type (
+	// CreateRequest is the container ContainerCreateWithCompatibility creates.
+	CreateRequest struct {
+		// Options are the create options before any compatibility shim is applied.
+		Options client.ContainerCreateOptions
+		// APIVersion is the daemon API version the shims target. Empty detects it
+		// with DetectDockerAPIVersion.
+		APIVersion string
+	}
+)
+
 const (
 	// NetworkScopedMacAddressMinAPIVersion is the first API version that accepts a
 	// per-network MAC address in endpoint settings.
@@ -139,15 +150,6 @@ func ConnectContainerExtraNetworksForDockerAPI(ctx context.Context, dockerClient
 		}
 	}
 	return nil
-}
-
-// CreateRequest is the container ContainerCreateWithCompatibility creates.
-type CreateRequest struct {
-	// Options are the create options before any compatibility shim is applied.
-	Options client.ContainerCreateOptions
-	// APIVersion is the daemon API version the shims target. Empty detects it
-	// with DetectDockerAPIVersion.
-	APIVersion string
 }
 
 func (r CreateRequest) apiVersion(ctx context.Context, dockerClient client.APIClient) string {

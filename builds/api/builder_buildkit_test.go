@@ -17,6 +17,12 @@ import (
 	"kit.getarcane.app/builds/types"
 )
 
+type (
+	testDockerClientProvider struct {
+		client *moby.Client
+	}
+)
+
 func TestBuildSolveOpt_StagesInlineDockerfile(t *testing.T) {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "app.txt"), []byte("hello\n"), 0o644))
@@ -144,10 +150,6 @@ func createBuildkitTestContext(t *testing.T) string {
 	contextDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
 	return contextDir
-}
-
-type testDockerClientProvider struct {
-	client *moby.Client
 }
 
 func (p testDockerClientProvider) GetClient(context.Context) (*moby.Client, error) {

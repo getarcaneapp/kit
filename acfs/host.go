@@ -6,9 +6,16 @@ import (
 	"strings"
 )
 
-// Host offers the Root operations on absolute host paths without confinement,
-// following symbolic links like the os package. Use acfs.Host{}.
-type Host struct{}
+type (
+	// Host offers the Root operations on absolute host paths without confinement,
+	// following symbolic links like the os package. Use acfs.Host{}.
+	Host struct {
+		// Special lets OpenRead, ReadFile, ReadTo, and OpenFile open FIFOs and
+		// character devices such as /dev/stdin, blocking like the os package.
+		// Directories are still refused, and OpenReadSeek requires a regular file.
+		Special bool
+	}
+)
 
 // cleanHostPath validates an absolute host path and returns its clean form.
 func cleanHostPath(hostPath string) (string, error) {

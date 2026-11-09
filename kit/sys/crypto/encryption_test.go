@@ -10,6 +10,10 @@ import (
 	"testing"
 )
 
+type (
+	errReader struct{}
+)
+
 func TestParseKeyDerivesRawPassphrasesWithoutTruncating(t *testing.T) {
 	key, err := ParseKey("this-is-a-raw-passphrase-that-is-long-enough")
 	if err != nil {
@@ -241,8 +245,6 @@ func TestKeyFileRoundTrip(t *testing.T) {
 		t.Fatalf("file mode = %v, want 0600", got)
 	}
 }
-
-type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) {
 	return 0, errors.New("random unavailable")

@@ -2,22 +2,39 @@ package crypto
 
 import "fmt"
 
-// InvalidKeyError reports invalid encryption key material.
-type InvalidKeyError struct {
-	Reason string
-}
+type (
+	// InvalidKeyError reports invalid encryption key material.
+	InvalidKeyError struct {
+		Reason string
+	}
+
+	// RandomError reports failure from the cryptographic random source.
+	RandomError struct {
+		Err error
+		Op  string
+	}
+
+	// DecodeError reports ciphertext decoding failures.
+	DecodeError struct {
+		Err error
+	}
+
+	// CiphertextError reports malformed ciphertext.
+	CiphertextError struct {
+		Reason string
+	}
+
+	// DecryptError reports authenticated decryption failure.
+	DecryptError struct {
+		Err error
+	}
+)
 
 func (e *InvalidKeyError) Error() string {
 	if e == nil || e.Reason == "" {
 		return "invalid encryption key"
 	}
 	return "invalid encryption key: " + e.Reason
-}
-
-// RandomError reports failure from the cryptographic random source.
-type RandomError struct {
-	Err error
-	Op  string
 }
 
 func (e *RandomError) Error() string {
@@ -37,11 +54,6 @@ func (e *RandomError) Unwrap() error {
 	return e.Err
 }
 
-// DecodeError reports ciphertext decoding failures.
-type DecodeError struct {
-	Err error
-}
-
 func (e *DecodeError) Error() string {
 	if e == nil {
 		return "failed to decode ciphertext"
@@ -56,21 +68,11 @@ func (e *DecodeError) Unwrap() error {
 	return e.Err
 }
 
-// CiphertextError reports malformed ciphertext.
-type CiphertextError struct {
-	Reason string
-}
-
 func (e *CiphertextError) Error() string {
 	if e == nil || e.Reason == "" {
 		return "invalid ciphertext"
 	}
 	return "invalid ciphertext: " + e.Reason
-}
-
-// DecryptError reports authenticated decryption failure.
-type DecryptError struct {
-	Err error
 }
 
 func (e *DecryptError) Error() string {

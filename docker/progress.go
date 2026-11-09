@@ -10,7 +10,20 @@ import (
 	"github.com/moby/moby/client/pkg/jsonmessage"
 )
 
-type flusher interface{ Flush() }
+type (
+	flusher interface{ Flush() }
+
+	nopWriteCloser struct{ io.Writer }
+
+	logLineWriter struct {
+		dst    io.Writer
+		buffer []byte
+
+		// Writers such as compose's plain progress renderer write from multiple
+		// goroutines concurrently; the line buffer must be guarded.
+		mu sync.Mutex
+	}
+)
 
 // NewLogLineWriter returns a writer that splits everything written to it on
 // newlines and emits each line as a {"log":"<line>"} NDJSON frame to dst,
@@ -25,18 +38,7 @@ func NewLogLineWriter(dst io.Writer) io.WriteCloser {
 	return &logLineWriter{dst: dst}
 }
 
-type nopWriteCloser struct{ io.Writer }
-
 func (nopWriteCloser) Close() error { return nil }
-
-type logLineWriter struct {
-	dst    io.Writer
-	buffer []byte
-
-	// Writers such as compose's plain progress renderer write from multiple
-	// goroutines concurrently; the line buffer must be guarded.
-	mu sync.Mutex
-}
 
 func (w *logLineWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()

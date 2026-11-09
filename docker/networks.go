@@ -13,7 +13,9 @@ import (
 	"kit.getarcane.app"
 )
 
-const defaultNetworkMode = "bridge"
+const (
+	defaultNetworkMode = "bridge"
+)
 
 // IsDefaultNetwork reports whether name is one of Docker's built-in networks.
 func IsDefaultNetwork(name string) bool {

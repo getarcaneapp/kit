@@ -14,6 +14,13 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+type (
+	// recorder collects batches on a channel.
+	recorder[K comparable] struct {
+		batches chan Batch[K]
+	}
+)
+
 const (
 	fastDebounce = 25 * time.Millisecond
 	waitFor      = 3 * time.Second
@@ -28,11 +35,6 @@ func composeKey(e Event) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-// recorder collects batches on a channel.
-type recorder[K comparable] struct {
-	batches chan Batch[K]
 }
 
 func (r *recorder[K]) onBatch(_ context.Context, b Batch[K]) {

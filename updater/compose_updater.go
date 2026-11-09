@@ -15,17 +15,19 @@ import (
 	"kit.getarcane.app/updater/internal/compose"
 )
 
-type dockerComposeProjectUpdater struct {
-	dockerClientProvider DockerClientProvider
-}
+type (
+	dockerComposeProjectUpdater struct {
+		dockerClientProvider DockerClientProvider
+	}
 
-type dockerComposeProjectMetadata struct {
-	projectName string
-	workingDir  string
-	dockerHost  string
-	configFiles []string
-	envFiles    []string
-}
+	dockerComposeProjectMetadata struct {
+		projectName string
+		workingDir  string
+		dockerHost  string
+		configFiles []string
+		envFiles    []string
+	}
+)
 
 // NewDockerComposeProjectUpdater returns a Docker Compose CLI project updater.
 func NewDockerComposeProjectUpdater(provider DockerClientProvider) ProjectUpdater {

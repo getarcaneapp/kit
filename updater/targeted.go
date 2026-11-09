@@ -18,11 +18,13 @@ import (
 	"kit.getarcane.app/updater/refs"
 )
 
-type targetedRecord struct {
-	record  ImageUpdateRecord
-	targets []string
-	failed  bool
-}
+type (
+	targetedRecord struct {
+		record  ImageUpdateRecord
+		targets []string
+		failed  bool
+	}
+)
 
 // applyTargetedRecords applies container-scoped and tag records by recreating exactly the containers they
 // target, and clears a record only once every one of its targets succeeded.

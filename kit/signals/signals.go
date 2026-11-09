@@ -18,9 +18,11 @@ License: Apache2 (https://github.com/kubernetes-sigs/controller-runtime/blob/849
 Also referenced from pocket-id/pocket-id
 */
 
-var onlyOneSignalHandler = make(chan struct{})
+const (
+	forcedShutdownTimeout = 30 * time.Second
+)
 
-const forcedShutdownTimeout = 30 * time.Second
+var onlyOneSignalHandler = make(chan struct{})
 
 // SignalContext returns a context that is canceled when the application receives an interrupt signal.
 // A second signal or an expired graceful-shutdown deadline forces the process to exit.

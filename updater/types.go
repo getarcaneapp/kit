@@ -7,54 +7,120 @@ import (
 	"kit.getarcane.app"
 )
 
-// Options configures an updater run.
-type Options struct {
-	// Force applies updates even when the digest check says the image is
-	// already current.
-	Force bool `json:"forceUpdate,omitempty"`
-	// DryRun reports what would be updated without pulling or recreating
-	// anything.
-	DryRun bool `json:"dryRun,omitempty"`
-	// IgnoreSettingsExclusions lets a user-requested run update the containers it targets despite a settings
-	// exclusion or updater opt-out label. Implicit dependency restarts still honor both, and Swarm, unmanaged,
-	// and immutability checks still apply.
-	IgnoreSettingsExclusions bool `json:"ignoreSettingsExclusions,omitempty"`
-}
+type (
+	// Options configures an updater run.
+	Options struct {
+		// Force applies updates even when the digest check says the image is
+		// already current.
+		Force bool `json:"forceUpdate,omitempty"`
+		// DryRun reports what would be updated without pulling or recreating
+		// anything.
+		DryRun bool `json:"dryRun,omitempty"`
+		// IgnoreSettingsExclusions lets a user-requested run update the containers it targets despite a settings
+		// exclusion or updater opt-out label. Implicit dependency restarts still honor both, and Swarm, unmanaged,
+		// and immutability checks still apply.
+		IgnoreSettingsExclusions bool `json:"ignoreSettingsExclusions,omitempty"`
+	}
 
-// exclusionPolicy tells containerEligibility whether to consult the updater label and the SettingsProvider's exclusions.
-type exclusionPolicy bool
+	// exclusionPolicy tells containerEligibility whether to consult the updater label and the SettingsProvider's exclusions.
+	exclusionPolicy bool
+
+	// ResourceResult represents the result of an update operation on one resource.
+	ResourceResult struct {
+		ResourceID      string         `json:"resourceId"`
+		ResourceName    string         `json:"resourceName,omitempty"`
+		ResourceType    ResourceType   `json:"resourceType"`
+		Status          ResourceStatus `json:"status"`
+		OldImage        string         `json:"oldImage,omitempty"`
+		NewImage        string         `json:"newImage,omitempty"`
+		Details         map[string]any `json:"details,omitempty"`
+		Error           string         `json:"error,omitempty"`
+		UpdateAvailable bool           `json:"updateAvailable,omitempty"`
+		UpdateApplied   bool           `json:"updateApplied,omitempty"`
+	}
+
+	// Result represents a complete updater run.
+	Result struct {
+		StartTime time.Time        `json:"startTime,omitzero"`
+		EndTime   time.Time        `json:"endTime,omitzero"`
+		Items     []ResourceResult `json:"items"`
+		Checked   int              `json:"checked"`
+		Updated   int              `json:"updated"`
+		Restarted int              `json:"restarted,omitempty"`
+		Skipped   int              `json:"skipped"`
+		Failed    int              `json:"failed"`
+		Success   bool             `json:"success,omitempty"`
+	}
+
+	// Status reports resources that are actively being updated by this service instance.
+	Status struct {
+		ContainerIDs       []string `json:"containerIds"`
+		ProjectIDs         []string `json:"projectIds"`
+		UpdatingContainers int      `json:"updatingContainers"`
+		UpdatingProjects   int      `json:"updatingProjects"`
+	}
+
+	// ImageUpdateRecord is a pending image update known to a caller-provided store.
+	ImageUpdateRecord struct {
+		LatestVersion *string
+		CurrentDigest *string
+		LatestDigest  *string
+		LastError     *string
+		CheckTime     time.Time
+		// ContainerID scopes this record to one container; ID remains the image/store ID.
+		ContainerID    string
+		ID             string
+		Repository     string
+		Tag            string
+		UpdateType     UpdateType
+		CurrentVersion string
+		HasUpdate      bool
+	}
+
+	// ComposeProject identifies a compose project known to the host application.
+	ComposeProject struct {
+		ID   string
+		Name string
+	}
+
+	// SelfUpdateTarget describes a container that should be handled by a host self-updater.
+	SelfUpdateTarget struct {
+		ContainerID   string
+		ContainerName string
+		InstanceType  string
+		Labels        map[string]string
+		// NewImageRef is the resolved image reference the self-updater should
+		// upgrade the container to. Empty when the updater could not resolve one.
+		NewImageRef string
+		// PullImageRef is an immutable reference the host froze the update to; the container is still
+		// recreated as NewImageRef. Empty when the host pulls NewImageRef directly.
+		PullImageRef string
+	}
+
+	// Notification describes a successful container update notification.
+	Notification struct {
+		ContainerID   string
+		ContainerName string
+		ImageRef      string
+		OldImage      string
+		NewImage      string
+	}
+
+	// Event describes a generic updater event for host applications.
+	Event struct {
+		Metadata     map[string]any
+		Phase        string
+		Severity     string
+		ResourceID   string
+		ResourceName string
+		ResourceType ResourceType
+	}
+)
 
 const (
 	enforceSettingsExclusions exclusionPolicy = true
 	ignoreSettingsExclusions  exclusionPolicy = false
 )
-
-// ResourceResult represents the result of an update operation on one resource.
-type ResourceResult struct {
-	ResourceID      string         `json:"resourceId"`
-	ResourceName    string         `json:"resourceName,omitempty"`
-	ResourceType    ResourceType   `json:"resourceType"`
-	Status          ResourceStatus `json:"status"`
-	OldImage        string         `json:"oldImage,omitempty"`
-	NewImage        string         `json:"newImage,omitempty"`
-	Details         map[string]any `json:"details,omitempty"`
-	Error           string         `json:"error,omitempty"`
-	UpdateAvailable bool           `json:"updateAvailable,omitempty"`
-	UpdateApplied   bool           `json:"updateApplied,omitempty"`
-}
-
-// Result represents a complete updater run.
-type Result struct {
-	StartTime time.Time        `json:"startTime,omitzero"`
-	EndTime   time.Time        `json:"endTime,omitzero"`
-	Items     []ResourceResult `json:"items"`
-	Checked   int              `json:"checked"`
-	Updated   int              `json:"updated"`
-	Restarted int              `json:"restarted,omitempty"`
-	Skipped   int              `json:"skipped"`
-	Failed    int              `json:"failed"`
-	Success   bool             `json:"success,omitempty"`
-}
 
 // Duration reports how long the run took. It is zero until the run finishes.
 func (r Result) Duration() time.Duration {
@@ -62,31 +128,6 @@ func (r Result) Duration() time.Duration {
 		return 0
 	}
 	return r.EndTime.Sub(r.StartTime)
-}
-
-// Status reports resources that are actively being updated by this service instance.
-type Status struct {
-	ContainerIDs       []string `json:"containerIds"`
-	ProjectIDs         []string `json:"projectIds"`
-	UpdatingContainers int      `json:"updatingContainers"`
-	UpdatingProjects   int      `json:"updatingProjects"`
-}
-
-// ImageUpdateRecord is a pending image update known to a caller-provided store.
-type ImageUpdateRecord struct {
-	LatestVersion *string
-	CurrentDigest *string
-	LatestDigest  *string
-	LastError     *string
-	CheckTime     time.Time
-	// ContainerID scopes this record to one container; ID remains the image/store ID.
-	ContainerID    string
-	ID             string
-	Repository     string
-	Tag            string
-	UpdateType     UpdateType
-	CurrentVersion string
-	HasUpdate      bool
 }
 
 // NeedsUpdate reports whether the record indicates a pending update.
@@ -124,43 +165,4 @@ func (i ImageUpdateRecord) NewImageRef() string {
 		return repo + ":" + strings.TrimSpace(kit.FromPtr(i.LatestVersion))
 	}
 	return i.ImageRef()
-}
-
-// ComposeProject identifies a compose project known to the host application.
-type ComposeProject struct {
-	ID   string
-	Name string
-}
-
-// SelfUpdateTarget describes a container that should be handled by a host self-updater.
-type SelfUpdateTarget struct {
-	ContainerID   string
-	ContainerName string
-	InstanceType  string
-	Labels        map[string]string
-	// NewImageRef is the resolved image reference the self-updater should
-	// upgrade the container to. Empty when the updater could not resolve one.
-	NewImageRef string
-	// PullImageRef is an immutable reference the host froze the update to; the container is still
-	// recreated as NewImageRef. Empty when the host pulls NewImageRef directly.
-	PullImageRef string
-}
-
-// Notification describes a successful container update notification.
-type Notification struct {
-	ContainerID   string
-	ContainerName string
-	ImageRef      string
-	OldImage      string
-	NewImage      string
-}
-
-// Event describes a generic updater event for host applications.
-type Event struct {
-	Metadata     map[string]any
-	Phase        string
-	Severity     string
-	ResourceID   string
-	ResourceName string
-	ResourceType ResourceType
 }

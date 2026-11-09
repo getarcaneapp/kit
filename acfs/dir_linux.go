@@ -22,39 +22,50 @@ import (
 	"kit.getarcane.app"
 )
 
+type (
+	// dir is a directory held open by descriptor.
+	dir struct {
+		rootName string
+		// path is the directory's lexical path relative to the root when opened.
+		path string
+		// host is the directory's host path for a Host directory, else empty.
+		host string
+		fd   int
+		// borrowed marks a descriptor owned by another dir, which Close leaves open.
+		borrowed bool
+	}
+
+	// statInfo is the os.FileInfo of a raw Stat_t, decoded like os.Lstat. It holds
+	// a syscall.Stat_t so Sys matches os.Lstat.
+	statInfo struct {
+		name string
+		stat syscall.Stat_t
+	}
+)
+
 const (
 	removeAllBatchSize = 1024
 	// noFollowResolve refuses every symbolic link, magic links, and escapes.
 	noFollowResolve = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS
 )
 
-// openat2Available reports whether openat2 (Linux 5.6+) is usable.
-var openat2Available = sync.OnceValue(func() bool {
-	fd, err := unix.Openat2(unix.AT_FDCWD, ".", &unix.OpenHow{Flags: unix.O_PATH | unix.O_CLOEXEC, Resolve: noFollowResolve})
-	if err != nil {
-		return false
-	}
-	_ = unix.Close(fd)
-	return true
-})
+var (
+	// openat2Available reports whether openat2 (Linux 5.6+) is usable.
+	openat2Available = sync.OnceValue(func() bool {
+		fd, err := unix.Openat2(unix.AT_FDCWD, ".", &unix.OpenHow{Flags: unix.O_PATH | unix.O_CLOEXEC, Resolve: noFollowResolve})
+		if err != nil {
+			return false
+		}
+		_ = unix.Close(fd)
+		return true
+	})
 
-// forceOpenatWalk makes tests use the openat walk.
-var forceOpenatWalk bool
+	// forceOpenatWalk makes tests use the openat walk.
+	forceOpenatWalk bool
 
-// renameat2 is replaced by tests to simulate missing RENAME_NOREPLACE.
-var renameat2 = unix.Renameat2
-
-// dir is a directory held open by descriptor.
-type dir struct {
-	rootName string
-	// path is the directory's lexical path relative to the root when opened.
-	path string
-	// host is the directory's host path for a Host directory, else empty.
-	host string
-	fd   int
-	// borrowed marks a descriptor owned by another dir, which Close leaves open.
-	borrowed bool
-}
+	// renameat2 is replaced by tests to simulate missing RENAME_NOREPLACE.
+	renameat2 = unix.Renameat2
+)
 
 func openMutationRoot(rootPath string) (*mutationRoot, error) {
 	fd, err := ignoringEINTR(func() (int, error) {
@@ -103,8 +114,8 @@ func statWithoutLinks(rootPath, relativePath string) (os.FileInfo, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var st unix.Stat_t
-	err = unix.Fstat(fd, &st)
+	var st syscall.Stat_t
+	err = syscall.Fstat(fd, &st)
 	_ = unix.Close(fd)
 	if err != nil || st.Mode&unix.S_IFMT == unix.S_IFLNK {
 		return nil, false
@@ -113,12 +124,6 @@ func statWithoutLinks(rootPath, relativePath string) (os.FileInfo, bool) {
 		name: path.Base(relativePath),
 		stat: st,
 	}, true
-}
-
-// statInfo is the os.FileInfo of a raw Stat_t, decoded like os.Lstat.
-type statInfo struct {
-	name string
-	stat unix.Stat_t
 }
 
 func (i statInfo) Name() string {

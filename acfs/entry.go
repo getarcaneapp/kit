@@ -16,6 +16,7 @@ import (
 )
 
 func newEntry(name, logicalPath, mode, linkTarget string, info os.FileInfo) acfstypes.Entry {
+	uid, gid, device, inode := fileIdentity(info)
 	return acfstypes.Entry{
 		ModTime:         info.ModTime().Truncate(time.Second),
 		ModTimeUnixNano: info.ModTime().UnixNano(),
@@ -24,6 +25,10 @@ func newEntry(name, logicalPath, mode, linkTarget string, info os.FileInfo) acfs
 		Mode:            mode,
 		LinkTarget:      linkTarget,
 		Size:            info.Size(),
+		Device:          device,
+		Inode:           inode,
+		UID:             uid,
+		GID:             gid,
 		UnixMode:        uint32(info.Mode()),
 		IsDirectory:     info.IsDir(),
 		IsSymlink:       info.Mode()&os.ModeSymlink != 0,

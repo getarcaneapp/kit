@@ -31,6 +31,8 @@ var (
 	ErrNotEmpty = errors.New("directory is not empty")
 	// ErrInvalidOpenOptions indicates an OpenOptions combination that cannot open a file.
 	ErrInvalidOpenOptions = errors.New("invalid open options")
+	// ErrInvalidWriteOptions indicates a WriteOptions combination that cannot write a file.
+	ErrInvalidWriteOptions = errors.New("invalid write options")
 	// ErrReplaced indicates that another process replaced the staged or published
 	// file, so the write did not succeed.
 	ErrReplaced = errors.New("staged file was replaced during the write")

@@ -12,13 +12,15 @@ import (
 	"kit.getarcane.app/updater/types"
 )
 
-type composeGroup struct {
-	err         error
-	images      map[string]types.ServiceImageChange
-	projectName string
-	services    []string
-	tagChanges  bool
-}
+type (
+	composeGroup struct {
+		err         error
+		images      map[string]types.ServiceImageChange
+		projectName string
+		services    []string
+		tagChanges  bool
+	}
+)
 
 // buildComposeGroups groups planned Compose containers by resolved project, flagging conflicting service targets.
 func (s *Service) buildComposeGroups(ctx context.Context, sorted []deps.ContainerWithDeps, plansByName map[string]*restartPlan) map[string]composeGroup {

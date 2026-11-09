@@ -18,26 +18,34 @@ import (
 	"kit.getarcane.app/updater/refs"
 )
 
-// Resolver resolves a remote image digest without pulling. It is structural so
-// the root package's public resolver satisfies it without an import cycle.
-type Resolver interface {
-	ImageDigest(ctx context.Context, imageRef string) (string, error)
-}
+type (
+	// Resolver resolves a remote image digest without pulling. It is structural so
+	// the root package's public resolver satisfies it without an import cycle.
+	Resolver interface {
+		ImageDigest(ctx context.Context, imageRef string) (string, error)
+	}
 
-// Checker compares local image digests with remote digests.
-type Checker struct {
-	dockerClient   *client.Client
-	digestResolver Resolver
-}
+	// Checker compares local image digests with remote digests.
+	Checker struct {
+		dockerClient   *client.Client
+		digestResolver Resolver
+	}
 
-// CheckResult contains the result of a digest check.
-type CheckResult struct {
-	Error         error
-	LocalDigest   string
-	RemoteDigest  string
-	NeedsUpdate   bool
-	CheckedViaAPI bool
-}
+	// CheckResult contains the result of a digest check.
+	CheckResult struct {
+		Error         error
+		LocalDigest   string
+		RemoteDigest  string
+		NeedsUpdate   bool
+		CheckedViaAPI bool
+	}
+
+	// RefIDCache memoizes Checker.GetImageIDsForRef lookups by image reference.
+	RefIDCache struct {
+		checker *Checker
+		ids     *cache.Cache[string, []string]
+	}
+)
 
 // NewChecker creates a digest checker. Both arguments are optional; checks that
 // need a missing one report an error.
@@ -172,12 +180,6 @@ func (c *Checker) GetImageIDsForRef(ctx context.Context, ref string) ([]string, 
 		}
 	}
 	return ids, nil
-}
-
-// RefIDCache memoizes Checker.GetImageIDsForRef lookups by image reference.
-type RefIDCache struct {
-	checker *Checker
-	ids     *cache.Cache[string, []string]
 }
 
 // NewRefIDCache creates a memoizing image-ID lookup around checker.

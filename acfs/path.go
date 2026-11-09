@@ -14,6 +14,17 @@ import (
 	kitfs "kit.getarcane.app/fs"
 )
 
+type (
+	// resolveOptions configures resolvePath.
+	resolveOptions struct {
+		// FollowFinal follows a symbolic link in the final component.
+		FollowFinal bool
+		// HostEquivalent refuses with ErrOutsideRoot any link that resolves differently
+		// on the host, such as an absolute target.
+		HostEquivalent bool
+	}
+)
+
 const (
 	logicalVolumeRoot = "/volume"
 	maxSymlinkHops    = 40
@@ -42,15 +53,6 @@ func (r Root) LogicalPath(absPath string) (string, error) {
 		return "", fmt.Errorf("%w: %q is outside %q", ErrOutsideRoot, absPath, r.Path)
 	}
 	return kitfs.LogicalPath(filepath.ToSlash(relative)), nil
-}
-
-// resolveOptions configures resolvePath.
-type resolveOptions struct {
-	// FollowFinal follows a symbolic link in the final component.
-	FollowFinal bool
-	// HostEquivalent refuses with ErrOutsideRoot any link that resolves differently
-	// on the host, such as an absolute target.
-	HostEquivalent bool
 }
 
 // resolvePath resolves relativePath through links inside root, returning the

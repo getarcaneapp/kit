@@ -10,65 +10,67 @@ import (
 	"kit.getarcane.app"
 )
 
+type (
+	// StatsHistorySample is a compact history sample for container CPU and memory
+	// usage.
+	StatsHistorySample struct {
+		CPUTenths        uint16 `json:"cpuTenths"`
+		MemoryTenths     uint16 `json:"memoryTenths"`
+		MemoryUsageBytes uint64 `json:"memoryUsageBytes"`
+	}
+
+	// StatsStreamPayload is a container stats stream payload.
+	StatsStreamPayload struct {
+		StatsHistory []StatsHistorySample `json:"statsHistory,omitempty"`
+		dockercontainer.StatsResponse
+		CurrentHistorySample StatsHistorySample `json:"currentHistorySample"`
+	}
+
+	// StoreConfig configures a Store. Zero or negative fields use the defaults.
+	StoreConfig struct {
+		// Capacity is the number of samples retained per container. Default 30.
+		Capacity int
+		// TTL is how long an inactive container history is retained. Default 10 minutes.
+		TTL time.Duration
+		// PruneInterval is the minimum time between automatic pruning passes. Default 1 minute.
+		PruneInterval time.Duration
+	}
+
+	// RecordRequest is one sample passed to Store.Record.
+	RecordRequest struct {
+		// RecordedAt timestamps the sample. Zero means now.
+		RecordedAt time.Time
+		// ContainerID selects the history the sample is appended to.
+		ContainerID string
+		// Sample is the value appended to the history.
+		Sample StatsHistorySample
+		// IncludeHistory makes Record return the history after appending.
+		IncludeHistory bool
+	}
+
+	// Store keeps bounded per-container stats history.
+	Store struct {
+		lastPrune     time.Time
+		histories     map[string]*historyBuffer
+		capacity      int
+		ttl           time.Duration
+		pruneInterval time.Duration
+		mu            sync.Mutex
+	}
+
+	historyBuffer struct {
+		updatedAt time.Time
+		samples   []StatsHistorySample
+		start     int
+		count     int
+	}
+)
+
 const (
 	DefaultHistoryCapacity = 30
 	defaultHistoryTTL      = 10 * time.Minute
 	defaultPruneInterval   = time.Minute
 )
-
-// StatsHistorySample is a compact history sample for container CPU and memory
-// usage.
-type StatsHistorySample struct {
-	CPUTenths        uint16 `json:"cpuTenths"`
-	MemoryTenths     uint16 `json:"memoryTenths"`
-	MemoryUsageBytes uint64 `json:"memoryUsageBytes"`
-}
-
-// StatsStreamPayload is a container stats stream payload.
-type StatsStreamPayload struct {
-	StatsHistory []StatsHistorySample `json:"statsHistory,omitempty"`
-	dockercontainer.StatsResponse
-	CurrentHistorySample StatsHistorySample `json:"currentHistorySample"`
-}
-
-// StoreConfig configures a Store. Zero or negative fields use the defaults.
-type StoreConfig struct {
-	// Capacity is the number of samples retained per container. Default 30.
-	Capacity int
-	// TTL is how long an inactive container history is retained. Default 10 minutes.
-	TTL time.Duration
-	// PruneInterval is the minimum time between automatic pruning passes. Default 1 minute.
-	PruneInterval time.Duration
-}
-
-// RecordRequest is one sample passed to Store.Record.
-type RecordRequest struct {
-	// RecordedAt timestamps the sample. Zero means now.
-	RecordedAt time.Time
-	// ContainerID selects the history the sample is appended to.
-	ContainerID string
-	// Sample is the value appended to the history.
-	Sample StatsHistorySample
-	// IncludeHistory makes Record return the history after appending.
-	IncludeHistory bool
-}
-
-// Store keeps bounded per-container stats history.
-type Store struct {
-	lastPrune     time.Time
-	histories     map[string]*historyBuffer
-	capacity      int
-	ttl           time.Duration
-	pruneInterval time.Duration
-	mu            sync.Mutex
-}
-
-type historyBuffer struct {
-	updatedAt time.Time
-	samples   []StatsHistorySample
-	start     int
-	count     int
-}
 
 // NewStore creates a Store configured by cfg. The zero Store is also usable and
 // uses the defaults.

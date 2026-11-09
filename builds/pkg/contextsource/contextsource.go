@@ -9,12 +9,14 @@ import (
 	"kit.getarcane.app/builds/types"
 )
 
-type GitBuildContextSource struct {
-	Raw           string
-	RepositoryURL string
-	Ref           string
-	Subdir        string
-}
+type (
+	GitBuildContextSource struct {
+		Raw           string
+		RepositoryURL string
+		Ref           string
+		Subdir        string
+	}
+)
 
 func ParseGitBuildContextSource(raw string) (*GitBuildContextSource, bool, error) {
 	trimmed := strings.TrimSpace(raw)

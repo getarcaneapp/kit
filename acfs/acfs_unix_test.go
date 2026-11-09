@@ -185,3 +185,56 @@ func findEntry(t *testing.T, entries []acfstypes.Entry, name string) acfstypes.E
 	t.Fatalf("entry %q not found in %#v", name, entries)
 	return acfstypes.Entry{}
 }
+
+func TestEntryIdentity(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFixtureFile(t, filepath.Join(dir, "file"), "data", 0o600)
+	if err := os.Link(filepath.Join(dir, "file"), filepath.Join(dir, "hardlink")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "file"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat := info.Sys().(*syscall.Stat_t)
+	want := acfstypes.Entry{
+		Device: uint64(int64(stat.Dev)),
+		Inode:  stat.Ino,
+		UID:    int(stat.Uid),
+		GID:    int(stat.Gid),
+	}
+
+	ctx := t.Context()
+	rootEntry, err := Root{Path: dir}.Stat(ctx, "/file", acfstypes.StatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostEntry, err := Host{}.Stat(ctx, filepath.Join(dir, "file"), acfstypes.StatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := Root{Path: dir}.List(ctx, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, entry := range map[string]acfstypes.Entry{
+		"Root.Stat":     rootEntry,
+		"Host.Stat":     hostEntry,
+		"List file":     findEntry(t, listed, "file"),
+		"List hardlink": findEntry(t, listed, "hardlink"),
+	} {
+		if entry.Device != want.Device || entry.Inode != want.Inode || entry.UID != want.UID || entry.GID != want.GID {
+			t.Errorf("%s identity = dev %d ino %d uid %d gid %d, want dev %d ino %d uid %d gid %d",
+				name, entry.Device, entry.Inode, entry.UID, entry.GID, want.Device, want.Inode, want.UID, want.GID)
+		}
+	}
+	directory, err := Root{Path: dir}.Stat(ctx, "/", acfstypes.StatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directory.Inode == 0 || directory.Inode == want.Inode {
+		t.Errorf("root directory inode = %d, want a distinct non-zero inode", directory.Inode)
+	}
+}

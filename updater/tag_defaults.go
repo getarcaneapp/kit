@@ -12,7 +12,9 @@ import (
 	"kit.getarcane.app/updater/types"
 )
 
-type defaultRegistryTagLister struct{ httpClient *http.Client }
+type (
+	defaultRegistryTagLister struct{ httpClient *http.Client }
+)
 
 // NewRegistryTagLister lists registry tags using local Docker credentials.
 func NewRegistryTagLister() types.RegistryTagLister { return defaultRegistryTagLister{} }

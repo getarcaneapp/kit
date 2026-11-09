@@ -9,18 +9,20 @@ import (
 	"kit.getarcane.app/updater/types"
 )
 
-// LabelPolicy decides from a container's labels whether the updater may touch it, whether the host must
-// update it itself, and how to stop it. New fills nil funcs from DefaultLabelPolicy.
-type LabelPolicy struct {
-	TagPolicyFunc          func(map[string]string) types.Policy
-	IsUpdateDisabledFunc   func(map[string]string) bool
-	IsSelfUpdateTargetFunc func(map[string]string) bool
-	IsAgentFunc            func(map[string]string) bool
-	IsServerFunc           func(map[string]string) bool
-	IsSwarmTaskFunc        func(map[string]string) bool
-	StopSignalFunc         func(map[string]string) string
-	UnmanagedReasonFunc    func(map[string]string) string
-}
+type (
+	// LabelPolicy decides from a container's labels whether the updater may touch it, whether the host must
+	// update it itself, and how to stop it. New fills nil funcs from DefaultLabelPolicy.
+	LabelPolicy struct {
+		TagPolicyFunc          func(map[string]string) types.Policy
+		IsUpdateDisabledFunc   func(map[string]string) bool
+		IsSelfUpdateTargetFunc func(map[string]string) bool
+		IsAgentFunc            func(map[string]string) bool
+		IsServerFunc           func(map[string]string) bool
+		IsSwarmTaskFunc        func(map[string]string) bool
+		StopSignalFunc         func(map[string]string) string
+		UnmanagedReasonFunc    func(map[string]string) string
+	}
+)
 
 // DefaultLabelPolicy returns the Arcane-compatible label behavior New uses for
 // any field a caller leaves nil. It sets no UnmanagedReasonFunc, so by default

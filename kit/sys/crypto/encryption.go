@@ -18,6 +18,30 @@ import (
 	atomicwriter "kit.getarcane.app/fs/atomic"
 )
 
+type (
+	// Config contains the key material used to initialize the package default
+	// encryptor for applications that have not yet threaded an Encryptor through
+	// every callsite.
+	Config struct {
+		EncryptionKey string
+		Environment   string
+		AgentMode     bool
+	}
+
+	// Encryptor encrypts and decrypts strings with AES-GCM.
+	Encryptor struct {
+		keys [][]byte
+	}
+
+	// Keys is the key material for an Encryptor.
+	Keys struct {
+		// Primary is the AES-256 key used to encrypt and tried first when decrypting.
+		Primary []byte
+		// Previous holds retired keys that are only used to decrypt during rotation.
+		Previous [][]byte
+	}
+)
+
 const (
 	// KeySize is the AES-256 key size used by Encryptor.
 	KeySize = 32
@@ -29,15 +53,6 @@ var (
 	randReader       = rand.Reader
 	defaultEncryptor atomic.Pointer[Encryptor]
 )
-
-// Config contains the key material used to initialize the package default
-// encryptor for applications that have not yet threaded an Encryptor through
-// every callsite.
-type Config struct {
-	EncryptionKey string
-	Environment   string
-	AgentMode     bool
-}
 
 // InitEncryption initializes the package default encryptor. Applications should
 // prefer constructing an Encryptor with New and passing it explicitly.
@@ -98,19 +113,6 @@ func Default() (*Encryptor, error) {
 		return nil, &InvalidKeyError{Reason: "encryption not initialized"}
 	}
 	return encryptor, nil
-}
-
-// Encryptor encrypts and decrypts strings with AES-GCM.
-type Encryptor struct {
-	keys [][]byte
-}
-
-// Keys is the key material for an Encryptor.
-type Keys struct {
-	// Primary is the AES-256 key used to encrypt and tried first when decrypting.
-	Primary []byte
-	// Previous holds retired keys that are only used to decrypt during rotation.
-	Previous [][]byte
 }
 
 // New creates an Encryptor from keys. Every key must be KeySize bytes.

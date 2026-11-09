@@ -18,6 +18,67 @@ import (
 	"github.com/opencontainers/go-digest"
 )
 
+type (
+	fakeDockerClientProvider struct {
+		client *client.Client
+		err    error
+		calls  int
+	}
+
+	fakePendingStore struct {
+		records []ImageUpdateRecord
+		cleared []string
+	}
+
+	fakeRunRecorder struct {
+		results []ResourceResult
+	}
+
+	fakePuller struct {
+		err    error
+		after  func(imageRef string)
+		pulled []string
+	}
+
+	// fakeSettings excludes the listed container names or IDs the way a host's
+	// settings would. Its list never changes: the engine only reads it.
+	fakeSettings struct {
+		excluded []string
+	}
+
+	fakeDigestResolver struct{}
+
+	countingDigestResolver struct {
+		err    error
+		digest string
+		calls  int
+	}
+
+	fakeProjectUpdater struct {
+		err         error
+		projects    map[string]ComposeProject
+		updateCalls []string
+		delay       time.Duration
+	}
+
+	fakeSelfUpdater struct {
+		targets []SelfUpdateTarget
+	}
+
+	fakeEventRecorder struct {
+		events []Event
+	}
+
+	captureLogHandler struct {
+		records []slog.Record
+	}
+
+	recordingSelfUpdater struct {
+		operations *[]string
+		targets    []SelfUpdateTarget
+	}
+)
+
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	_, err := New(Config{OperationTimeout: -time.Second})
 	if err == nil {
@@ -141,12 +202,6 @@ func newServiceForTest(t *testing.T, config Config) *Service {
 	return service
 }
 
-type fakeDockerClientProvider struct {
-	client *client.Client
-	err    error
-	calls  int
-}
-
 func (f *fakeDockerClientProvider) DockerClient(ctx context.Context) (*client.Client, error) {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -155,11 +210,6 @@ func (f *fakeDockerClientProvider) DockerClient(ctx context.Context) (*client.Cl
 	}
 	f.calls++
 	return f.client, f.err
-}
-
-type fakePendingStore struct {
-	records []ImageUpdateRecord
-	cleared []string
 }
 
 func (f *fakePendingStore) PendingImageUpdates(ctx context.Context) ([]ImageUpdateRecord, error) {
@@ -181,10 +231,6 @@ func (f *fakePendingStore) ClearImageUpdateRecord(ctx context.Context, record Im
 	return nil
 }
 
-type fakeRunRecorder struct {
-	results []ResourceResult
-}
-
 func (f *fakeRunRecorder) RecordUpdateRun(ctx context.Context, result ResourceResult) error {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -193,12 +239,6 @@ func (f *fakeRunRecorder) RecordUpdateRun(ctx context.Context, result ResourceRe
 	}
 	f.results = append(f.results, result)
 	return nil
-}
-
-type fakePuller struct {
-	err    error
-	after  func(imageRef string)
-	pulled []string
 }
 
 func (f *fakePuller) PullImage(ctx context.Context, imageRef string, progress io.Writer) error {
@@ -222,12 +262,6 @@ func (f *fakePuller) PullImage(ctx context.Context, imageRef string, progress io
 	return nil
 }
 
-// fakeSettings excludes the listed container names or IDs the way a host's
-// settings would. Its list never changes: the engine only reads it.
-type fakeSettings struct {
-	excluded []string
-}
-
 func (f *fakeSettings) ExcludedContainers(ctx context.Context) ([]string, error) {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -236,8 +270,6 @@ func (f *fakeSettings) ExcludedContainers(ctx context.Context) ([]string, error)
 	}
 	return f.excluded, nil
 }
-
-type fakeDigestResolver struct{}
 
 func (fakeDigestResolver) ImageDigest(ctx context.Context, imageRef string) (string, error) {
 	if ctx != nil {
@@ -251,12 +283,6 @@ func (fakeDigestResolver) ImageDigest(ctx context.Context, imageRef string) (str
 	return digest.FromString(imageRef).String(), nil
 }
 
-type countingDigestResolver struct {
-	err    error
-	digest string
-	calls  int
-}
-
 func (r *countingDigestResolver) ImageDigest(ctx context.Context, imageRef string) (string, error) {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -268,13 +294,6 @@ func (r *countingDigestResolver) ImageDigest(ctx context.Context, imageRef strin
 		return "", r.err
 	}
 	return r.digest, nil
-}
-
-type fakeProjectUpdater struct {
-	err         error
-	projects    map[string]ComposeProject
-	updateCalls []string
-	delay       time.Duration
 }
 
 func (f *fakeProjectUpdater) ProjectByComposeName(ctx context.Context, composeName string) (ComposeProject, error) {
@@ -306,10 +325,6 @@ func (f *fakeProjectUpdater) UpdateServices(ctx context.Context, projectID strin
 	return f.err
 }
 
-type fakeSelfUpdater struct {
-	targets []SelfUpdateTarget
-}
-
 func (f *fakeSelfUpdater) TriggerSelfUpdate(ctx context.Context, target SelfUpdateTarget) error {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -320,10 +335,6 @@ func (f *fakeSelfUpdater) TriggerSelfUpdate(ctx context.Context, target SelfUpda
 	return nil
 }
 
-type fakeEventRecorder struct {
-	events []Event
-}
-
 func (f *fakeEventRecorder) RecordEvent(ctx context.Context, event Event) error {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -332,10 +343,6 @@ func (f *fakeEventRecorder) RecordEvent(ctx context.Context, event Event) error 
 	}
 	f.events = append(f.events, event)
 	return nil
-}
-
-type captureLogHandler struct {
-	records []slog.Record
 }
 
 func (h *captureLogHandler) Enabled(context.Context, slog.Level) bool {
@@ -353,11 +360,6 @@ func (h *captureLogHandler) WithAttrs([]slog.Attr) slog.Handler {
 
 func (h *captureLogHandler) WithGroup(string) slog.Handler {
 	return h
-}
-
-type recordingSelfUpdater struct {
-	operations *[]string
-	targets    []SelfUpdateTarget
 }
 
 func (r *recordingSelfUpdater) TriggerSelfUpdate(ctx context.Context, target SelfUpdateTarget) error {

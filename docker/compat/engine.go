@@ -15,14 +15,16 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// EngineCompatibilityInfo describes the container engine details that decide
-// whether recreate-time HostConfig sanitization is required.
-type EngineCompatibilityInfo struct {
-	// Name is the normalized engine identifier, "docker" or "podman".
-	Name string
-	// CgroupVersion is the daemon-reported cgroup version, such as "1" or "2".
-	CgroupVersion string
-}
+type (
+	// EngineCompatibilityInfo describes the container engine details that decide
+	// whether recreate-time HostConfig sanitization is required.
+	EngineCompatibilityInfo struct {
+		// Name is the normalized engine identifier, "docker" or "podman".
+		Name string
+		// CgroupVersion is the daemon-reported cgroup version, such as "1" or "2".
+		CgroupVersion string
+	}
+)
 
 // DetectEngineCompatibility derives the engine name from the daemon's version
 // and info responses, checking the platform, components, and OS markers in order.

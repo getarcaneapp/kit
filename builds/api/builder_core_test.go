@@ -14,10 +14,14 @@ import (
 	"kit.getarcane.app/builds/types"
 )
 
-type fakeRegistryAuthProvider struct {
-	authConfigs map[string]dockerregistry.AuthConfig
-	err         error
-}
+type (
+	fakeRegistryAuthProvider struct {
+		authConfigs map[string]dockerregistry.AuthConfig
+		err         error
+	}
+
+	testSettingsProvider struct{}
+)
 
 func (f fakeRegistryAuthProvider) GetAllRegistryAuthConfigs(_ context.Context) (map[string]dockerregistry.AuthConfig, error) {
 	return f.authConfigs, f.err
@@ -107,8 +111,6 @@ func TestWrapBuildkitSolveError_WrapsDockerAndImageExporterErrors(t *testing.T) 
 		assert.Contains(t, wrapped.Error(), "depot and remote BuildKit providers require the image exporter")
 	})
 }
-
-type testSettingsProvider struct{}
 
 func (testSettingsProvider) BuildSettings() types.BuildSettings {
 	return types.BuildSettings{}

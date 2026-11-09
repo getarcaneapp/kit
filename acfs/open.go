@@ -12,20 +12,22 @@ import (
 	kitfs "kit.getarcane.app/fs"
 )
 
-// OpenOptions selects how OpenFile opens a regular file. Read or Write is required.
-type OpenOptions struct {
-	// Mode is the permission set of a file created by Create.
-	Mode   os.FileMode
-	Read   bool
-	Write  bool
-	Create bool
-	// Exclusive, which requires Create, reports ErrAlreadyExists for an existing file.
-	Exclusive bool
-	// Truncate, which requires Write, empties an existing file.
-	Truncate bool
-	// Append, which requires Write, makes every write append to the file.
-	Append bool
-}
+type (
+	// OpenOptions selects how OpenFile opens a regular file. Read or Write is required.
+	OpenOptions struct {
+		// Mode is the permission set of a file created by Create.
+		Mode   os.FileMode
+		Read   bool
+		Write  bool
+		Create bool
+		// Exclusive, which requires Create, reports ErrAlreadyExists for an existing file.
+		Exclusive bool
+		// Truncate, which requires Write, empties an existing file.
+		Truncate bool
+		// Append, which requires Write, makes every write append to the file.
+		Append bool
+	}
+)
 
 func (o OpenOptions) flags() (int, error) {
 	if o.Mode&^chmodModeMask != 0 {
@@ -86,7 +88,7 @@ func (r Root) OpenFile(ctx context.Context, logicalPath string, options OpenOpti
 	if err == nil && info == nil {
 		info, err = root.Stat(name)
 	}
-	err = checkOpenTarget(info, err, options, logicalPath)
+	err = checkOpenTarget(info, err, options, logicalPath, false)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +96,7 @@ func (r Root) OpenFile(ctx context.Context, logicalPath string, options OpenOpti
 	if err != nil {
 		return nil, openError(err, logicalPath)
 	}
-	err = verifyOpenedFile(file)
+	err = verifyOpenedFile(file, false)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +125,7 @@ func (r Root) openFileForMutation(relativePath, logicalPath string, flags int, o
 	if err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("%w: %s", ErrSymlink, logicalPath)
 	}
-	err = checkOpenTarget(info, err, options, logicalPath)
+	err = checkOpenTarget(info, err, options, logicalPath, false)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +134,7 @@ func (r Root) openFileForMutation(relativePath, logicalPath string, flags int, o
 	if err != nil {
 		return nil, openError(err, logicalPath)
 	}
-	err = verifyOpenedFile(file)
+	err = verifyOpenedFile(file, false)
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +148,9 @@ func (r Root) openFileForMutation(relativePath, logicalPath string, flags int, o
 	return file, nil
 }
 
-// OpenFile opens a host regular file, following symbolic links.
-func (Host) OpenFile(ctx context.Context, hostPath string, options OpenOptions) (*os.File, error) {
+// OpenFile opens a host regular file, or a special file with h.Special,
+// following symbolic links.
+func (h Host) OpenFile(ctx context.Context, hostPath string, options OpenOptions) (*os.File, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -161,23 +164,25 @@ func (Host) OpenFile(ctx context.Context, hostPath string, options OpenOptions) 
 	}
 
 	info, err := os.Stat(filePath)
-	err = checkOpenTarget(info, err, options, filePath)
+	err = checkOpenTarget(info, err, options, filePath, h.Special)
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(filePath, flags|syscall.O_NONBLOCK, options.Mode)
+	special := info != nil && !info.Mode().IsRegular()
+	file, err := os.OpenFile(filePath, flags|kit.Ternary(special, 0, syscall.O_NONBLOCK), options.Mode)
 	if err != nil {
 		return nil, openError(err, filePath)
 	}
-	err = verifyOpenedFile(file)
+	err = verifyOpenedFile(file, h.Special)
 	if err != nil {
 		return nil, err
 	}
 	return file, nil
 }
 
-// checkOpenTarget refuses directories and FIFOs before an open could block on them.
-func checkOpenTarget(info os.FileInfo, statErr error, options OpenOptions, displayPath string) error {
+// checkOpenTarget refuses directories, and FIFOs unless special, before an open
+// could block on them.
+func checkOpenTarget(info os.FileInfo, statErr error, options OpenOptions, displayPath string, special bool) error {
 	if errors.Is(statErr, fs.ErrNotExist) && options.Create {
 		return nil
 	}
@@ -187,7 +192,7 @@ func checkOpenTarget(info os.FileInfo, statErr error, options OpenOptions, displ
 	if options.Exclusive {
 		return fmt.Errorf("%w: %q: %w", ErrAlreadyExists, displayPath, fs.ErrExist)
 	}
-	return requireRegular(info)
+	return requireFile(info, special)
 }
 
 func openError(err error, displayPath string) error {
@@ -200,11 +205,12 @@ func openError(err error, displayPath string) error {
 	return fmt.Errorf("open %q: %w", displayPath, err)
 }
 
-// verifyOpenedFile closes file unless it is a regular file.
-func verifyOpenedFile(file *os.File) error {
+// verifyOpenedFile closes file unless it is a regular file, or any
+// non-directory when special.
+func verifyOpenedFile(file *os.File, special bool) error {
 	opened, err := file.Stat()
 	if err == nil {
-		err = requireRegular(opened)
+		err = requireFile(opened, special)
 	}
 	if err != nil {
 		_ = file.Close()

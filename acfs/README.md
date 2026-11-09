@@ -43,7 +43,7 @@ confinement, and the `FS` interface covers what both share:
 
 - Reading: `List`, `ListEach`, `Walk`, `Stat`, `Exists`, `OpenRead`,
   `OpenReadSeek`, `ReadFile`, `ReadTo`
-- Writing: `Write`, `WriteFrom`, `WriteAt`, `OpenFile`, `CreateTemp`
+- Writing: `Write`, `WriteFrom`, `WriteAt`, `OpenFile`, `CreateTemp`, `Sync`
 - Directories and names: `Mkdir`, `MkdirAll`, `MkdirTemp`, `Rename`, `Remove`,
   `RemoveAll`
 - Attributes and links: `Chmod`, `Chown`, `Lchown`, `Chtimes`, `Symlink`,
@@ -51,17 +51,22 @@ confinement, and the `FS` interface covers what both share:
 
 `Root` adds `LogicalPath`, `CopyTo`, `MirrorTo`, and ordered batch `Apply`;
 `Host` adds `CopyDir` and `MirrorDir`. Public filesystem and protocol DTOs live
-in `types`.
+in `types`. An `Entry` carries `UID`, `GID`, `Device`, and `Inode` on Unix, so
+callers can copy ownership or compare identity like `os.SameFile`.
+
+`Sync` flushes a file or directory to stable storage. `acfs.Host{Special: true}`
+lets reads and `OpenFile` open FIFOs and character devices such as `/dev/stdin`;
+a special file's `OpenRead` size is `-1`.
 
 On a `Root`, links inside the root are handled per operation:
 
 - Resolve links in the parent path: `Write`, `WriteFrom`, `WriteAt`, `Mkdir`,
-  `MkdirAll`, `MkdirTemp`, `CreateTemp`, `Rename`, `Remove`, `RemoveAll`, and a
-  read-only `OpenFile`.
+  `MkdirAll`, `MkdirTemp`, `CreateTemp`, `Rename`, `Remove`, `RemoveAll`,
+  `Sync`, and a read-only `OpenFile`.
 - Refuse any link in the path with `ErrSymlink`: `Chmod`, `Chown`, `Lchown`,
   `Chtimes`, `Symlink`, a writing `OpenFile`, and `Apply`.
 - A final link is refused by `Write` with `InPlace`, a writing `OpenFile`,
-  `Chmod`, `Chown`, and `Chtimes`. `Lchown`, `Remove`, `RemoveAll`, and
+  `Chmod`, `Chown`, `Chtimes`, and `Sync`. `Lchown`, `Remove`, `RemoveAll`, and
   `Rename` act on the link itself.
 
 `Symlink` only creates links that stay inside the root, stored as relative
@@ -93,10 +98,13 @@ Use typed options to choose how a byte-slice write replaces a file:
 ```go
 err = root.Write(ctx, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644})
 err = root.Write(ctx, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644, InPlace: true})
+err = root.Write(ctx, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644, Exclusive: true})
 ```
 
 Writes are atomic by default. `InPlace` preserves existing file inodes for bind
 mounts and refuses final symlinks; callers must handle partial writes on failure.
+`Exclusive` publishes the complete file only if the target is absent, otherwise
+returning `ErrAlreadyExists`; it cannot be combined with `InPlace`.
 
 ## CLI
 

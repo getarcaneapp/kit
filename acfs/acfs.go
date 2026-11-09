@@ -19,7 +19,30 @@ import (
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
-const directoryReadBatchSize = 256
+type (
+	walker struct {
+		ctx     context.Context
+		root    Root
+		visit   func(acfstypes.Entry) error
+		level   walkLevel
+		options acfstypes.WalkOptions
+		result  acfstypes.WalkResult
+	}
+
+	walkDirectory struct {
+		path  string
+		depth int
+	}
+
+	walkLevel struct {
+		directory walkDirectory
+		children  []walkDirectory
+	}
+)
+
+const (
+	directoryReadBatchSize = 256
+)
 
 // ListEach visits the children of a root-confined directory in name order.
 func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfstypes.Entry) error) error {
@@ -209,15 +232,6 @@ func (r Root) Walk(ctx context.Context, logicalPath string, options acfstypes.Wa
 	}
 
 	return w.result, nil
-}
-
-type walker struct {
-	ctx     context.Context
-	root    Root
-	visit   func(acfstypes.Entry) error
-	level   walkLevel
-	options acfstypes.WalkOptions
-	result  acfstypes.WalkResult
 }
 
 func (w *walker) entry(entry acfstypes.Entry) error {
@@ -458,14 +472,4 @@ func (r Root) RemoveAll(ctx context.Context, logicalPath string) error {
 		return fmt.Errorf("remove %q: %w", logicalPath, err)
 	}
 	return nil
-}
-
-type walkDirectory struct {
-	path  string
-	depth int
-}
-
-type walkLevel struct {
-	directory walkDirectory
-	children  []walkDirectory
 }

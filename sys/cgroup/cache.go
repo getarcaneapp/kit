@@ -6,23 +6,25 @@ import (
 	"kit.getarcane.app/cache"
 )
 
-// Cache memoizes the result of cgroup limit detection for a configurable TTL.
-// A single in-flight refresh is shared across concurrent callers, so a
-// stampede of samplers never duplicates the work. The zero Cache is usable and
-// runs DetectLimits on every Get.
-type Cache struct {
-	cache    *cache.Cache[struct{}, *Limits]
-	detector func() (*Limits, error)
-	ttl      time.Duration
-}
+type (
+	// Cache memoizes the result of cgroup limit detection for a configurable TTL.
+	// A single in-flight refresh is shared across concurrent callers, so a
+	// stampede of samplers never duplicates the work. The zero Cache is usable and
+	// runs DetectLimits on every Get.
+	Cache struct {
+		cache    *cache.Cache[struct{}, *Limits]
+		detector func() (*Limits, error)
+		ttl      time.Duration
+	}
 
-// CacheConfig configures a Cache. The zero value detects on every call with DetectLimits.
-type CacheConfig struct {
-	// Detector replaces DetectLimits, e.g. in tests that simulate failures. Nil uses DetectLimits.
-	Detector func() (*Limits, error)
-	// TTL is how long a detection result is reused. Zero or negative disables caching.
-	TTL time.Duration
-}
+	// CacheConfig configures a Cache. The zero value detects on every call with DetectLimits.
+	CacheConfig struct {
+		// Detector replaces DetectLimits, e.g. in tests that simulate failures. Nil uses DetectLimits.
+		Detector func() (*Limits, error)
+		// TTL is how long a detection result is reused. Zero or negative disables caching.
+		TTL time.Duration
+	}
+)
 
 // NewCache returns a cache configured by cfg.
 func NewCache(cfg CacheConfig) *Cache {

@@ -4,8 +4,10 @@ package registry
 
 import "strings"
 
-// DefaultDomain is the canonical Docker Hub registry domain.
-const DefaultDomain = "docker.io"
+const (
+	// DefaultDomain is the canonical Docker Hub registry domain.
+	DefaultDomain = "docker.io"
+)
 
 // Normalize canonicalizes a registry host or URL for equality checks; every
 // Docker Hub alias collapses to "docker.io".

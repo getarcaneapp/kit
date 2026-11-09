@@ -20,23 +20,25 @@ import (
 	"kit.getarcane.app/updater/types"
 )
 
-// restartScan holds the per-container plans, the restart-marked set, and every eligible container with its dependencies.
-type restartScan struct {
-	plansByName      map[string]*restartPlan
-	markedForRestart map[string]bool
-	containers       []deps.ContainerWithDeps
-}
+type (
+	// restartScan holds the per-container plans, the restart-marked set, and every eligible container with its dependencies.
+	restartScan struct {
+		plansByName      map[string]*restartPlan
+		markedForRestart map[string]bool
+		containers       []deps.ContainerWithDeps
+	}
 
-// RestartTargets selects the running containers RestartContainersUsingOldImages restarts.
-type RestartTargets struct {
-	// ByOldID maps a replaced image ID to the ref its containers move to.
-	ByOldID map[string]string
-	// ByOldRef maps a replaced image ref to the ref its containers move to.
-	ByOldRef map[string]string
-	// IgnoreSettingsExclusions restarts matching containers despite a settings exclusion or updater
-	// opt-out label, as Options.IgnoreSettingsExclusions does for a run.
-	IgnoreSettingsExclusions bool
-}
+	// RestartTargets selects the running containers RestartContainersUsingOldImages restarts.
+	RestartTargets struct {
+		// ByOldID maps a replaced image ID to the ref its containers move to.
+		ByOldID map[string]string
+		// ByOldRef maps a replaced image ref to the ref its containers move to.
+		ByOldRef map[string]string
+		// IgnoreSettingsExclusions restarts matching containers despite a settings exclusion or updater
+		// opt-out label, as Options.IgnoreSettingsExclusions does for a run.
+		IgnoreSettingsExclusions bool
+	}
+)
 
 // RestartContainersUsingOldImages restarts running containers matching targets' old image IDs or refs,
 // plus their dependents. A dependency cycle falls back to discovery order.

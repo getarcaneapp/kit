@@ -7,11 +7,13 @@ import (
 	"syscall"
 )
 
-// fileID identifies a directory independent of the path used to reach it.
-type fileID struct {
-	dev uint64
-	ino uint64
-}
+type (
+	// fileID identifies a directory independent of the path used to reach it.
+	fileID struct {
+		dev uint64
+		ino uint64
+	}
+)
 
 func identify(path string) (fileID, error) {
 	info, err := os.Stat(path)

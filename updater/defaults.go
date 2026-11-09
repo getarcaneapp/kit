@@ -18,20 +18,22 @@ import (
 	"kit.getarcane.app/updater/registry"
 )
 
-// DockerClient is the built-in DockerClientProvider: it lazily opens one client, pings it on every
-// hand-out, and reconnects after the daemon goes away. Construct one with NewDockerClientProvider.
-type DockerClient struct {
-	client  atomic.Pointer[client.Client]
-	options []client.Opt
-}
+type (
+	// DockerClient is the built-in DockerClientProvider: it lazily opens one client, pings it on every
+	// hand-out, and reconnects after the daemon goes away. Construct one with NewDockerClientProvider.
+	DockerClient struct {
+		client  atomic.Pointer[client.Client]
+		options []client.Opt
+	}
 
-type defaultImagePuller struct {
-	dockerClientProvider DockerClientProvider
-}
+	defaultImagePuller struct {
+		dockerClientProvider DockerClientProvider
+	}
 
-type defaultRegistryDigestResolver struct {
-	httpClient *http.Client
-}
+	defaultRegistryDigestResolver struct {
+		httpClient *http.Client
+	}
+)
 
 // NewDockerClientProvider returns a provider for the local Docker environment plus options. The caller
 // owns it and should Close it, unless New built it, in which case Service.Close does.

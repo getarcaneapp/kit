@@ -37,7 +37,7 @@ func (Host) WriteFrom(ctx context.Context, hostPath string, source io.Reader, op
 	defer func() {
 		_ = parent.Close()
 	}()
-	return writeFromRoot(ctx, parent, targetPath, filepath.Base(targetPath), source, options.Size, options.Mode)
+	return writeFromRoot(ctx, parent, targetPath, filepath.Base(targetPath), source, options)
 }
 
 // Write writes data to a host file like Root.Write.
@@ -45,8 +45,8 @@ func (Host) Write(ctx context.Context, hostPath string, data []byte, options Wri
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if options.Mode&^chmodModeMask != 0 {
-		return fmt.Errorf("invalid file mode %v", options.Mode)
+	if err := options.validate(); err != nil {
+		return err
 	}
 	targetPath, err := cleanHostFilePath(hostPath)
 	if err != nil {
@@ -60,7 +60,11 @@ func (Host) Write(ctx context.Context, hostPath string, data []byte, options Wri
 		_ = parent.Close()
 	}()
 	if !options.InPlace {
-		_, err = writeFromRoot(ctx, parent, targetPath, filepath.Base(targetPath), bytes.NewReader(data), int64(len(data)), options.Mode)
+		_, err = writeFromRoot(ctx, parent, targetPath, filepath.Base(targetPath), bytes.NewReader(data), WriteFromOptions{
+			Size:      int64(len(data)),
+			Mode:      options.Mode,
+			Exclusive: options.Exclusive,
+		})
 		return err
 	}
 	return writeInPlace(ctx, parent, filepath.Base(targetPath), data, options.Mode)

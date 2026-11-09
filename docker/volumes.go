@@ -18,16 +18,16 @@ import (
 	"kit.getarcane.app/cache"
 )
 
+const (
+	volumeUsageCacheTTL               = 30 * time.Second
+	volumeUsageRefreshFallbackTimeout = 30 * time.Second
+)
+
 var volumeUsageCache = &cache.Cache[string, []volume.Volume]{
 	Capacity: 16,
 	TTL:      volumeUsageCacheTTL,
 	Clone:    cloneVolumeUsage,
 }
-
-const (
-	volumeUsageCacheTTL               = 30 * time.Second
-	volumeUsageRefreshFallbackTimeout = 30 * time.Second
-)
 
 // GetVolumeUsageData returns current volume usage data, sharing an in-flight
 // refresh with concurrent callers while allowing each caller to honor its own context.

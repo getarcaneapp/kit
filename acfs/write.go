@@ -17,24 +17,47 @@ import (
 	kitfs "kit.getarcane.app/fs"
 )
 
+type (
+	// WriteOptions configures a write.
+	WriteOptions struct {
+		Mode os.FileMode
+		// InPlace keeps existing inodes and refuses a final symbolic link, but is not atomic.
+		InPlace bool
+		// Exclusive publishes the file only if the target does not exist, reporting
+		// ErrAlreadyExists otherwise. It cannot be combined with InPlace.
+		Exclusive bool
+	}
+
+	// WriteFromOptions configures WriteFrom.
+	WriteFromOptions struct {
+		// Size is the exact number of bytes to read from the source.
+		Size int64
+		// Mode is the permission set of the written file.
+		Mode os.FileMode
+		// Exclusive publishes the file only if the target does not exist, reporting
+		// ErrAlreadyExists otherwise.
+		Exclusive bool
+	}
+
+	contextReader struct {
+		ctx    context.Context
+		reader io.Reader
+	}
+)
+
 const (
 	temporaryWritePrefix = ".acfs-write-"
 	chmodModeMask        = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
 )
 
-// WriteOptions configures a write.
-type WriteOptions struct {
-	Mode os.FileMode
-	// InPlace keeps existing inodes and refuses a final symbolic link, but is not atomic.
-	InPlace bool
-}
-
-// WriteFromOptions configures WriteFrom.
-type WriteFromOptions struct {
-	// Size is the exact number of bytes to read from the source.
-	Size int64
-	// Mode is the permission set of the written file.
-	Mode os.FileMode
+func (o WriteOptions) validate() error {
+	if o.Mode&^chmodModeMask != 0 {
+		return fmt.Errorf("invalid file mode %v", o.Mode)
+	}
+	if o.Exclusive && o.InPlace {
+		return fmt.Errorf("%w: Exclusive cannot be combined with InPlace", ErrInvalidWriteOptions)
+	}
+	return nil
 }
 
 // WriteFrom atomically writes exactly options.Size bytes from source to a
@@ -82,7 +105,7 @@ func (r Root) WriteFrom(ctx context.Context, logicalPath string, source io.Reade
 	defer func() {
 		_ = parent.Close()
 	}()
-	return writeFromRoot(ctx, parent, logicalPath, base, source, options.Size, options.Mode)
+	return writeFromRoot(ctx, parent, logicalPath, base, source, options)
 }
 
 // Write atomically replaces a root-confined file with data, or rewrites it in
@@ -91,8 +114,8 @@ func (r Root) Write(ctx context.Context, logicalPath string, data []byte, option
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if options.Mode&^chmodModeMask != 0 {
-		return fmt.Errorf("invalid file mode %v", options.Mode)
+	if err := options.validate(); err != nil {
+		return err
 	}
 	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
@@ -129,7 +152,11 @@ func (r Root) Write(ctx context.Context, logicalPath string, data []byte, option
 		return err
 	}
 	if !options.InPlace {
-		_, err = writeFromRoot(ctx, parent, logicalPath, base, bytes.NewReader(data), int64(len(data)), options.Mode)
+		_, err = writeFromRoot(ctx, parent, logicalPath, base, bytes.NewReader(data), WriteFromOptions{
+			Size:      int64(len(data)),
+			Mode:      options.Mode,
+			Exclusive: options.Exclusive,
+		})
 		return err
 	}
 	return writeInPlace(ctx, parent, base, data, options.Mode)
@@ -291,11 +318,6 @@ func rejectReservedPath(relativePath string) error {
 	return nil
 }
 
-type contextReader struct {
-	ctx    context.Context
-	reader io.Reader
-}
-
 func (r contextReader) Read(buffer []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err
@@ -328,9 +350,19 @@ func createTemporaryFile(files *dir) (*os.File, string, error) {
 	return nil, "", errors.New("could not allocate a unique temporary file")
 }
 
-// writeFromRoot stages expectedSize bytes from source in files and renames the
+// writeFromRoot stages options.Size bytes from source in files and renames the
 // staged file onto targetName, reporting ErrReplaced if either name is swapped.
-func writeFromRoot(ctx context.Context, files *dir, displayPath, targetName string, source io.Reader, expectedSize int64, mode os.FileMode) (int64, error) {
+// With options.Exclusive an existing targetName is never replaced.
+func writeFromRoot(ctx context.Context, files *dir, displayPath, targetName string, source io.Reader, options WriteFromOptions) (int64, error) {
+	if options.Exclusive {
+		_, err := files.Lstat(targetName)
+		if err == nil {
+			return 0, fmt.Errorf("%w: %q: %w", ErrAlreadyExists, displayPath, fs.ErrExist)
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return 0, fmt.Errorf("inspect %q: %w", displayPath, err)
+		}
+	}
 	temporaryFile, temporaryName, err := createTemporaryFile(files)
 	if err != nil {
 		return 0, err
@@ -344,21 +376,21 @@ func writeFromRoot(ctx context.Context, files *dir, displayPath, targetName stri
 	}()
 
 	reader := contextReader{ctx: ctx, reader: source}
-	written, err := io.CopyN(temporaryFile, reader, expectedSize)
+	written, err := io.CopyN(temporaryFile, reader, options.Size)
 	if err != nil {
-		return written, fmt.Errorf("%w: expected %d bytes, received %d: %w", ErrSizeMismatch, expectedSize, written, err)
+		return written, fmt.Errorf("%w: expected %d bytes, received %d: %w", ErrSizeMismatch, options.Size, written, err)
 	}
 
 	var extra [1]byte
 	extraCount, extraErr := io.ReadFull(reader, extra[:])
 	if extraCount != 0 {
-		return written, fmt.Errorf("%w: input exceeds %d bytes", ErrSizeMismatch, expectedSize)
+		return written, fmt.Errorf("%w: input exceeds %d bytes", ErrSizeMismatch, options.Size)
 	}
 	if extraErr != nil && !errors.Is(extraErr, io.EOF) {
 		return written, fmt.Errorf("check input size: %w", extraErr)
 	}
 
-	err = temporaryFile.Chmod(mode)
+	err = temporaryFile.Chmod(options.Mode)
 	if err != nil {
 		return written, fmt.Errorf("chmod temporary file: %w", err)
 	}
@@ -374,7 +406,14 @@ func writeFromRoot(ctx context.Context, files *dir, displayPath, targetName stri
 		committed = true
 		return written, err
 	}
-	err = files.renameTo(temporaryName, files, targetName)
+	if options.Exclusive {
+		err = files.renameNoReplace(temporaryName, files, targetName)
+		if errors.Is(err, fs.ErrExist) {
+			return written, fmt.Errorf("%w: %q: %w", ErrAlreadyExists, displayPath, fs.ErrExist)
+		}
+	} else {
+		err = files.renameTo(temporaryName, files, targetName)
+	}
 	if err != nil {
 		return written, fmt.Errorf("replace %q: %w", displayPath, err)
 	}

@@ -8,6 +8,21 @@ import (
 	"kit.getarcane.app"
 )
 
+type (
+	// RedeployCheck describes the container ShouldDisableArcaneServerRedeploy checks and the
+	// lookup of the container the caller itself runs in.
+	RedeployCheck struct {
+		// CurrentErr is the error from looking up CurrentContainerID, if any.
+		CurrentErr error
+		// Labels are the checked container's labels.
+		Labels map[string]string
+		// ContainerID is the checked container's ID or ID prefix.
+		ContainerID string
+		// CurrentContainerID is the ID or ID prefix of the container the caller runs in.
+		CurrentContainerID string
+	}
+)
+
 const (
 	// LabelArcane identifies an Arcane server container.
 	LabelArcane = "com.getarcaneapp.arcane"
@@ -41,19 +56,6 @@ func IsArcaneContainer(labels map[string]string) bool {
 // IsArcaneServerContainer reports whether labels identify an Arcane server.
 func IsArcaneServerContainer(labels map[string]string) bool {
 	return (hasTruthyLabel(labels, LabelArcane) || hasTruthyLabel(labels, LabelArcaneLegacyServer)) && !IsArcaneAgentContainer(labels)
-}
-
-// RedeployCheck describes the container ShouldDisableArcaneServerRedeploy checks and the
-// lookup of the container the caller itself runs in.
-type RedeployCheck struct {
-	// CurrentErr is the error from looking up CurrentContainerID, if any.
-	CurrentErr error
-	// Labels are the checked container's labels.
-	Labels map[string]string
-	// ContainerID is the checked container's ID or ID prefix.
-	ContainerID string
-	// CurrentContainerID is the ID or ID prefix of the container the caller runs in.
-	CurrentContainerID string
 }
 
 // ShouldDisableArcaneServerRedeploy reports whether redeploy or edit should be

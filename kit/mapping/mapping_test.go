@@ -5,17 +5,19 @@ import (
 	"testing"
 )
 
-type netipConfig struct {
-	Aux     map[string]netip.Addr
-	Gateway netip.Addr
-	Subnet  netip.Prefix
-}
+type (
+	netipConfig struct {
+		Aux     map[string]netip.Addr
+		Gateway netip.Addr
+		Subnet  netip.Prefix
+	}
 
-type stringConfig struct {
-	Aux     map[string]string
-	Subnet  string
-	Gateway string
-}
+	stringConfig struct {
+		Aux     map[string]string
+		Subnet  string
+		Gateway string
+	}
+)
 
 func TestMapOneConvertsNetipAndStrings(t *testing.T) {
 	t.Parallel()

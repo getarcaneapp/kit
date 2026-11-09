@@ -13,25 +13,57 @@ import (
 	"kit.getarcane.app"
 )
 
-// Producer sends events until ctx is canceled.
-type Producer[T any] func(ctx context.Context, events chan<- T)
+type (
+	// Producer sends events until ctx is canceled.
+	Producer[T any] func(ctx context.Context, events chan<- T)
 
-// Config configures Run.
-type Config[T any] struct {
-	Writer            io.Writer
-	Flush             func()
-	MakeHeartbeat     func() T
-	Logger            *slog.Logger
-	Producers         []Producer[T]
-	Buffer            int
-	HeartbeatInterval time.Duration
-}
+	// Config configures Run.
+	Config[T any] struct {
+		Writer            io.Writer
+		Flush             func()
+		MakeHeartbeat     func() T
+		Logger            *slog.Logger
+		Producers         []Producer[T]
+		Buffer            int
+		HeartbeatInterval time.Duration
+	}
 
-// InvalidConfigError describes an invalid Run configuration.
-type InvalidConfigError struct {
-	Field  string
-	Reason string
-}
+	// InvalidConfigError describes an invalid Run configuration.
+	InvalidConfigError struct {
+		Field  string
+		Reason string
+	}
+
+	// PollerConfig configures ReconcilePollersByKey.
+	PollerConfig[T any] struct {
+		// List returns the items that should each have a running poller.
+		List func(ctx context.Context) ([]T, error)
+		// Key identifies an item. Items with an empty key are skipped.
+		Key func(item T) string
+		// Version restarts an item's poller when it changes. Nil never restarts.
+		Version func(item T) string
+		// Run is the poller body; it must return when ctx is canceled.
+		Run func(ctx context.Context, item T)
+		// Label names the stream in log messages.
+		Label string
+		// Interval is how often List is re-checked. Zero or negative means one minute.
+		Interval time.Duration
+	}
+
+	poller struct {
+		cancel  context.CancelFunc
+		done    chan struct{}
+		version string
+	}
+
+	// pollerSet tracks one running poller goroutine per key.
+	pollerSet[T any] struct {
+		ctx       context.Context
+		active    map[string]poller
+		runPoller func(ctx context.Context, item T)
+		wg        sync.WaitGroup
+	}
+)
 
 func (e *InvalidConfigError) Error() string {
 	if e == nil {
@@ -110,22 +142,6 @@ func Send[T any](ctx context.Context, events chan<- T, event T) bool {
 	case <-ctx.Done():
 		return false
 	}
-}
-
-// PollerConfig configures ReconcilePollersByKey.
-type PollerConfig[T any] struct {
-	// List returns the items that should each have a running poller.
-	List func(ctx context.Context) ([]T, error)
-	// Key identifies an item. Items with an empty key are skipped.
-	Key func(item T) string
-	// Version restarts an item's poller when it changes. Nil never restarts.
-	Version func(item T) string
-	// Run is the poller body; it must return when ctx is canceled.
-	Run func(ctx context.Context, item T)
-	// Label names the stream in log messages.
-	Label string
-	// Interval is how often List is re-checked. Zero or negative means one minute.
-	Interval time.Duration
 }
 
 // ReconcilePollersByKey keeps one poller goroutine per listed item, keyed by a
@@ -213,18 +229,4 @@ func ReconcilePollersByKey[T any](ctx context.Context, cfg PollerConfig[T]) {
 			reconcile()
 		}
 	}
-}
-
-type poller struct {
-	cancel  context.CancelFunc
-	done    chan struct{}
-	version string
-}
-
-// pollerSet tracks one running poller goroutine per key.
-type pollerSet[T any] struct {
-	ctx       context.Context
-	active    map[string]poller
-	runPoller func(ctx context.Context, item T)
-	wg        sync.WaitGroup
 }

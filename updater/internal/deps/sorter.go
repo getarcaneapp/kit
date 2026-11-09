@@ -13,24 +13,26 @@ import (
 	"kit.getarcane.app/updater/labels"
 )
 
-// ContainerWithDeps represents a container and its restart dependencies.
-type ContainerWithDeps struct {
-	Container   container.Summary
-	Inspect     container.InspectResponse
-	Name        string
-	Links       []string
-	DependsOn   []string
-	NetworkDeps []string
-}
+type (
+	// ContainerWithDeps represents a container and its restart dependencies.
+	ContainerWithDeps struct {
+		Container   container.Summary
+		Inspect     container.InspectResponse
+		Name        string
+		Links       []string
+		DependsOn   []string
+		NetworkDeps []string
+	}
 
-// ContainerSorter topologically sorts containers by dependency.
-type ContainerSorter struct {
-	containers  []ContainerWithDeps
-	nameToIndex map[string]int
-	visited     map[string]bool
-	marked      map[string]bool
-	sorted      []ContainerWithDeps
-}
+	// ContainerSorter topologically sorts containers by dependency.
+	ContainerSorter struct {
+		containers  []ContainerWithDeps
+		nameToIndex map[string]int
+		visited     map[string]bool
+		marked      map[string]bool
+		sorted      []ContainerWithDeps
+	}
+)
 
 // NewContainerSorter creates a sorter for containers.
 func NewContainerSorter(containers []ContainerWithDeps) *ContainerSorter {

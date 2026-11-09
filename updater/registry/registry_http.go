@@ -22,35 +22,37 @@ import (
 	kitregistry "kit.getarcane.app/registry"
 )
 
+type (
+	// RateLimitInfo contains pull quota information returned by registry headers.
+	RateLimitInfo struct {
+		Limit         *int   `json:"limit,omitempty"`
+		Remaining     *int   `json:"remaining,omitempty"`
+		Used          *int   `json:"used,omitempty"`
+		WindowSeconds *int   `json:"windowSeconds,omitempty"`
+		Source        string `json:"source,omitempty"`
+	}
+
+	// Request identifies the registry repository, and for digest and rate-limit lookups the tag, that a
+	// Fetch function queries.
+	Request struct {
+		// Credential authenticates the request; nil or empty is anonymous.
+		Credential *authn.AuthConfig
+		// HTTPClient supplies the base transport; nil uses http.DefaultTransport.
+		HTTPClient *http.Client
+		// Host is the registry host; "docker.io" resolves to Docker Hub's registry.
+		Host string
+		// Repository is the repository path within Host.
+		Repository string
+		// Tag is the image tag. FetchTags ignores it.
+		Tag string
+	}
+)
+
 const (
 	defaultRegistryHost           = "registry-1.docker.io"
 	daemonProxyConnectIndicator   = "proxy" + "connect"
 	registryRateLimitHeaderSource = "rate" + "limit"
 )
-
-// RateLimitInfo contains pull quota information returned by registry headers.
-type RateLimitInfo struct {
-	Limit         *int   `json:"limit,omitempty"`
-	Remaining     *int   `json:"remaining,omitempty"`
-	Used          *int   `json:"used,omitempty"`
-	WindowSeconds *int   `json:"windowSeconds,omitempty"`
-	Source        string `json:"source,omitempty"`
-}
-
-// Request identifies the registry repository, and for digest and rate-limit lookups the tag, that a
-// Fetch function queries.
-type Request struct {
-	// Credential authenticates the request; nil or empty is anonymous.
-	Credential *authn.AuthConfig
-	// HTTPClient supplies the base transport; nil uses http.DefaultTransport.
-	HTTPClient *http.Client
-	// Host is the registry host; "docker.io" resolves to Docker Hub's registry.
-	Host string
-	// Repository is the repository path within Host.
-	Repository string
-	// Tag is the image tag. FetchTags ignores it.
-	Tag string
-}
 
 // IsFallbackEligibleDaemonError reports whether a daemon registry error should use direct HTTP fallback.
 func IsFallbackEligibleDaemonError(err error) bool {

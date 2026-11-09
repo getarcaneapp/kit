@@ -12,10 +12,17 @@ import (
 	kitfs "kit.getarcane.app/fs"
 )
 
-type contextReadCloser struct {
-	contextReader
-	io.Closer
-}
+type (
+	contextReadCloser struct {
+		contextReader
+		io.Closer
+	}
+
+	contextReadSeekCloser struct {
+		ctx  context.Context
+		file *os.File
+	}
+)
 
 // OpenRead opens a root-confined file for a streaming read of at most maxBytes
 // when positive.
@@ -78,11 +85,6 @@ func (r Root) OpenRead(ctx context.Context, logicalPath string, maxBytes int64) 
 		reader: io.LimitReader(file, size),
 		Closer: file,
 	}, size, nil
-}
-
-type contextReadSeekCloser struct {
-	ctx  context.Context
-	file *os.File
 }
 
 func (r *contextReadSeekCloser) Read(buffer []byte) (int, error) {

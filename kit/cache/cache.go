@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-var errLoaderPanicked = errors.New("cache: loader panicked")
-
 type (
 	// Cache is an LRU cache configured by its exported fields. Build it with a
 	// keyed literal and always use it through a pointer. The fields must not
@@ -69,6 +67,8 @@ type (
 		found bool
 	}
 )
+
+var errLoaderPanicked = errors.New("cache: loader panicked")
 
 // Get returns the value for key, filling a miss with Load when it is set.
 func (c *Cache[K, V]) Get(key K) (V, bool, error) {

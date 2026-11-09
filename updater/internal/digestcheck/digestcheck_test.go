@@ -13,9 +13,11 @@ import (
 	ocidigest "github.com/opencontainers/go-digest"
 )
 
-type fakeRemoteResolver struct {
-	digest string
-}
+type (
+	fakeRemoteResolver struct {
+		digest string
+	}
+)
 
 func (f fakeRemoteResolver) ImageDigest(ctx context.Context, imageRef string) (string, error) {
 	if ctx != nil {

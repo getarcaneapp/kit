@@ -1,14 +1,16 @@
 package updater
 
-// UpdateType distinguishes the two kinds of image update the updater applies.
-type UpdateType string
+type (
+	// UpdateType distinguishes the two kinds of image update the updater applies.
+	UpdateType string
 
-// ResourceType names the kind of thing a ResourceResult describes.
-type ResourceType string
+	// ResourceType names the kind of thing a ResourceResult describes.
+	ResourceType string
 
-// ResourceStatus is the outcome recorded for one resource in a run. It is
-// distinct from Status, which reports the work a Service has in flight.
-type ResourceStatus string
+	// ResourceStatus is the outcome recorded for one resource in a run. It is
+	// distinct from Status, which reports the work a Service has in flight.
+	ResourceStatus string
+)
 
 const (
 	// UpdateTypeDigest identifies an image update where the tag is unchanged but the digest changed.

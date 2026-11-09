@@ -14,13 +14,15 @@ import (
 	"github.com/moby/moby/client/pkg/jsonmessage"
 )
 
-// syncWriter serializes writes to a caller-provided writer that is shared
-// between concurrent producers. Callers hand BuildImage a plain io.Writer and
-// must not be required to make it concurrency-safe themselves.
-type syncWriter struct {
-	w  io.Writer
-	mu sync.Mutex
-}
+type (
+	// syncWriter serializes writes to a caller-provided writer that is shared
+	// between concurrent producers. Callers hand BuildImage a plain io.Writer and
+	// must not be required to make it concurrency-safe themselves.
+	syncWriter struct {
+		w  io.Writer
+		mu sync.Mutex
+	}
+)
 
 func (s *syncWriter) Write(p []byte) (int, error) {
 	s.mu.Lock()

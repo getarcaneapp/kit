@@ -16,45 +16,61 @@ import (
 	"kit.getarcane.app/docker/streams/internal/buffer"
 )
 
+type (
+	// Entry is a single captured log record.
+	Entry struct {
+		Time    time.Time      `json:"time"`
+		Attrs   map[string]any `json:"attrs,omitempty"`
+		Level   string         `json:"level"`
+		Message string         `json:"message"`
+	}
+
+	// Config configures a Broadcaster. The zero value uses the defaults.
+	Config struct {
+		// SubscriberBuffer is the per-subscriber channel buffer. Nil or negative
+		// uses the default of 256; new(0) makes subscriber channels unbuffered.
+		SubscriberBuffer *int
+		// Capacity is the number of recent entries retained. Zero or negative uses
+		// the default of 1000.
+		Capacity int
+	}
+
+	// Broadcaster keeps a bounded ring buffer of recent log entries and fans new
+	// entries out to active subscribers.
+	Broadcaster struct {
+		subscribers      atomic.Pointer[logSubscriberSnapshot]
+		buf              []Entry
+		start            int
+		size             int
+		capN             int
+		subscriberBuffer int
+		deliveryMu       sync.RWMutex
+		historyMu        sync.Mutex
+	}
+
+	logSubscriberSnapshot struct {
+		subscribers []chan Entry
+	}
+
+	// slogHandler wraps a base slog.Handler and appends handled records to a
+	// Broadcaster.
+	slogHandler struct {
+		base  slog.Handler
+		b     *Broadcaster
+		attrs []boundAttrs
+		group []string
+	}
+
+	boundAttrs struct {
+		groups []string
+		attrs  []slog.Attr
+	}
+)
+
 const (
 	defaultRingCapacity     = 1000
 	defaultSubscriberBuffer = 256
 )
-
-// Entry is a single captured log record.
-type Entry struct {
-	Time    time.Time      `json:"time"`
-	Attrs   map[string]any `json:"attrs,omitempty"`
-	Level   string         `json:"level"`
-	Message string         `json:"message"`
-}
-
-// Config configures a Broadcaster. The zero value uses the defaults.
-type Config struct {
-	// SubscriberBuffer is the per-subscriber channel buffer. Nil or negative
-	// uses the default of 256; new(0) makes subscriber channels unbuffered.
-	SubscriberBuffer *int
-	// Capacity is the number of recent entries retained. Zero or negative uses
-	// the default of 1000.
-	Capacity int
-}
-
-// Broadcaster keeps a bounded ring buffer of recent log entries and fans new
-// entries out to active subscribers.
-type Broadcaster struct {
-	subscribers      atomic.Pointer[logSubscriberSnapshot]
-	buf              []Entry
-	start            int
-	size             int
-	capN             int
-	subscriberBuffer int
-	deliveryMu       sync.RWMutex
-	historyMu        sync.Mutex
-}
-
-type logSubscriberSnapshot struct {
-	subscribers []chan Entry
-}
 
 // New returns a Broadcaster configured by cfg.
 func New(cfg Config) *Broadcaster {
@@ -158,20 +174,6 @@ func (b *Broadcaster) loadSubscribers() *logSubscriberSnapshot {
 			return initial
 		}
 	}
-}
-
-// slogHandler wraps a base slog.Handler and appends handled records to a
-// Broadcaster.
-type slogHandler struct {
-	base  slog.Handler
-	b     *Broadcaster
-	attrs []boundAttrs
-	group []string
-}
-
-type boundAttrs struct {
-	groups []string
-	attrs  []slog.Attr
 }
 
 // NewSlogHandler returns a slog.Handler that tees records to base and to b.

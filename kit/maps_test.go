@@ -5,7 +5,9 @@ import (
 	"testing"
 )
 
-type namedLabels map[string]string
+type (
+	namedLabels map[string]string
+)
 
 func TestAsStringMap(t *testing.T) {
 	t.Parallel()

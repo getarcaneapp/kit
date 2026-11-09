@@ -18,6 +18,41 @@ import (
 	"kit.getarcane.app/updater/refs"
 )
 
+type (
+	tagSelectionScenario struct {
+		// excluded is a settings exclusion matching the container by name or ID;
+		// override sets Options.IgnoreSettingsExclusions.
+		excluded   string
+		constraint string
+		name       string
+		// repository is the configured spelling of the current app:1.0.0 image.
+		repository      string
+		current         string
+		wantFailure     bool
+		compose         bool
+		self            bool
+		dry             bool
+		force           bool
+		override        bool
+		unchangedDigest bool
+		disabled        bool
+		wantSkipped     bool
+	}
+
+	// tagSelectionDocker serves a single container to the updater and
+	// records the images it recreates and every mutating request.
+	tagSelectionDocker struct {
+		current   string
+		values    map[string]string
+		created   []string
+		mutations int
+	}
+)
+
+const (
+	tagSelectionContainerID, tagSelectionContainerName = "app", "web"
+)
+
 func TestClearPendingRecord(t *testing.T) {
 	latest := "1.28"
 	tests := []struct {
@@ -442,28 +477,6 @@ func TestServiceFallsBackToStandaloneWhenComposeProjectUnresolved(t *testing.T) 
 	}
 }
 
-const tagSelectionContainerID, tagSelectionContainerName = "app", "web"
-
-type tagSelectionScenario struct {
-	// excluded is a settings exclusion matching the container by name or ID;
-	// override sets Options.IgnoreSettingsExclusions.
-	excluded   string
-	constraint string
-	name       string
-	// repository is the configured spelling of the current app:1.0.0 image.
-	repository      string
-	current         string
-	wantFailure     bool
-	compose         bool
-	self            bool
-	dry             bool
-	force           bool
-	override        bool
-	unchangedDigest bool
-	disabled        bool
-	wantSkipped     bool
-}
-
 func TestUpdateContainerTagSelection(t *testing.T) {
 	const containerID, containerName = tagSelectionContainerID, tagSelectionContainerName
 	for _, scenario := range []tagSelectionScenario{
@@ -495,15 +508,6 @@ func TestUpdateContainerTagSelection(t *testing.T) {
 			runTagSelectionScenario(t, scenario)
 		})
 	}
-}
-
-// tagSelectionDocker serves a single container to the updater and
-// records the images it recreates and every mutating request.
-type tagSelectionDocker struct {
-	current   string
-	values    map[string]string
-	created   []string
-	mutations int
 }
 
 func newTagSelectionDocker(scenario tagSelectionScenario) *tagSelectionDocker {

@@ -23,10 +23,16 @@ import (
 	"strconv"
 )
 
-// A Capacity represents a size in bytes.
-//
-//nolint:recvcheck // Set requires a pointer receiver for flag.Value; every other method reads through a value receiver.
-type Capacity uint64
+type (
+	// A Capacity represents a size in bytes.
+	//
+	//nolint:recvcheck // Set requires a pointer receiver for flag.Value; every other method reads through a value receiver.
+	Capacity uint64
+
+	capacityError struct {
+		detail string
+	}
+)
 
 const (
 	Byte Capacity = 1
@@ -53,44 +59,46 @@ const (
 	maxCapacity = Capacity(^uint64(0))
 )
 
-// ErrInvalidCapacity is returned by ParseCapacity for any input it cannot
-// parse. Errors returned by ParseCapacity wrap it, so callers can test with
-// errors.Is.
-var ErrInvalidCapacity = errors.New("bytes: invalid capacity")
+var (
+	// ErrInvalidCapacity is returned by ParseCapacity for any input it cannot
+	// parse. Errors returned by ParseCapacity wrap it, so callers can test with
+	// errors.Is.
+	ErrInvalidCapacity = errors.New("bytes: invalid capacity")
 
-var units = [...]struct {
-	Suffix byte
-	Size   uint64
-}{
-	{Suffix: 'E', Size: uint64(Exabyte)},
-	{Suffix: 'P', Size: uint64(Petabyte)},
-	{Suffix: 'T', Size: uint64(Terabyte)},
-	{Suffix: 'G', Size: uint64(Gigabyte)},
-	{Suffix: 'M', Size: uint64(Megabyte)},
-	{Suffix: 'K', Size: uint64(Kilobyte)},
-}
+	units = [...]struct {
+		Suffix byte
+		Size   uint64
+	}{
+		{Suffix: 'E', Size: uint64(Exabyte)},
+		{Suffix: 'P', Size: uint64(Petabyte)},
+		{Suffix: 'T', Size: uint64(Terabyte)},
+		{Suffix: 'G', Size: uint64(Gigabyte)},
+		{Suffix: 'M', Size: uint64(Megabyte)},
+		{Suffix: 'K', Size: uint64(Kilobyte)},
+	}
 
-// unitMapDecimal holds the base 10 (SI) suffixes, e.g. "G" for Gigabyte.
-var unitMapDecimal = map[byte]Capacity{
-	'E': Exabyte,
-	'P': Petabyte,
-	'T': Terabyte,
-	'G': Gigabyte,
-	'M': Megabyte,
-	'K': Kilobyte,
-}
+	// unitMapDecimal holds the base 10 (SI) suffixes, e.g. "G" for Gigabyte.
+	unitMapDecimal = map[byte]Capacity{
+		'E': Exabyte,
+		'P': Petabyte,
+		'T': Terabyte,
+		'G': Gigabyte,
+		'M': Megabyte,
+		'K': Kilobyte,
+	}
 
-// unitMapBinary holds the base 2 (IEC) suffixes, e.g. "Gi" for Gibibyte. It
-// is keyed on the leading byte only; ParseCapacity has already checked the
-// trailing 'i'.
-var unitMapBinary = map[byte]Capacity{
-	'E': Exbibyte,
-	'P': Pebibyte,
-	'T': Tebibyte,
-	'G': Gibibyte,
-	'M': Mebibyte,
-	'K': Kibibyte,
-}
+	// unitMapBinary holds the base 2 (IEC) suffixes, e.g. "Gi" for Gibibyte. It
+	// is keyed on the leading byte only; ParseCapacity has already checked the
+	// trailing 'i'.
+	unitMapBinary = map[byte]Capacity{
+		'E': Exbibyte,
+		'P': Pebibyte,
+		'T': Tebibyte,
+		'G': Gibibyte,
+		'M': Mebibyte,
+		'K': Kibibyte,
+	}
+)
 
 // Bytes returns the capacity as an integer bytes count.
 func (c Capacity) Bytes() uint64 { return uint64(c) }
@@ -298,10 +306,6 @@ func fmtInt(buf []byte, v uint64) int {
 // parseError builds an error wrapping ErrInvalidCapacity with detail.
 func parseError(detail string) error {
 	return &capacityError{detail: detail}
-}
-
-type capacityError struct {
-	detail string
 }
 
 func (e *capacityError) Error() string {

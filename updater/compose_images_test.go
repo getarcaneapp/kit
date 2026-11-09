@@ -14,12 +14,14 @@ import (
 	updatetypes "kit.getarcane.app/updater/types"
 )
 
-type recordingProjectImages struct {
-	imageErr  error
-	changes   map[string]updatetypes.ServiceImageChange
-	projectID string
-	fakeProjectUpdater
-}
+type (
+	recordingProjectImages struct {
+		imageErr  error
+		changes   map[string]updatetypes.ServiceImageChange
+		projectID string
+		fakeProjectUpdater
+	}
+)
 
 func (f *recordingProjectImages) UpdateServiceImages(_ context.Context, projectID string, changes map[string]updatetypes.ServiceImageChange) error {
 	f.projectID, f.changes = projectID, changes

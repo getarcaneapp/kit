@@ -14,18 +14,20 @@ import (
 	"github.com/moby/moby/client"
 )
 
-type fakeClient struct {
-	client.APIClient
-	createResult       client.ContainerCreateResult
-	createErr          error
-	connectErrs        map[string]error
-	removeErr          error
-	createCalls        []client.ContainerCreateOptions
-	connectCalls       []string
-	removeCalls        []client.ContainerRemoveOptions
-	clientVersionCalls int
-	serverVersionCalls int
-}
+type (
+	fakeClient struct {
+		client.APIClient
+		createResult       client.ContainerCreateResult
+		createErr          error
+		connectErrs        map[string]error
+		removeErr          error
+		createCalls        []client.ContainerCreateOptions
+		connectCalls       []string
+		removeCalls        []client.ContainerRemoveOptions
+		clientVersionCalls int
+		serverVersionCalls int
+	}
+)
 
 func (f *fakeClient) ClientVersion() string {
 	f.clientVersionCalls++

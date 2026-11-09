@@ -9,16 +9,18 @@ import (
 	"testing"
 )
 
-type sample struct {
-	Optional *string           `json:"optional,omitempty" trim:"true" unorm:"nfc"`
-	Map      map[string]string `json:"map"`
-	Next     *sample           `json:"next,omitempty"`
-	Name     string            `json:"name" unorm:"nfc" trim:"true"`
-	Unicode  string            `json:"unicode" unorm:"nfc"`
-	Trim     string            `json:"trim" trim:"true"`
-	Secret   string            `json:"secret"`
-	Children []sample          `json:"children,omitempty"`
-}
+type (
+	sample struct {
+		Optional *string           `json:"optional,omitempty" trim:"true" unorm:"nfc"`
+		Map      map[string]string `json:"map"`
+		Next     *sample           `json:"next,omitempty"`
+		Name     string            `json:"name" unorm:"nfc" trim:"true"`
+		Unicode  string            `json:"unicode" unorm:"nfc"`
+		Trim     string            `json:"trim" trim:"true"`
+		Secret   string            `json:"secret"`
+		Children []sample          `json:"children,omitempty"`
+	}
+)
 
 func TestText(t *testing.T) {
 	for _, test := range []struct{ name, input, want string }{

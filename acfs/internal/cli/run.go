@@ -24,16 +24,18 @@ import (
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
+type (
+	pathFlags struct {
+		root string
+		path string
+	}
+)
+
 const (
 	exitSuccess = 0
 	exitFailure = 1
 	exitUsage   = 2
 )
-
-type pathFlags struct {
-	root string
-	path string
-}
 
 // Run executes acfs and returns its process exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {

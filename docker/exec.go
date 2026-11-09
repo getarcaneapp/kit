@@ -15,24 +15,40 @@ import (
 	"kit.getarcane.app"
 )
 
-// streamEndErrors are the typed errors that mark an ordinary end of a Docker
-// attach/log stream.
-var streamEndErrors = []error{
-	io.EOF,
-	net.ErrClosed,
-	context.Canceled,
-	syscall.EPIPE,
-	syscall.ECONNRESET,
-}
+type (
+	// ExecRequest describes one exec run by ExecInContainer.
+	ExecRequest struct {
+		// Stdout receives the exec's demultiplexed standard output.
+		Stdout io.Writer
+		// Stderr receives the exec's demultiplexed standard error.
+		Stderr io.Writer
+		// ContainerID is the container the exec runs in.
+		ContainerID string
+		// Options configures the exec, e.g. its command and environment.
+		Options client.ExecCreateOptions
+	}
+)
 
-// streamEndMessages match the same conditions once an error has crossed a
-// boundary that flattened it to text, such as the Docker API.
-var streamEndMessages = []string{
-	"use of closed network connection",
-	"context canceled",
-	"broken pipe",
-	"connection reset by peer",
-}
+var (
+	// streamEndErrors are the typed errors that mark an ordinary end of a Docker
+	// attach/log stream.
+	streamEndErrors = []error{
+		io.EOF,
+		net.ErrClosed,
+		context.Canceled,
+		syscall.EPIPE,
+		syscall.ECONNRESET,
+	}
+
+	// streamEndMessages match the same conditions once an error has crossed a
+	// boundary that flattened it to text, such as the Docker API.
+	streamEndMessages = []string{
+		"use of closed network connection",
+		"context canceled",
+		"broken pipe",
+		"connection reset by peer",
+	}
+)
 
 // IsExpectedStreamEndError reports whether err is the ordinary way a Docker
 // attach/log stream ends rather than a real failure.
@@ -67,18 +83,6 @@ func StartStdCopy(stream io.Reader, stdout, stderr io.Writer) <-chan error {
 func WaitStdCopy(done <-chan error) error {
 	err := <-done
 	return kit.Ternary(err == nil || IsExpectedStreamEndError(err), nil, err)
-}
-
-// ExecRequest describes one exec run by ExecInContainer.
-type ExecRequest struct {
-	// Stdout receives the exec's demultiplexed standard output.
-	Stdout io.Writer
-	// Stderr receives the exec's demultiplexed standard error.
-	Stderr io.Writer
-	// ContainerID is the container the exec runs in.
-	ContainerID string
-	// Options configures the exec, e.g. its command and environment.
-	Options client.ExecCreateOptions
 }
 
 // ExecInContainer runs req in its container, demultiplexing output into

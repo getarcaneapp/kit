@@ -2,8 +2,53 @@ package types
 
 import "fmt"
 
-// ErrorCode is a stable machine-readable ACFS failure category.
-type ErrorCode string
+type (
+	// ErrorCode is a stable machine-readable ACFS failure category.
+	ErrorCode string
+
+	// ErrorResponse is emitted as one JSON line on stderr when a command fails.
+	ErrorResponse struct {
+		ChangeIndex *int      `json:"changeIndex,omitempty"`
+		Code        ErrorCode `json:"code"`
+		Message     string    `json:"message"`
+		Operation   string    `json:"operation,omitempty"`
+		Path        string    `json:"path,omitempty"`
+		Version     int       `json:"version"`
+	}
+
+	// ApplyOperation identifies one ordered filesystem mutation.
+	ApplyOperation string
+
+	// ApplyChange describes one ordered root-confined filesystem mutation.
+	ApplyChange struct {
+		Operation  ApplyOperation `json:"operation"`
+		Path       string         `json:"path"`
+		TargetPath string         `json:"targetPath,omitempty"`
+		StagedName string         `json:"stagedName,omitempty"`
+		Size       int64          `json:"size,omitempty"`
+		Recursive  bool           `json:"recursive,omitempty"`
+	}
+
+	// ApplyManifest is the versioned input consumed by acfs apply.
+	ApplyManifest struct {
+		Changes []ApplyChange `json:"changes"`
+		Version int           `json:"version"`
+	}
+
+	// ApplyResponse confirms that every mutation in a manifest was applied.
+	ApplyResponse struct {
+		Applied int `json:"applied"`
+		Version int `json:"version"`
+	}
+
+	// ApplyError identifies the manifest change that failed.
+	ApplyError struct {
+		Err       error
+		Operation ApplyOperation
+		Path      string
+		Index     int
+	}
+)
 
 const (
 	ErrorInvalidPath  ErrorCode = "invalid_path"
@@ -27,49 +72,6 @@ const (
 	ApplyMove         ApplyOperation = "move"
 	ApplyDelete       ApplyOperation = "delete"
 )
-
-// ErrorResponse is emitted as one JSON line on stderr when a command fails.
-type ErrorResponse struct {
-	ChangeIndex *int      `json:"changeIndex,omitempty"`
-	Code        ErrorCode `json:"code"`
-	Message     string    `json:"message"`
-	Operation   string    `json:"operation,omitempty"`
-	Path        string    `json:"path,omitempty"`
-	Version     int       `json:"version"`
-}
-
-// ApplyOperation identifies one ordered filesystem mutation.
-type ApplyOperation string
-
-// ApplyChange describes one ordered root-confined filesystem mutation.
-type ApplyChange struct {
-	Operation  ApplyOperation `json:"operation"`
-	Path       string         `json:"path"`
-	TargetPath string         `json:"targetPath,omitempty"`
-	StagedName string         `json:"stagedName,omitempty"`
-	Size       int64          `json:"size,omitempty"`
-	Recursive  bool           `json:"recursive,omitempty"`
-}
-
-// ApplyManifest is the versioned input consumed by acfs apply.
-type ApplyManifest struct {
-	Changes []ApplyChange `json:"changes"`
-	Version int           `json:"version"`
-}
-
-// ApplyResponse confirms that every mutation in a manifest was applied.
-type ApplyResponse struct {
-	Applied int `json:"applied"`
-	Version int `json:"version"`
-}
-
-// ApplyError identifies the manifest change that failed.
-type ApplyError struct {
-	Err       error
-	Operation ApplyOperation
-	Path      string
-	Index     int
-}
 
 func (e *ApplyError) Error() string {
 	return fmt.Sprintf("apply change %d (%s %q): %v", e.Index, e.Operation, e.Path, e.Err)

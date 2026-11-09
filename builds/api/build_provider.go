@@ -18,19 +18,21 @@ import (
 	"kit.getarcane.app/builds/types"
 )
 
-type buildSession struct {
-	Client *client.Client
-	Close  func(buildErr error) error
-}
+type (
+	buildSession struct {
+		Client *client.Client
+		Close  func(buildErr error) error
+	}
 
-type buildProvider interface {
-	Name() string
-	NewSession(ctx context.Context, req types.BuildRequest) (*buildSession, error)
-}
+	buildProvider interface {
+		Name() string
+		NewSession(ctx context.Context, req types.BuildRequest) (*buildSession, error)
+	}
 
-type depotBuildKitProvider struct {
-	settings types.SettingsProvider
-}
+	depotBuildKitProvider struct {
+		settings types.SettingsProvider
+	}
+)
 
 func (p *depotBuildKitProvider) Name() string {
 	return "depot"

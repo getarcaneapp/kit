@@ -15,12 +15,14 @@ import (
 	"github.com/moby/moby/client"
 )
 
-const networkListJSON = `[{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge",
+const (
+	networkListJSON = `[{"Name":"test-net","Id":"net123","Created":"2026-03-11T00:00:00Z","Scope":"local","Driver":"bridge",
 	"IPAM":{"Driver":"default","Config":[{"Subnet":"fdd0:0:0:c::/64","Gateway":"fdd0:0:0:c::1/64","AuxiliaryAddresses":{"router":"fdd0:0:0:c::2/64"}},
 	{"Subnet":"192.168.0.0/24","IPRange":"192.168.0.3"}]}}]`
 
-const containerInspectJSON = `{"Id":"abc123","Name":"/app","Config":{"Image":"test:latest"},"HostConfig":{"NetworkMode":"bridge"},
+	containerInspectJSON = `{"Id":"abc123","Name":"/app","Config":{"Image":"test:latest"},"HostConfig":{"NetworkMode":"bridge"},
 	"NetworkSettings":{"Networks":{"bridge":{"IPv6Gateway":"fdd0:0:0:c::1/64"}}}}`
+)
 
 func newTestClient(t *testing.T, handler http.HandlerFunc) *client.Client {
 	t.Helper()

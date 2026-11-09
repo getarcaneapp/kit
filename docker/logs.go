@@ -15,13 +15,15 @@ import (
 	"kit.getarcane.app"
 )
 
-// LogOptions describes the log stream StreamContainerLogs reads.
-type LogOptions struct {
-	// Follow streams logs until the reader ends instead of reading a snapshot.
-	Follow bool
-	// TTY marks a raw TTY stream; otherwise the stream is stdout/stderr multiplexed.
-	TTY bool
-}
+type (
+	// LogOptions describes the log stream StreamContainerLogs reads.
+	LogOptions struct {
+		// Follow streams logs until the reader ends instead of reading a snapshot.
+		Follow bool
+		// TTY marks a raw TTY stream; otherwise the stream is stdout/stderr multiplexed.
+		TTY bool
+	}
+)
 
 // StreamContainerLogs streams Docker container logs, handling TTY raw streams
 // and non-TTY multiplexed stdout/stderr streams.

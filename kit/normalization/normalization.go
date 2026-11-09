@@ -11,6 +11,17 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+type (
+	// TextOptions selects the normalizations Text applies. The zero value returns
+	// the input unchanged.
+	TextOptions struct {
+		// Trim removes leading and trailing whitespace.
+		Trim bool
+		// NFC converts the text to Unicode Normalization Form C.
+		NFC bool
+	}
+)
+
 // Normalize normalizes tagged fields in place and checks their length constraints.
 // The input must be a non-nil pointer. Untagged strings, maps, and nested nil
 // pointers are left untouched. Tagged string
@@ -31,15 +42,6 @@ func Normalize(value any) error {
 		return err
 	}
 	return normalizeValue(v, p, make(map[any]bool))
-}
-
-// TextOptions selects the normalizations Text applies. The zero value returns
-// the input unchanged.
-type TextOptions struct {
-	// Trim removes leading and trailing whitespace.
-	Trim bool
-	// NFC converts the text to Unicode Normalization Form C.
-	NFC bool
 }
 
 // Text applies the normalizations selected by opts: trimming first, then NFC.

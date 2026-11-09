@@ -8,6 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type (
+	syncBuffer struct {
+		buf strings.Builder
+		mu  sync.Mutex
+	}
+)
+
 func TestRenderJSONMessageStream(t *testing.T) {
 	t.Run("renders docker CLI text for pull messages", func(t *testing.T) {
 		stream := strings.NewReader("{\"status\":\"Pulling from library/nginx\",\"id\":\"stable-alpine\"}\n{\"status\":\"Pull complete\",\"id\":\"abc123\"" +
@@ -57,11 +64,6 @@ func TestLogLineWriterConcurrentWrites(t *testing.T) {
 		require.Len(t, lines, 8*200,
 			"expected %d frames, got %d", 8*200, len(lines))
 	}
-}
-
-type syncBuffer struct {
-	buf strings.Builder
-	mu  sync.Mutex
 }
 
 func (b *syncBuffer) Write(p []byte) (int, error) {

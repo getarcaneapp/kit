@@ -32,28 +32,30 @@ import (
 	"kit.getarcane.app/builds/types"
 )
 
-type dockerBuildInput struct {
-	buildArgs map[string]*string
-	labels    map[string]string
-	buildFilesystemInput
-	platform    string
-	networkMode string
-	isolation   string
-	cacheFrom   []string
-	ulimits     []*dockercontainer.Ulimit
-	extraHosts  []string
-	shmSize     int64
-	noCache     bool
-	pullParent  bool
-}
+type (
+	dockerBuildInput struct {
+		buildArgs map[string]*string
+		labels    map[string]string
+		buildFilesystemInput
+		platform    string
+		networkMode string
+		isolation   string
+		cacheFrom   []string
+		ulimits     []*dockercontainer.Ulimit
+		extraHosts  []string
+		shmSize     int64
+		noCache     bool
+		pullParent  bool
+	}
 
-type buildFilesystemInput struct {
-	contextDir           string
-	fullDockerfilePath   string
-	relDockerfile        string
-	dockerfileInline     string
-	dockerfileOutsideCtx bool
-}
+	buildFilesystemInput struct {
+		contextDir           string
+		fullDockerfilePath   string
+		relDockerfile        string
+		dockerfileInline     string
+		dockerfileOutsideCtx bool
+	}
+)
 
 func parseUlimits(values map[string]string) ([]*dockercontainer.Ulimit, error) {
 	if len(values) == 0 {

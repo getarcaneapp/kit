@@ -12,6 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type (
+	blockingReadCloser struct {
+		readStarted chan struct{}
+		closeCalled chan struct{}
+	}
+)
+
 func TestStreamContainerLogsNonTTYFollowDemultiplexesStdoutAndStderr(t *testing.T) {
 	var stream bytes.Buffer
 	writeDockerLogFrame(t, &stream, 1, "stdout line\n")
@@ -168,11 +175,6 @@ func writeDockerLogFrame(t *testing.T, buffer *bytes.Buffer, streamType byte, pa
 	require.NoError(t, err)
 	_, err = buffer.WriteString(payload)
 	require.NoError(t, err)
-}
-
-type blockingReadCloser struct {
-	readStarted chan struct{}
-	closeCalled chan struct{}
 }
 
 func (r *blockingReadCloser) Read(_ []byte) (int, error) {

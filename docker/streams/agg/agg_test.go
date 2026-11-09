@@ -8,7 +8,9 @@ import (
 	"time"
 )
 
-type failingWriter struct{}
+type (
+	failingWriter struct{}
+)
 
 func (failingWriter) Write([]byte) (int, error) {
 	return 0, errors.New("write failed")
