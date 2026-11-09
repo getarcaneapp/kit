@@ -1,3 +1,13 @@
+## acfs/v0.8.0
+
+### New features
+
+* race-safe root operations and a Host API([ed0b005](https://github.com/getarcaneapp/kit/commit/ed0b005dd7eefb3e0d99417ce888a5cf96a8951e) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/acfs/v0.7.0...acfs/v0.8.0
+
 ## acfs/v0.7.0
 
 ### New features
