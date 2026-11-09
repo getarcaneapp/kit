@@ -107,7 +107,8 @@ used by the Arcane tools image:
 acfs list|walk|stat|read|write|mkdir|remove|apply|version
 ```
 
-`list`, `stat`, and `apply` emit JSON. `walk` emits NDJSON with a mandatory end
+`list`, `stat`, and `apply` emit JSON. `list --limit N` emits at most `N`
+entries and adds `"truncated":true` when it left any out. `walk` emits NDJSON with a mandatory end
 record and supports depth and entry limits. `read` emits an `ARCW` protocol-v2
 header followed by raw file content. Failures are emitted as structured JSON
 only on stderr.

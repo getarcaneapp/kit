@@ -26,8 +26,9 @@ type Entry struct {
 
 // ListResponse is the versioned response emitted by the list command.
 type ListResponse struct {
-	Entries []Entry `json:"entries"`
-	Version int     `json:"version"`
+	Entries   []Entry `json:"entries"`
+	Truncated bool    `json:"truncated,omitempty"`
+	Version   int     `json:"version"`
 }
 
 // StatResponse is the versioned response emitted by the stat command.
