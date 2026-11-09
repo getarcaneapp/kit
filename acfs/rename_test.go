@@ -53,3 +53,17 @@ func TestRenameReplacesFileAndRejectsNonEmptyDirectoryTarget(t *testing.T) {
 		t.Fatalf("Rename of workspace root error = %v, want ErrRootRemoval", err)
 	}
 }
+
+func BenchmarkRename(b *testing.B) {
+	root := Root{Path: b.TempDir()}
+	writeFixtureFile(b, filepath.Join(root.Path, "a"), "x", 0o600)
+	names := [2]string{"/a", "/b"}
+	b.ReportAllocs()
+	iteration := 0
+	for b.Loop() {
+		if err := root.Rename(b.Context(), names[iteration%2], names[(iteration+1)%2]); err != nil {
+			b.Fatal(err)
+		}
+		iteration++
+	}
+}

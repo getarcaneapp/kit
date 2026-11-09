@@ -148,3 +148,60 @@ func TestApplyPreservesUpdateModeAndRejectsOverlappingRoots(t *testing.T) {
 		t.Fatalf("overlapping roots error = %v, want ErrInvalidPath", err)
 	}
 }
+
+func TestApplyCreateRejectsReplacedPublication(t *testing.T) {
+	tests := map[string]func(root, victim string) (func(string), func()){
+		"temporary link": func(root, victim string) (func(string), func()) {
+			return func(temporaryName string) {
+				replaceWithLink(t, filepath.Join(root, temporaryName), victim)
+			}, nil
+		},
+		"destination": func(root, victim string) (func(string), func()) {
+			return nil, func() {
+				replaceWithLink(t, filepath.Join(root, "file"), victim)
+			}
+		},
+	}
+	for name, hooks := range tests {
+		t.Run(name, func(t *testing.T) {
+			root, staging := t.TempDir(), t.TempDir()
+			victim := filepath.Join(t.TempDir(), "victim")
+			writeFixtureFile(t, victim, "victim", 0o600)
+			writeFixtureFile(t, filepath.Join(staging, "create"), "created", 0o600)
+			before, after := hooks(root, victim)
+			setPublishHooks(t, before, after)
+
+			_, err := Root{Path: root}.Apply(t.Context(), Root{Path: staging}, acfstypes.ApplyManifest{
+				Version: acfstypes.ProtocolVersion,
+				Changes: []acfstypes.ApplyChange{{Operation: acfstypes.ApplyCreateFile, Path: "/file", StagedName: "create", Size: 7}},
+			})
+			if !errors.Is(err, ErrReplaced) {
+				t.Fatalf("Apply error = %v, want ErrReplaced", err)
+			}
+			if content, readErr := os.ReadFile(victim); readErr != nil || string(content) != "victim" {
+				t.Fatalf("victim = %q, %v", content, readErr)
+			}
+		})
+	}
+}
+
+// replaceWithLink swaps name for a symbolic link to target, as a concurrent
+// writer of the directory could.
+func replaceWithLink(t *testing.T, name, target string) {
+	t.Helper()
+	if err := os.Remove(name); err != nil {
+		t.Error(err)
+		return
+	}
+	if err := os.Symlink(target, name); err != nil {
+		t.Error(err)
+	}
+}
+
+func setPublishHooks(t *testing.T, before func(string), after func()) {
+	t.Helper()
+	beforePublish, afterPublish = before, after
+	t.Cleanup(func() {
+		beforePublish, afterPublish = nil, nil
+	})
+}

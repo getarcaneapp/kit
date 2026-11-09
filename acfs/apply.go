@@ -22,9 +22,8 @@ const (
 	applyDirectoryMode = 0o755
 )
 
-// Apply performs an ordered batch of root-confined mutations. It stops at the
-// first failure; callers that require transactionality remain responsible for
-// restoring their own backup.
+// Apply performs an ordered batch of root-confined mutations, stopping at the
+// first failure.
 func (r Root) Apply(ctx context.Context, staging Root, manifest acfstypes.ApplyManifest) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -42,20 +41,24 @@ func (r Root) Apply(ctx context.Context, staging Root, manifest acfstypes.ApplyM
 			}
 		}
 	}
-	if err := validateDistinctRoots(r.Path, staging.Path); err != nil {
+	if _, _, err := validateDistinctRoots(r.Path, staging.Path); err != nil {
 		return 0, err
 	}
 
-	root, openErr := os.OpenRoot(r.Path)
+	mutation, openErr := openMutationRoot(r.Path)
 	if openErr != nil {
-		return 0, fmt.Errorf("open workspace root: %w", openErr)
+		return 0, openErr
 	}
-	defer func() { _ = root.Close() }()
+	defer func() {
+		_ = mutation.Close()
+	}()
 	stagingRoot, openErr := os.OpenRoot(staging.Path)
 	if openErr != nil {
 		return 0, fmt.Errorf("open staging root: %w", openErr)
 	}
-	defer func() { _ = stagingRoot.Close() }()
+	defer func() {
+		_ = stagingRoot.Close()
+	}()
 
 	for index, change := range manifest.Changes {
 		if err := ctx.Err(); err != nil {
@@ -64,37 +67,15 @@ func (r Root) Apply(ctx context.Context, staging Root, manifest acfstypes.ApplyM
 		if err := func() error {
 			switch change.Operation {
 			case acfstypes.ApplyCreateFile:
-				return applyFile(ctx, root, stagingRoot, change, true)
+				return applyFile(ctx, mutation, stagingRoot, change, true)
 			case acfstypes.ApplyUpdateFile:
-				return applyFile(ctx, root, stagingRoot, change, false)
+				return applyFile(ctx, mutation, stagingRoot, change, false)
 			case acfstypes.ApplyCreateFolder:
-				relativePath, err := normalizeMutationPath(change.Path)
-				if err != nil {
-					return err
-				}
-				parent, err := ensureMutationParent(root, relativePath, true)
-				if err != nil {
-					return err
-				}
-				parentRoot, err := root.OpenRoot(parent)
-				if err != nil {
-					return err
-				}
-				defer func() { _ = parentRoot.Close() }()
-				base := path.Base(relativePath)
-				err = rejectExistingTarget(parentRoot, base)
-				if err != nil {
-					return err
-				}
-				err = parentRoot.Mkdir(base, applyDirectoryMode)
-				if errors.Is(err, fs.ErrExist) {
-					return ErrAlreadyExists
-				}
-				return err
+				return applyFolder(mutation, change.Path)
 			case acfstypes.ApplyRename, acfstypes.ApplyMove:
-				return applyRename(root, change.Path, change.TargetPath)
+				return applyRename(mutation, change.Path, change.TargetPath)
 			case acfstypes.ApplyDelete:
-				return applyDelete(root, change.Path, change.Recursive)
+				return applyDelete(mutation, change.Path, change.Recursive)
 			}
 			return nil
 		}(); err != nil {
@@ -124,75 +105,47 @@ func normalizeMutationPath(logicalPath string) (string, error) {
 	return relativePath, nil
 }
 
-func ensureMutationParent(root *os.Root, relativePath string, create bool) (string, error) {
-	parent := path.Dir(relativePath)
-	if parent == "." {
-		return ".", nil
-	}
-
-	current := ""
-	for component := range strings.SplitSeq(parent, "/") {
-		current = path.Join(current, component)
-		info, err := root.Lstat(current)
-		if errors.Is(err, fs.ErrNotExist) && create {
-			err = root.Mkdir(current, applyDirectoryMode)
-			if err != nil && !errors.Is(err, fs.ErrExist) {
-				return "", fmt.Errorf("create parent %q: %w", kitfs.LogicalPath(current), err)
-			}
-			info, err = root.Lstat(current)
-		}
-		if err != nil {
-			return "", err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("%w: %s", ErrSymlink, kitfs.LogicalPath(current))
-		}
-		if !info.IsDir() {
-			return "", fmt.Errorf("%w: %s", ErrNotDirectory, kitfs.LogicalPath(current))
-		}
-	}
-	return parent, nil
-}
-
-// rejectExistingTarget reports ErrAlreadyExists, or ErrSymlink for a
-// symbolic link, when name already exists in root.
-func rejectExistingTarget(root *os.Root, name string) error {
-	info, err := root.Lstat(name)
-	if err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return ErrSymlink
-		}
-		return ErrAlreadyExists
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
+func applyFolder(mutation *mutationRoot, logicalPath string) error {
+	relativePath, err := normalizeMutationPath(logicalPath)
+	if err != nil {
 		return err
 	}
-	return nil
+	parent, base, err := mutation.openParent(relativePath, true)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = parent.Close()
+	}()
+	err = rejectExistingTarget(parent, base)
+	if err != nil {
+		return err
+	}
+	err = parent.Mkdir(base, applyDirectoryMode)
+	if errors.Is(err, fs.ErrExist) {
+		return ErrAlreadyExists
+	}
+	return err
 }
 
-func applyFile(ctx context.Context, root, stagingRoot *os.Root, change acfstypes.ApplyChange, create bool) error {
+func applyFile(ctx context.Context, mutation *mutationRoot, stagingRoot *os.Root, change acfstypes.ApplyChange, create bool) error {
 	relativePath, err := normalizeMutationPath(change.Path)
 	if err != nil {
 		return err
 	}
-	parent, err := ensureMutationParent(root, relativePath, create)
+	parent, base, err := mutation.openParent(relativePath, create)
 	if err != nil {
 		return err
 	}
-	parentRoot, err := root.OpenRoot(parent)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = parentRoot.Close() }()
-	base := path.Base(relativePath)
+	defer func() {
+		_ = parent.Close()
+	}()
 
-	// For updates, mode is the permission bits of an existing regular file in
-	// root, refusing symbolic links and other file types.
 	mode, err := func() (os.FileMode, error) {
 		if create {
-			return applyFileMode, rejectExistingTarget(parentRoot, base)
+			return applyFileMode, rejectExistingTarget(parent, base)
 		}
-		info, lstatErr := parentRoot.Lstat(base)
+		info, lstatErr := parent.Lstat(base)
 		if lstatErr != nil {
 			return 0, lstatErr
 		}
@@ -222,20 +175,25 @@ func applyFile(ctx context.Context, root, stagingRoot *os.Root, change acfstypes
 	if err != nil {
 		return err
 	}
-	defer func() { _ = staged.Close() }()
+	defer func() {
+		_ = staged.Close()
+	}()
 
 	if !create {
-		_, err = writeFromRoot(ctx, parentRoot, change.Path, base, staged, change.Size, mode)
+		_, err = writeFromRoot(ctx, parent, change.Path, base, staged, change.Size, mode)
 		return err
 	}
 
-	target, temporaryPath, err := createTemporaryFile(parentRoot, ".")
+	target, temporaryName, err := createTemporaryFile(parent)
 	if err != nil {
 		return err
 	}
+	removeTemporary := true
 	defer func() {
 		_ = target.Close()
-		_ = parentRoot.Remove(temporaryPath)
+		if removeTemporary {
+			_ = parent.Remove(temporaryName)
+		}
 	}()
 
 	written, err := io.CopyN(target, contextReader{ctx: ctx, reader: staged}, change.Size)
@@ -250,21 +208,38 @@ func applyFile(ctx context.Context, root, stagingRoot *os.Root, change acfstypes
 	if err != nil {
 		return err
 	}
-	err = target.Close()
+	// A hard link refuses an existing name.
+	if beforePublish != nil {
+		beforePublish(temporaryName)
+	}
+	err = parent.verifyPublished(temporaryName, target)
 	if err != nil {
+		removeTemporary = false
 		return err
 	}
-	err = parentRoot.Link(temporaryPath, base)
+	err = parent.Link(temporaryName, base)
 	if errors.Is(err, fs.ErrExist) {
 		return ErrAlreadyExists
 	}
 	if err != nil {
 		return err
 	}
-	return parentRoot.Remove(temporaryPath)
+	if afterPublish != nil {
+		afterPublish()
+	}
+	err = parent.verifyPublished(base, target)
+	if err != nil {
+		return err
+	}
+	err = target.Close()
+	if err != nil {
+		return err
+	}
+	removeTemporary = false
+	return parent.Remove(temporaryName)
 }
 
-func applyRename(root *os.Root, sourcePath, targetPath string) error {
+func applyRename(mutation *mutationRoot, sourcePath, targetPath string) error {
 	source, err := normalizeMutationPath(sourcePath)
 	if err != nil {
 		return err
@@ -276,29 +251,39 @@ func applyRename(root *os.Root, sourcePath, targetPath string) error {
 	if source == target || strings.HasPrefix(target, source+"/") {
 		return fmt.Errorf("%w: invalid destination", ErrInvalidPath)
 	}
-	_, err = ensureMutationParent(root, source, false)
+	sourceParent, sourceBase, err := mutation.openParent(source, false)
 	if err != nil {
 		return err
 	}
-	info, err := root.Lstat(source)
+	defer func() {
+		_ = sourceParent.Close()
+	}()
+	info, err := sourceParent.Lstat(sourceBase)
 	if err != nil {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%w: %s", ErrSymlink, kitfs.LogicalPath(source))
 	}
-	_, err = ensureMutationParent(root, target, false)
+	targetParent, targetBase, err := mutation.openParent(target, false)
 	if err != nil {
 		return err
 	}
-	err = rejectExistingTarget(root, target)
+	defer func() {
+		_ = targetParent.Close()
+	}()
+	err = rejectExistingTarget(targetParent, targetBase)
 	if err != nil {
 		return err
 	}
-	return root.Rename(source, target)
+	err = sourceParent.renameNoReplace(sourceBase, targetParent, targetBase)
+	if errors.Is(err, fs.ErrExist) {
+		return ErrAlreadyExists
+	}
+	return err
 }
 
-func applyDelete(root *os.Root, logicalPath string, recursive bool) error {
+func applyDelete(mutation *mutationRoot, logicalPath string, recursive bool) error {
 	if logicalPath == "/" {
 		return ErrRootRemoval
 	}
@@ -306,17 +291,14 @@ func applyDelete(root *os.Root, logicalPath string, recursive bool) error {
 	if err != nil {
 		return err
 	}
-	parent, err := ensureMutationParent(root, relativePath, false)
+	parent, base, err := mutation.openParent(relativePath, false)
 	if err != nil {
 		return err
 	}
-	parentRoot, err := root.OpenRoot(parent)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = parentRoot.Close() }()
-	base := path.Base(relativePath)
-	info, err := parentRoot.Lstat(base)
+	defer func() {
+		_ = parent.Close()
+	}()
+	info, err := parent.Lstat(base)
 	if err != nil {
 		return err
 	}
@@ -324,9 +306,9 @@ func applyDelete(root *os.Root, logicalPath string, recursive bool) error {
 		return ErrSymlink
 	}
 	if info.IsDir() && recursive {
-		return parentRoot.RemoveAll(base)
+		return parent.RemoveAll(base)
 	}
-	err = parentRoot.Remove(base)
+	err = parent.Remove(base)
 	if err != nil {
 		if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
 			return ErrNotEmpty
@@ -375,23 +357,23 @@ func validateApplyChange(change acfstypes.ApplyChange) error {
 	}
 }
 
-func validateDistinctRoots(rootPath, stagingPath string) error {
+func validateDistinctRoots(rootPath, stagingPath string) (string, string, error) {
 	root, err := filepath.EvalSymlinks(rootPath)
 	if err != nil {
-		return fmt.Errorf("resolve workspace root: %w", err)
+		return "", "", fmt.Errorf("resolve workspace root: %w", err)
 	}
 	staging, err := filepath.EvalSymlinks(stagingPath)
 	if err != nil {
-		return fmt.Errorf("resolve staging root: %w", err)
+		return "", "", fmt.Errorf("resolve staging root: %w", err)
 	}
 	for _, paths := range [][2]string{{root, staging}, {staging, root}} {
 		relative, relErr := filepath.Rel(paths[0], paths[1])
 		if relErr != nil {
-			return relErr
+			return "", "", relErr
 		}
 		if filepath.IsLocal(relative) {
-			return fmt.Errorf("%w: workspace and staging roots overlap", ErrInvalidPath)
+			return "", "", fmt.Errorf("%w: workspace and staging roots overlap", ErrInvalidPath)
 		}
 	}
-	return nil
+	return root, staging, nil
 }

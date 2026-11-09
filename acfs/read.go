@@ -1,12 +1,12 @@
 package acfs
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"syscall"
 
 	"kit.getarcane.app"
 	kitfs "kit.getarcane.app/fs"
@@ -14,16 +14,11 @@ import (
 
 type contextReadCloser struct {
 	contextReader
-	closer io.Closer
+	io.Closer
 }
 
-func (r *contextReadCloser) Close() error {
-	return r.closer.Close()
-}
-
-// OpenRead opens a file for a root-confined streaming read. The returned size
-// is the number of bytes available after applying maxBytes; a non-positive
-// limit reads the complete file.
+// OpenRead opens a root-confined file for a streaming read of at most maxBytes
+// when positive.
 func (r Root) OpenRead(ctx context.Context, logicalPath string, maxBytes int64) (io.ReadCloser, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -42,16 +37,19 @@ func (r Root) OpenRead(ctx context.Context, logicalPath string, maxBytes int64) 
 	if err != nil {
 		return nil, 0, fmt.Errorf("open workspace root: %w", err)
 	}
-	defer func() { _ = root.Close() }()
+	defer func() {
+		_ = root.Close()
+	}()
 
-	resolvedPath, err := resolvePath(root, relativePath, true)
+	resolvedPath, info, err := resolvePath(root, relativePath, resolveOptions{FollowFinal: true})
 	if err != nil {
 		return nil, 0, err
 	}
-
-	info, err := root.Stat(resolvedPath)
-	if err != nil {
-		return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
+	if info == nil {
+		info, err = root.Stat(resolvedPath)
+		if err != nil {
+			return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
+		}
 	}
 	if info.IsDir() {
 		return nil, 0, ErrIsDirectory
@@ -60,7 +58,7 @@ func (r Root) OpenRead(ctx context.Context, logicalPath string, maxBytes int64) 
 		return nil, 0, ErrNotFile
 	}
 
-	file, err := root.Open(resolvedPath)
+	file, err := root.OpenFile(resolvedPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
@@ -78,7 +76,7 @@ func (r Root) OpenRead(ctx context.Context, logicalPath string, maxBytes int64) 
 	return &contextReadCloser{
 		ctx:    ctx,
 		reader: io.LimitReader(file, size),
-		closer: file,
+		Closer: file,
 	}, size, nil
 }
 
@@ -105,9 +103,7 @@ func (r *contextReadSeekCloser) Close() error {
 	return r.file.Close()
 }
 
-// OpenReadSeek opens a root-confined regular file for a seekable read of its
-// complete contents, following its final symbolic link. The returned size is
-// the file size at open time.
+// OpenReadSeek opens a root-confined regular file for a seekable read.
 func (r Root) OpenReadSeek(ctx context.Context, logicalPath string) (io.ReadSeekCloser, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -126,14 +122,16 @@ func (r Root) OpenReadSeek(ctx context.Context, logicalPath string) (io.ReadSeek
 	if err != nil {
 		return nil, 0, fmt.Errorf("open workspace root: %w", err)
 	}
-	defer func() { _ = root.Close() }()
+	defer func() {
+		_ = root.Close()
+	}()
 
-	resolvedPath, err := resolvePath(root, relativePath, true)
+	resolvedPath, _, err := resolvePath(root, relativePath, resolveOptions{FollowFinal: true})
 	if err != nil {
 		return nil, 0, err
 	}
 
-	file, err := root.Open(resolvedPath)
+	file, err := root.OpenFile(resolvedPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
@@ -154,25 +152,33 @@ func (r Root) OpenReadSeek(ctx context.Context, logicalPath string) (io.ReadSeek
 	return &contextReadSeekCloser{ctx: ctx, file: file}, info.Size(), nil
 }
 
-// ReadFile returns the complete contents of a root-confined regular file,
-// following its final symbolic link.
+// ReadFile returns the contents of a root-confined regular file.
 func (r Root) ReadFile(ctx context.Context, logicalPath string) ([]byte, error) {
 	reader, size, err := r.OpenRead(ctx, logicalPath, 0)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = reader.Close() }()
+	defer func() {
+		_ = reader.Close()
+	}()
 
-	buffer := bytes.NewBuffer(make([]byte, 0, size))
-	_, err = io.Copy(buffer, reader)
+	// A file that shrank since open yields a short read, like reaching EOF.
+	content := make([]byte, size)
+	read, err := io.ReadFull(reader, content)
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		err = nil
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", logicalPath, err)
 	}
-	return buffer.Bytes(), nil
+	return content[:read], nil
 }
 
-// ReadTo streams a root-confined file into destination. A non-positive limit
-// reads the complete file.
+// ReadTo streams a root-confined file into destination, at most maxBytes when
+// positive.
 func (r Root) ReadTo(ctx context.Context, logicalPath string, destination io.Writer, maxBytes int64) (int64, error) {
 	if destination == nil {
 		return 0, errors.New("destination writer is required")
@@ -181,8 +187,9 @@ func (r Root) ReadTo(ctx context.Context, logicalPath string, destination io.Wri
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = reader.Close() }()
-
+	defer func() {
+		_ = reader.Close()
+	}()
 	written, err := io.Copy(destination, reader)
 	if err != nil {
 		return written, fmt.Errorf("read %q: %w", logicalPath, err)

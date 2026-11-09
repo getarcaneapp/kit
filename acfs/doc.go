@@ -1,41 +1,16 @@
-// Package acfs provides root-confined filesystem operations for Arcane
-// helper processes.
+// Package acfs provides filesystem operations for Arcane, either confined to a
+// root directory (Root) or on absolute host paths (Host).
 //
-// Every operation is a method on Root, a host directory built with a literal
-// such as acfs.Root{Path: dir}. Methods take an absolute logical path
-// interpreted relative to Root.Path and can never touch anything outside it:
-// ".." components are collapsed, and a symbolic link whose target escapes the
-// root reports ErrOutsideRoot rather than being followed.
+// Root never reads, writes, or follows a link outside its Path. Some mutations
+// resolve links inside the root in the parent path and others refuse them; the
+// README lists which. On Linux mutations act on a parent opened by descriptor
+// without following links; other systems check, then act by path.
+// A write that finds its staged or published file replaced reports ErrReplaced.
 //
-// # Errors
+// Operating system errors are wrapped, so errors.Is with fs.ErrNotExist,
+// fs.ErrExist, and os.ErrPermission keeps working. RemoveAll ignores a missing
+// target; Remove reports it.
 //
-// The sentinels in errors.go classify ACFS-level policy failures. Errors that
-// originate in the operating system are wrapped rather than translated, so the
-// standard library predicates keep working and are part of the API contract:
-// errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrExist), and
-// errors.Is(err, os.ErrPermission) all hold through ACFS wrapping. That is why
-// there is no ErrNotExist sentinel of our own.
-//
-// Removal deliberately has two behaviours. RemoveAll returns nil when the
-// target is already gone, matching os.RemoveAll. Remove surfaces the not-exist
-// error instead, so bounded cleanup loops (prune empty parents until something
-// stops you) can terminate on any error without a separate existence probe.
-//
-// # Writes
-//
-// Writes are atomic by default: Write and WriteFrom stage the content in a
-// temporary file inside the target's directory and rename it into place, so a
-// reader never observes a torn file. Write with WriteOptions.InPlace and
-// Root.MirrorTo rewrite destination files in place to preserve their inodes for
-// live bind mounts. In-place writes can leave partial contents on failure.
-//
-// Temporary files created during a write use the reserved ".acfs-write-"
-// name prefix. Paths containing a component with that prefix are rejected, and
-// List, Walk, and CopyTo hide them.
-//
-// # Subpackages
-//
-// Subpackage atomic provides an unrooted atomic write for the handful of
-// destinations that have no natural workspace root, such as a user-specified
-// output file. It refuses a symlinked destination instead of replacing it.
+// Writes are atomic by default and stage a temporary file with the reserved
+// ".acfs-write-" prefix, which paths may not use and listings hide.
 package acfs

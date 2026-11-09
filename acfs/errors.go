@@ -29,4 +29,9 @@ var (
 	ErrNotFile = errors.New("path is not a regular file")
 	// ErrNotEmpty indicates that a non-recursive directory removal was requested.
 	ErrNotEmpty = errors.New("directory is not empty")
+	// ErrInvalidOpenOptions indicates an OpenOptions combination that cannot open a file.
+	ErrInvalidOpenOptions = errors.New("invalid open options")
+	// ErrReplaced indicates that another process replaced the staged or published
+	// file, so the write did not succeed.
+	ErrReplaced = errors.New("staged file was replaced during the write")
 )

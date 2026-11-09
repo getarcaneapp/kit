@@ -16,8 +16,7 @@ paths are confined with `os.Root`, and directory traversal never follows
 symlinks.
 
 > [!IMPORTANT]
-> This module is in early development. The API is not stable and may change
-> before v1.0.0.
+> This module is under development. The API is not stable and may change before v1.0.0.
 
 ## Getting started
 
@@ -26,32 +25,74 @@ go get kit.getarcane.app/acfs@latest
 ```
 
 ```go
-entries, err := acfs.List(ctx, "/var/lib/docker/volumes/example/_data", "/")
+root := acfs.Root{Path: "/var/lib/docker/volumes/example/_data"}
+entries, err := root.List(ctx, "/")
 if err != nil {
 	return err
 }
 
-err = acfs.Walk(ctx, root, "/logs", func(entry types.Entry) error {
+_, err = root.Walk(ctx, "/logs", types.WalkOptions{}, func(entry types.Entry) error {
 	fmt.Println(entry.Path, entry.Mode, entry.Size)
 	return nil
 })
 ```
 
-The root package also provides `WalkBounded`, `Stat`, `Exists`, `ReadFile`,
-`ReadTo`, `Write`, `WriteFrom`, `Mkdir`, `MkdirAll`, `MkdirTemp`, `Rename`,
-`Remove`, `RemoveAll`, `CopyDir`, `MirrorDir`, `LogicalPath`, and ordered batch
-`Apply`. Public filesystem and protocol DTOs live in `types`.
+`Root` confines every operation to `Root.Path` using logical paths. `Host`
+(`acfs.Host{}`) offers the same methods on absolute host paths without
+confinement, and the `FS` interface covers what both share:
 
-Subpackage `acfs/atomic` provides a crash-safe `WriteFile` for the rare
-destination that has no natural workspace root, such as a user-specified output
-file. Unlike the default `acfs.Write` it refuses a symlinked destination rather than
-replacing it.
+- Reading: `List`, `ListEach`, `Walk`, `Stat`, `Exists`, `OpenRead`,
+  `OpenReadSeek`, `ReadFile`, `ReadTo`
+- Writing: `Write`, `WriteFrom`, `WriteAt`, `OpenFile`, `CreateTemp`
+- Directories and names: `Mkdir`, `MkdirAll`, `MkdirTemp`, `Rename`, `Remove`,
+  `RemoveAll`
+- Attributes and links: `Chmod`, `Chown`, `Lchown`, `Chtimes`, `Symlink`,
+  `Readlink`
+
+`Root` adds `LogicalPath`, `CopyTo`, `MirrorTo`, and ordered batch `Apply`;
+`Host` adds `CopyDir` and `MirrorDir`. Public filesystem and protocol DTOs live
+in `types`.
+
+On a `Root`, links inside the root are handled per operation:
+
+- Resolve links in the parent path: `Write`, `WriteFrom`, `WriteAt`, `Mkdir`,
+  `MkdirAll`, `MkdirTemp`, `CreateTemp`, `Rename`, `Remove`, `RemoveAll`, and a
+  read-only `OpenFile`.
+- Refuse any link in the path with `ErrSymlink`: `Chmod`, `Chown`, `Lchown`,
+  `Chtimes`, `Symlink`, a writing `OpenFile`, and `Apply`.
+- A final link is refused by `Write` with `InPlace`, a writing `OpenFile`,
+  `Chmod`, `Chown`, and `Chtimes`. `Lchown`, `Remove`, `RemoveAll`, and
+  `Rename` act on the link itself.
+
+`Symlink` only creates links that stay inside the root, stored as relative
+targets. On Linux mutations act through a parent directory descriptor opened
+without following symbolic links, so concurrent writers cannot redirect them.
+
+### Threat model
+
+- `Root`'s own operations never read, write, or follow a link outside the root.
+- A process that can concurrently write inside the root can already create
+  links and replace files there, so ACFS does not protect root contents from it.
+- ACFS will not act as a confused deputy for such a process. An atomic write or
+  `Apply` that finds its staged file or published name replaced returns
+  `ErrReplaced`, not success. This narrows the race window but does not close
+  it.
+- A directory that ACFS has opened and another process then moves outside the
+  root stays writable through the open descriptor until the operation finishes.
+
+`OpenFile` takes typed options instead of `os.O_*` flags:
+
+```go
+lock, err := acfs.Host{}.OpenFile(ctx, "/run/arcane/lock", acfs.OpenOptions{
+	Write: true, Create: true, Exclusive: true, Mode: 0o600,
+})
+```
 
 Use typed options to choose how a byte-slice write replaces a file:
 
 ```go
-err = acfs.Write(ctx, root, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644})
-err = acfs.Write(ctx, root, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644, InPlace: true})
+err = root.Write(ctx, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644})
+err = root.Write(ctx, "/config.yaml", data, acfs.WriteOptions{Mode: 0o644, InPlace: true})
 ```
 
 Writes are atomic by default. `InPlace` preserves existing file inodes for bind

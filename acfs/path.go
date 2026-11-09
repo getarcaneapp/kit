@@ -2,11 +2,14 @@ package acfs
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	kitfs "kit.getarcane.app/fs"
 )
@@ -16,10 +19,8 @@ const (
 	maxSymlinkHops    = 40
 )
 
-// LogicalPath translates an absolute host path into the logical workspace path
-// that every ACFS operation on r expects. It is a purely lexical translation —
-// no filesystem access, no symlink resolution — and reports ErrOutsideRoot for
-// a path that does not lexically live under r.Path.
+// LogicalPath lexically translates an absolute host path under r.Path into a
+// logical path, reporting ErrOutsideRoot for one outside it.
 func (r Root) LogicalPath(absPath string) (string, error) {
 	if r.Path == "" {
 		return "", fmt.Errorf("%w: root path is empty", ErrInvalidPath)
@@ -43,13 +44,25 @@ func (r Root) LogicalPath(absPath string) (string, error) {
 	return kitfs.LogicalPath(filepath.ToSlash(relative)), nil
 }
 
-func resolvePath(root *os.Root, relativePath string, followFinal bool) (string, error) {
+// resolveOptions configures resolvePath.
+type resolveOptions struct {
+	// FollowFinal follows a symbolic link in the final component.
+	FollowFinal bool
+	// HostEquivalent refuses with ErrOutsideRoot any link that resolves differently
+	// on the host, such as an absolute target.
+	HostEquivalent bool
+}
+
+// resolvePath resolves relativePath through links inside root, returning the
+// final Lstat result or nil when resolution ended on the root, "..", or a link.
+func resolvePath(root *os.Root, relativePath string, options resolveOptions) (string, os.FileInfo, error) {
 	if relativePath == "." {
-		return ".", nil
+		return ".", nil, nil
 	}
 
 	pending := strings.Split(relativePath, "/")
 	resolved := make([]string, 0, len(pending))
+	var info os.FileInfo
 	symlinkHops := 0
 
 	for len(pending) > 0 {
@@ -61,48 +74,67 @@ func resolvePath(root *os.Root, relativePath string, followFinal bool) (string, 
 			continue
 		case "..":
 			if len(resolved) == 0 {
-				return "", ErrOutsideRoot
+				return "", nil, ErrOutsideRoot
 			}
 			resolved = resolved[:len(resolved)-1]
+			info = nil
 			continue
 		}
 
 		candidate := path.Join(append(resolved, component)...)
-		info, err := root.Lstat(candidate)
+		var err error
+		info, err = root.Lstat(candidate)
+		if err != nil && options.HostEquivalent && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)) {
+			depth := len(resolved) + 1
+			for _, remaining := range pending {
+				switch remaining {
+				case "", ".":
+				case "..":
+					depth--
+				default:
+					depth++
+				}
+				if depth < 0 {
+					return "", nil, ErrOutsideRoot
+				}
+			}
+		}
 		if err != nil {
-			return "", fmt.Errorf("lstat %q: %w", kitfs.LogicalPath(candidate), err)
+			return "", nil, fmt.Errorf("lstat %q: %w", kitfs.LogicalPath(candidate), err)
 		}
 
-		if info.Mode()&os.ModeSymlink == 0 || (len(pending) == 0 && !followFinal) {
+		if info.Mode()&os.ModeSymlink == 0 || (len(pending) == 0 && !options.FollowFinal) {
 			resolved = append(resolved, component)
 			continue
 		}
 
 		symlinkHops++
 		if symlinkHops > maxSymlinkHops {
-			return "", ErrSymlinkLoop
+			return "", nil, ErrSymlinkLoop
 		}
 
 		target, err := root.Readlink(candidate)
 		if err != nil {
-			return "", fmt.Errorf("readlink %q: %w", kitfs.LogicalPath(candidate), err)
+			return "", nil, fmt.Errorf("readlink %q: %w", kitfs.LogicalPath(candidate), err)
 		}
+		info = nil
 
 		if filepath.IsAbs(target) {
 			switch {
 			case filepath.Clean(root.Name()) == filepath.VolumeName(root.Name())+string(filepath.Separator):
-				// An explicitly filesystem-wide root can resolve host-absolute links.
 				relativeTarget, relErr := filepath.Rel(root.Name(), target)
 				if relErr != nil {
-					return "", fmt.Errorf("%w: symlink %q targets %q", ErrOutsideRoot, kitfs.LogicalPath(candidate), target)
+					return "", nil, fmt.Errorf("%w: symlink %q targets %q", ErrOutsideRoot, kitfs.LogicalPath(candidate), target)
 				}
 				target = filepath.ToSlash(relativeTarget)
+			case options.HostEquivalent:
+				return "", nil, fmt.Errorf("%w: symlink %q targets host path %q", ErrOutsideRoot, kitfs.LogicalPath(candidate), target)
 			case target == logicalVolumeRoot:
 				target = ""
 			case strings.HasPrefix(target, logicalVolumeRoot+"/"):
 				target = strings.TrimPrefix(target, logicalVolumeRoot+"/")
 			default:
-				return "", fmt.Errorf("%w: symlink %q targets %q", ErrOutsideRoot, kitfs.LogicalPath(candidate), target)
+				return "", nil, fmt.Errorf("%w: symlink %q targets %q", ErrOutsideRoot, kitfs.LogicalPath(candidate), target)
 			}
 			resolved = resolved[:0]
 		}
@@ -110,7 +142,7 @@ func resolvePath(root *os.Root, relativePath string, followFinal bool) (string, 
 		pending = append(strings.Split(target, "/"), pending...)
 	}
 
-	return cmp.Or(path.Join(resolved...), "."), nil
+	return cmp.Or(path.Join(resolved...), "."), info, nil
 }
 
 func resolveParent(root *os.Root, relativePath string) (string, string, error) {
@@ -119,7 +151,7 @@ func resolveParent(root *os.Root, relativePath string) (string, string, error) {
 		return "", "", ErrInvalidPath
 	}
 
-	resolvedParent, err := resolvePath(root, path.Dir(relativePath), true)
+	resolvedParent, _, err := resolvePath(root, path.Dir(relativePath), resolveOptions{FollowFinal: true})
 	if err != nil {
 		return "", "", err
 	}

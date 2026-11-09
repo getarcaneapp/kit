@@ -4,31 +4,31 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
 const copyDirectoryMode = 0o755
 
-// CopyTo copies the contents of r into destination. The two roots must be
-// separate and may not nest, so a copy can never feed itself.
-//
-// Directories are recreated, regular files are written with the source's
-// permission bits, and symbolic links are skipped silently: the destination
-// gets no link, because ACFS never creates one. Sockets, FIFOs, and device
-// nodes are skipped and recorded in CopyResult.Skipped.
+// CopyTo copies r into destination, which may not nest with r. Links are skipped
+// and sockets, FIFOs, and devices are recorded in CopyResult.Skipped.
 func (r Root) CopyTo(ctx context.Context, destination Root, options acfstypes.CopyOptions) (acfstypes.CopyResult, error) {
-	if err := validateDistinctRoots(r.Path, destination.Path); err != nil {
+	sourcePath, destinationPath, err := validateDistinctRoots(r.Path, destination.Path)
+	if err != nil {
 		return acfstypes.CopyResult{}, err
 	}
 
 	var skipped []string
-	copied, err := copyDirectoryContents(ctx, r.Path, destination.Path, options.TolerateUnreadable, false, func(relativePath string) {
+	copied, err := copyDirectoryContents(ctx, sourcePath, destinationPath, options.TolerateUnreadable, false, func(relativePath string) {
 		skipped = append(skipped, relativePath)
 	})
 	slices.Sort(skipped)
@@ -38,109 +38,92 @@ func (r Root) CopyTo(ctx context.Context, destination Root, options acfstypes.Co
 	}, err
 }
 
-// MirrorTo makes destination match r while updating files
-// and directories IN PLACE. Entries missing from the source, or whose type
-// differs, are removed first, then the source is copied over the result.
-//
-// The copy phase deliberately truncates and rewrites existing destination files
-// instead of using the default atomic temp-then-rename of Write: rename would
-// replace the inode, and a mirror runs against live project directories whose
-// files may be bind-mounted into running containers. Preserving inodes is the
-// point — do not "fix" this to be atomic. A destination file whose content
-// already matches the source is left entirely untouched (inode and mtime
-// preserved).
-//
-// MirrorOptions.Preserve names destination entries that must survive even
-// though the source omits them; a directory holding a preserved descendant is
-// descended into rather than removed wholesale. The copy phase always tolerates
-// unreadable source entries, because failing half-way through leaves the live
-// directory in a mixed state that is worse than one stale file (#3509, #3085).
-// Destination files the process cannot write are tolerated in the same spirit
-// (#3625): the stale file keeps its old content and the mirror carries on.
+// MirrorTo makes destination match r in place, keeping inodes of bind-mounted
+// files and tolerating unreadable or unwritable entries (#3509, #3625).
 func (r Root) MirrorTo(ctx context.Context, destination Root, options acfstypes.MirrorOptions) error {
-	if err := validateDistinctRoots(r.Path, destination.Path); err != nil {
+	sourcePath, destinationPath, err := validateDistinctRoots(r.Path, destination.Path)
+	if err != nil {
 		return err
 	}
 
-	preserve := make(map[string]struct{}, len(options.Preserve))
-	for _, entry := range options.Preserve {
+	err = pruneMirrorDestination(ctx, sourcePath, destinationPath, options.Preserve)
+	if err != nil {
+		return err
+	}
+
+	_, err = copyDirectoryContents(ctx, sourcePath, destinationPath, true, true, func(string) {})
+	return err
+}
+
+func pruneMirrorDestination(ctx context.Context, sourcePath, destinationPath string, preserved []string) error {
+	preserve := make(map[string]struct{}, len(preserved))
+	for _, entry := range preserved {
 		preserve[filepath.Clean(entry)] = struct{}{}
 	}
-	if err := func() error {
-		sourceRoot, openErr := os.OpenRoot(r.Path)
-		if openErr != nil {
-			return openErr
-		}
-		defer func() { _ = sourceRoot.Close() }()
-
-		destinationRoot, openErr := os.OpenRoot(destination.Path)
-		if openErr != nil {
-			return openErr
-		}
-		defer func() { _ = destinationRoot.Close() }()
-
-		return filepath.WalkDir(destination.Path, func(currentPath string, entry os.DirEntry, walkErr error) error {
-			// An unreadable destination subdirectory (e.g. foreign-owned
-			// bind-mount data) cannot be pruned; leave it in place instead of
-			// failing the whole mirror mid-restore (#3509, #3085). Entries that
-			// vanished mid-walk need no pruning either.
-			if errors.Is(walkErr, os.ErrPermission) || errors.Is(walkErr, os.ErrNotExist) {
-				return keepUnprunableEntry(entry)
-			}
-			if walkErr != nil {
-				return walkErr
-			}
-			if currentPath == destination.Path {
-				return nil
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-
-			relativePath, err := filepath.Rel(destination.Path, currentPath)
-			if err != nil {
-				return err
-			}
-
-			// Never delete a preserved entry.
-			if _, ok := preserve[relativePath]; ok {
-				return keepUnprunableEntry(entry)
-			}
-
-			sourceInfo, sourceErr := sourceRoot.Lstat(relativePath)
-			if sourceErr == nil && sourceInfo.Mode()&os.ModeType == entry.Type() {
-				return nil
-			}
-			// Cannot inspect the source counterpart — keep the destination entry
-			// rather than deleting something the source may still have.
-			if errors.Is(sourceErr, os.ErrPermission) {
-				return keepUnprunableEntry(entry)
-			}
-			if sourceErr != nil && !errors.Is(sourceErr, os.ErrNotExist) {
-				return sourceErr
-			}
-
-			// This entry is absent from (or type-changed vs) the source, so it would
-			// normally be pruned. If it is a directory that still contains a preserved
-			// entry, descend and prune its other children instead of removing it whole.
-			if entry.IsDir() && slices.ContainsFunc(slices.Collect(maps.Keys(preserve)), func(preserved string) bool {
-				return strings.HasPrefix(preserved, relativePath+string(filepath.Separator))
-			}) {
-				return nil
-			}
-
-			err = destinationRoot.RemoveAll(relativePath)
-			if err != nil {
-				return err
-			}
-			return keepUnprunableEntry(entry)
-		})
-	}(); err != nil {
-		return err
+	sourceRoot, openErr := os.OpenRoot(sourcePath)
+	if openErr != nil {
+		return openErr
 	}
+	defer func() {
+		_ = sourceRoot.Close()
+	}()
 
-	_, err := copyDirectoryContents(ctx, r.Path, destination.Path, true, true, func(string) {})
-	return err
+	mutation, openErr := openMutationRoot(destinationPath)
+	if openErr != nil {
+		return openErr
+	}
+	defer func() {
+		_ = mutation.Close()
+	}()
+
+	return filepath.WalkDir(destinationPath, func(currentPath string, entry os.DirEntry, walkErr error) error {
+		if errors.Is(walkErr, os.ErrPermission) || errors.Is(walkErr, os.ErrNotExist) {
+			return keepUnprunableEntry(entry)
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if currentPath == destinationPath {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		relativePath, err := filepath.Rel(destinationPath, currentPath)
+		if err != nil {
+			return err
+		}
+		if _, ok := preserve[relativePath]; ok {
+			return keepUnprunableEntry(entry)
+		}
+
+		sourceInfo, sourceErr := sourceRoot.Lstat(relativePath)
+		if sourceErr == nil && sourceInfo.Mode()&os.ModeType == entry.Type() {
+			return nil
+		}
+		if errors.Is(sourceErr, os.ErrPermission) {
+			return keepUnprunableEntry(entry)
+		}
+		if sourceErr != nil && !errors.Is(sourceErr, os.ErrNotExist) {
+			return sourceErr
+		}
+		if entry.IsDir() && slices.ContainsFunc(slices.Collect(maps.Keys(preserve)), func(preserved string) bool {
+			return strings.HasPrefix(preserved, relativePath+string(filepath.Separator))
+		}) {
+			return nil
+		}
+
+		parent, base, err := mutation.openParent(filepath.ToSlash(relativePath), false)
+		if err != nil {
+			return err
+		}
+		err = errors.Join(parent.RemoveAll(base), parent.Close())
+		if err != nil {
+			return err
+		}
+		return keepUnprunableEntry(entry)
+	})
 }
 
 func copyDirectoryContents(ctx context.Context, sourceDir, destinationDir string, tolerate, mirror bool, record func(relativePath string)) (int, error) {
@@ -148,19 +131,21 @@ func copyDirectoryContents(ctx context.Context, sourceDir, destinationDir string
 	if openErr != nil {
 		return 0, openErr
 	}
-	defer func() { _ = sourceRoot.Close() }()
+	defer func() {
+		_ = sourceRoot.Close()
+	}()
 
-	destinationRoot, openErr := os.OpenRoot(destinationDir)
+	destination, openErr := openMutationRoot(destinationDir)
 	if openErr != nil {
 		return 0, openErr
 	}
-	defer func() { _ = destinationRoot.Close() }()
+	defer func() {
+		_ = destination.Close()
+	}()
 
 	copied := 0
 	err := filepath.WalkDir(sourceDir, func(currentPath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			// An unreadable subdirectory surfaces here as a permission error on the
-			// directory entry itself; an entry deleted mid-walk surfaces as not-exist.
 			if !tolerate || (!errors.Is(walkErr, os.ErrPermission) && !errors.Is(walkErr, os.ErrNotExist)) {
 				return walkErr
 			}
@@ -186,14 +171,19 @@ func copyDirectoryContents(ctx context.Context, sourceDir, destinationDir string
 
 		switch {
 		case entry.IsDir():
-			return destinationRoot.MkdirAll(relativePath, copyDirectoryMode)
+			target := filepath.ToSlash(relativePath)
+			created, createErr := destination.top.openDir(target, dirOptions{Create: true, Mode: copyDirectoryMode})
+			if pathErr, ok := errors.AsType[*fs.PathError](createErr); ok && pathErr.Path == target && errors.Is(pathErr.Err, syscall.ENOTDIR) {
+				return &fs.PathError{Op: "mkdirat", Path: target, Err: syscall.EEXIST}
+			}
+			if createErr != nil {
+				return createErr
+			}
+			return created.Close()
 		case entry.Type()&os.ModeSymlink != 0:
 			return nil
 		case !entry.Type().IsRegular():
-			// Sockets, FIFOs, and device nodes left behind by running containers
-			// have no copyable content — reading one fails with ENXIO, not a
-			// permission error (#3003). Record them like unreadable entries so a
-			// later restore preserves rather than prunes them.
+			// Reading a socket, FIFO, or device fails with ENXIO (#3003).
 			record(relativePath)
 			return nil
 		}
@@ -212,20 +202,7 @@ func copyDirectoryContents(ctx context.Context, sourceDir, destinationDir string
 			return err
 		}
 
-		// In mirror mode, leave an already-identical destination file untouched:
-		// the in-place rewrite would only churn its mtime, and it would fail
-		// outright on a file the process can read but not write (#3625).
-		if mirror {
-			if existing, readErr := destinationRoot.ReadFile(relativePath); readErr == nil && bytes.Equal(existing, content) {
-				return nil
-			}
-		}
-
-		err = destinationRoot.MkdirAll(filepath.Dir(relativePath), copyDirectoryMode)
-		if err != nil {
-			return err
-		}
-		err = destinationRoot.WriteFile(relativePath, content, info.Mode()&chmodModeMask)
+		err = writeCopiedFile(destination, filepath.ToSlash(relativePath), content, info.Mode()&chmodModeMask, mirror)
 		if mirror && errors.Is(err, os.ErrPermission) {
 			record(relativePath)
 			return nil
@@ -239,8 +216,48 @@ func copyDirectoryContents(ctx context.Context, sourceDir, destinationDir string
 	return copied, err
 }
 
-// keepUnprunableEntry continues a prune walk past an entry that must
-// stay: descend no further into directories, ignore files.
+// writeCopiedFile writes a copied file in place without following symbolic
+// links. In mirror mode an identical destination file is left untouched.
+func writeCopiedFile(destination *mutationRoot, relativePath string, content []byte, mode os.FileMode, mirror bool) (retErr error) {
+	parent, err := destination.top.openDir(path.Dir(relativePath), dirOptions{Create: true, Mode: copyDirectoryMode})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		retErr = errors.Join(retErr, parent.Close())
+	}()
+	base := path.Base(relativePath)
+
+	if mirror {
+		if existing, readErr := parent.ReadFile(base); readErr == nil && bytes.Equal(existing, content) {
+			return nil
+		}
+	}
+	file, err := parent.OpenFile(base, os.O_WRONLY|os.O_CREATE, mode)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		retErr = errors.Join(retErr, file.Close())
+	}()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: %s", ErrNotFile, parent.display(base))
+	}
+	if info.Size() > 0 {
+		err = file.Truncate(0)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = file.Write(content)
+	return err
+}
+
+// keepUnprunableEntry skips an entry that must stay during a walk.
 func keepUnprunableEntry(entry os.DirEntry) error {
 	if entry != nil && entry.IsDir() {
 		return filepath.SkipDir

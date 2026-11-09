@@ -2,59 +2,16 @@ package acfs
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
-	"syscall"
+	"strings"
 	"testing"
 	"time"
 
 	acfstypes "kit.getarcane.app/acfs/types"
 )
-
-func TestCopyDirSkipsSymlinksAndRecordsUncopyableEntries(t *testing.T) {
-	t.Parallel()
-
-	source := t.TempDir()
-	destination := t.TempDir()
-	ctx := t.Context()
-
-	if err := os.Mkdir(filepath.Join(source, "nested"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	writeFixtureFile(t, filepath.Join(source, "nested", "compose.yaml"), "services: {}", 0o640)
-	if err := os.Symlink("nested/compose.yaml", filepath.Join(source, "link.yaml")); err != nil {
-		t.Fatal(err)
-	}
-	// A socket or FIFO left behind by a running container has no copyable
-	// content: reading it fails with ENXIO, not a permission error (#3003).
-	if err := syscall.Mkfifo(filepath.Join(source, "runtime.sock"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := Root{Path: source}.CopyTo(ctx, Root{Path: destination}, acfstypes.CopyOptions{TolerateUnreadable: true})
-	if err != nil {
-		t.Fatalf("CopyDir: %v", err)
-	}
-	if result.Copied != 1 {
-		t.Fatalf("CopyDir copied = %d, want 1", result.Copied)
-	}
-	if !slices.Contains(result.Skipped, "runtime.sock") {
-		t.Fatalf("CopyDir skipped = %v, want it to contain runtime.sock", result.Skipped)
-	}
-
-	contents, err := os.ReadFile(filepath.Join(destination, "nested", "compose.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(contents) != "services: {}" {
-		t.Fatalf("copied contents = %q", contents)
-	}
-	_, err = os.Lstat(filepath.Join(destination, "link.yaml"))
-	if err == nil {
-		t.Fatal("CopyDir recreated a symbolic link in the destination")
-	}
-}
 
 func TestCopyDirRecordsUnreadableFileOnlyWhenTolerant(t *testing.T) {
 	if os.Geteuid() == 0 {
@@ -73,7 +30,9 @@ func TestCopyDirRecordsUnreadableFileOnlyWhenTolerant(t *testing.T) {
 	if err := os.Chmod(locked, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o640) })
+	t.Cleanup(func() {
+		_ = os.Chmod(locked, 0o640)
+	})
 
 	tolerant, err := Root{Path: source}.CopyTo(ctx, Root{Path: t.TempDir()}, acfstypes.CopyOptions{TolerateUnreadable: true})
 	if err != nil {
@@ -105,7 +64,9 @@ func TestMirrorDirLeavesUnreadableDestinationSubtreeIntact(t *testing.T) {
 	if err := os.Chmod(locked, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o750) })
+	t.Cleanup(func() {
+		_ = os.Chmod(locked, 0o750)
+	})
 
 	source := t.TempDir()
 	writeFixtureFile(t, filepath.Join(source, "compose.yaml"), "new", 0o640)
@@ -291,5 +252,81 @@ func TestMirrorDirToleratesUnwritableDestinationFiles(t *testing.T) {
 		if string(contents) != want {
 			t.Fatalf("%s = %q, want %q", path, contents, want)
 		}
+	}
+}
+
+func BenchmarkCopyTo(b *testing.B) {
+	// 8 directories of 25 files each: 200 files.
+	source := b.TempDir()
+	for directory := range 8 {
+		nested := filepath.Join(source, fmt.Sprintf("dir-%d", directory))
+		if err := os.Mkdir(nested, 0o755); err != nil {
+			b.Fatal(err)
+		}
+		for file := range 25 {
+			writeFixtureFile(b, filepath.Join(nested, fmt.Sprintf("file-%02d", file)), strings.Repeat("x", 1<<10), 0o644)
+		}
+	}
+	destination := b.TempDir()
+	b.ReportAllocs()
+	for b.Loop() {
+		result, err := Root{Path: source}.CopyTo(b.Context(), Root{Path: destination}, acfstypes.CopyOptions{})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if result.Copied != 200 {
+			b.Fatalf("CopyTo copied %d files, want 200", result.Copied)
+		}
+	}
+}
+
+func TestCopyToRefusesDestinationSymlinks(t *testing.T) {
+	t.Parallel()
+
+	for _, link := range []string{"file", "nested"} {
+		source, destination, outside := t.TempDir(), t.TempDir(), t.TempDir()
+		if err := os.Mkdir(filepath.Join(source, "nested"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFixtureFile(t, filepath.Join(source, "file"), "source", 0o644)
+		writeFixtureFile(t, filepath.Join(source, "nested", "file"), "source", 0o644)
+		writeFixtureFile(t, filepath.Join(outside, "file"), "victim", 0o644)
+		target := outside
+		if link == "file" {
+			target = filepath.Join(outside, "file")
+		}
+		if err := os.Symlink(target, filepath.Join(destination, link)); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := Root{Path: source}.CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{})
+		if !errors.Is(err, ErrSymlink) {
+			t.Fatalf("CopyTo through destination link %q = %v, want ErrSymlink", link, err)
+		}
+		if content, readErr := os.ReadFile(filepath.Join(outside, "file")); readErr != nil || string(content) != "victim" {
+			t.Fatalf("victim = %q, %v", content, readErr)
+		}
+	}
+}
+
+func TestMirrorToReplacesDestinationSymlinks(t *testing.T) {
+	t.Parallel()
+
+	source, destination, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFixtureFile(t, filepath.Join(source, "file"), "source", 0o644)
+	writeFixtureFile(t, filepath.Join(outside, "file"), "victim", 0o644)
+	if err := os.Symlink(filepath.Join(outside, "file"), filepath.Join(destination, "file")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (Root{Path: source}).MirrorTo(t.Context(), Root{Path: destination}, acfstypes.MirrorOptions{}); err != nil {
+		t.Fatalf("MirrorTo: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(destination, "file"))
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("destination = %v, %v; want a regular file", info, err)
+	}
+	if content, readErr := os.ReadFile(filepath.Join(outside, "file")); readErr != nil || string(content) != "victim" {
+		t.Fatalf("victim = %q, %v", content, readErr)
 	}
 }

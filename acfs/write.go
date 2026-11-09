@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"strings"
+	"syscall"
 
 	kitfs "kit.getarcane.app/fs"
 )
@@ -20,24 +22,23 @@ const (
 	chmodModeMask        = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
 )
 
-// WriteOptions configures the permissions and replacement behavior of a write.
+// WriteOptions configures a write.
 type WriteOptions struct {
 	Mode os.FileMode
-	// InPlace preserves existing regular-file inodes and refuses final symlinks.
-	// The default uses an atomic replacement; in-place writes can be partial on failure.
+	// InPlace keeps existing inodes and refuses a final symbolic link, but is not atomic.
 	InPlace bool
 }
 
 // WriteFromOptions configures WriteFrom.
 type WriteFromOptions struct {
-	// Size is the exact number of bytes WriteFrom must read from the source.
+	// Size is the exact number of bytes to read from the source.
 	Size int64
-	// Mode is the permission set applied to the written file.
+	// Mode is the permission set of the written file.
 	Mode os.FileMode
 }
 
 // WriteFrom atomically writes exactly options.Size bytes from source to a
-// root-confined file. The destination is unchanged when the transfer fails.
+// root-confined file.
 func (r Root) WriteFrom(ctx context.Context, logicalPath string, source io.Reader, options WriteFromOptions) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -64,25 +65,29 @@ func (r Root) WriteFrom(ctx context.Context, logicalPath string, source io.Reade
 		return 0, ErrIsDirectory
 	}
 
-	root, err := os.OpenRoot(r.Path)
-	if err != nil {
-		return 0, fmt.Errorf("open workspace root: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-
-	resolvedParent, base, err := resolveParent(root, relativePath)
+	mutation, err := openMutationRoot(r.Path)
 	if err != nil {
 		return 0, err
 	}
-	return writeFromRoot(ctx, root, logicalPath, path.Join(resolvedParent, base), source, options.Size, options.Mode)
+	defer func() {
+		_ = mutation.Close()
+	}()
+
+	parent, base, err := mutation.openResolvedParent(relativePath, func(target string) error {
+		return fmt.Errorf("create temporary file: %w", &fs.PathError{Op: "openat", Path: path.Join(path.Dir(target), temporaryWriteName()), Err: syscall.ENOTDIR})
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		_ = parent.Close()
+	}()
+	return writeFromRoot(ctx, parent, logicalPath, base, source, options.Size, options.Mode)
 }
 
-// Write writes data to a root-confined file, creating it when absent. By default
-// it atomically replaces the destination, including a final symbolic link.
-// With InPlace enabled it preserves regular-file inodes, leaves identical files
-// untouched, and refuses final symlinks. In-place writes are not atomic; callers
-// coordinate writers and provide recovery if partial writes must be rolled back.
-func (r Root) Write(ctx context.Context, logicalPath string, data []byte, options WriteOptions) (retErr error) {
+// Write atomically replaces a root-confined file with data, or rewrites it in
+// place with options.InPlace.
+func (r Root) Write(ctx context.Context, logicalPath string, data []byte, options WriteOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -100,32 +105,46 @@ func (r Root) Write(ctx context.Context, logicalPath string, data []byte, option
 	if relativePath == "." {
 		return ErrIsDirectory
 	}
-	root, err := os.OpenRoot(r.Path)
-	if err != nil {
-		return fmt.Errorf("open workspace root: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-	parent, base, err := resolveParent(root, relativePath)
+	mutation, err := openMutationRoot(r.Path)
 	if err != nil {
 		return err
 	}
-	targetPath := path.Join(parent, base)
-	err = rejectReservedPath(targetPath)
+	defer func() {
+		_ = mutation.Close()
+	}()
+	parent, base, err := mutation.openResolvedParent(relativePath, func(target string) error {
+		if options.InPlace {
+			return fmt.Errorf("inspect %q: %w", kitfs.LogicalPath(target), &fs.PathError{Op: "statat", Path: target, Err: syscall.ENOTDIR})
+		}
+		return fmt.Errorf("create temporary file: %w", &fs.PathError{Op: "openat", Path: path.Join(path.Dir(target), temporaryWriteName()), Err: syscall.ENOTDIR})
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = parent.Close()
+	}()
+	err = rejectReservedPath(path.Join(parent.path, base))
 	if err != nil {
 		return err
 	}
 	if !options.InPlace {
-		_, err = writeFromRoot(ctx, root, logicalPath, targetPath, bytes.NewReader(data), int64(len(data)), options.Mode)
+		_, err = writeFromRoot(ctx, parent, logicalPath, base, bytes.NewReader(data), int64(len(data)), options.Mode)
 		return err
 	}
-	info, err := root.Lstat(targetPath)
+	return writeInPlace(ctx, parent, base, data, options.Mode)
+}
+
+// writeInPlace rewrites targetPath in files, keeping its inode.
+func writeInPlace(ctx context.Context, files *dir, targetPath string, data []byte, mode os.FileMode) (retErr error) {
+	info, err := files.Lstat(targetPath)
 	flags := os.O_WRONLY
 	identical := false
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		flags |= os.O_CREATE | os.O_EXCL
 	case err != nil:
-		return fmt.Errorf("inspect %q: %w", kitfs.LogicalPath(targetPath), err)
+		return fmt.Errorf("inspect %q: %w", files.display(targetPath), err)
 	case info.Mode()&os.ModeSymlink != 0:
 		return ErrSymlink
 	case info.IsDir():
@@ -133,26 +152,28 @@ func (r Root) Write(ctx context.Context, logicalPath string, data []byte, option
 	case !info.Mode().IsRegular():
 		return ErrNotFile
 	default:
-		existing, readErr := root.ReadFile(targetPath)
+		existing, readErr := files.ReadFile(targetPath)
 		if readErr != nil {
-			return fmt.Errorf("read %q: %w", kitfs.LogicalPath(targetPath), readErr)
+			return fmt.Errorf("read %q: %w", files.display(targetPath), readErr)
 		}
 		identical = bytes.Equal(existing, data)
-		if identical && info.Mode()&chmodModeMask == options.Mode {
+		if identical && info.Mode()&chmodModeMask == mode {
 			return ctx.Err()
 		}
 	}
 
-	file, err := root.OpenFile(targetPath, flags, options.Mode)
+	file, err := files.OpenFile(targetPath, flags, mode)
 	if err != nil {
-		return fmt.Errorf("open %q: %w", kitfs.LogicalPath(targetPath), err)
+		return fmt.Errorf("open %q: %w", files.display(targetPath), err)
 	}
-	defer func() { retErr = errors.Join(retErr, file.Close()) }()
+	defer func() {
+		retErr = errors.Join(retErr, file.Close())
+	}()
 	opened, err := file.Stat()
 	if err != nil {
 		return fmt.Errorf("stat opened file: %w", err)
 	}
-	live, err := root.Lstat(targetPath)
+	live, err := files.Lstat(targetPath)
 	if err != nil {
 		return fmt.Errorf("stat destination: %w", err)
 	}
@@ -167,28 +188,28 @@ func (r Root) Write(ctx context.Context, logicalPath string, data []byte, option
 		return err
 	}
 	if !identical {
-		err = file.Truncate(0)
-		if err != nil {
-			return fmt.Errorf("truncate %q: %w", kitfs.LogicalPath(targetPath), err)
+		if opened.Size() > 0 {
+			err = file.Truncate(0)
+			if err != nil {
+				return fmt.Errorf("truncate %q: %w", files.display(targetPath), err)
+			}
 		}
 		_, err = file.Write(data)
 		if err != nil {
-			return fmt.Errorf("write %q: %w", kitfs.LogicalPath(targetPath), err)
+			return fmt.Errorf("write %q: %w", files.display(targetPath), err)
 		}
 	}
-	if !identical || opened.Mode()&chmodModeMask != options.Mode {
-		err = file.Chmod(options.Mode)
+	if !identical || opened.Mode()&chmodModeMask != mode {
+		err = file.Chmod(mode)
 		if err != nil {
-			return fmt.Errorf("chmod %q: %w", kitfs.LogicalPath(targetPath), err)
+			return fmt.Errorf("chmod %q: %w", files.display(targetPath), err)
 		}
 	}
 	return nil
 }
 
-// WriteAt writes data to an existing root-confined regular file at the given
-// byte offset, growing the file (sparsely) when the offset lies beyond its
-// current end. Unlike WriteFrom, the write is in-place and not atomic; callers
-// coordinate concurrent writers themselves.
+// WriteAt writes data at offset into an existing root-confined regular file,
+// in place.
 func (r Root) WriteAt(ctx context.Context, logicalPath string, offset int64, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -209,26 +230,46 @@ func (r Root) WriteAt(ctx context.Context, logicalPath string, offset int64, dat
 		return ErrIsDirectory
 	}
 
-	root, err := os.OpenRoot(r.Path)
-	if err != nil {
-		return fmt.Errorf("open workspace root: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-
-	resolvedPath, err := resolvePath(root, relativePath, true)
+	mutation, err := openMutationRoot(r.Path)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		_ = mutation.Close()
+	}()
 
-	file, err := root.OpenFile(resolvedPath, os.O_WRONLY, 0)
+	root, err := mutation.workspace()
+	if err != nil {
+		return err
+	}
+	resolvedPath, _, err := resolvePath(root, relativePath, resolveOptions{FollowFinal: true})
+	if err != nil {
+		return err
+	}
+	parent, err := mutation.top.openDir(path.Dir(resolvedPath), dirOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = parent.Close()
+	}()
+
+	file, err := parent.OpenFile(path.Base(resolvedPath), os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
-	defer func() { _ = file.Close() }()
+	return writeAtAndClose(file, logicalPath, offset, data)
+}
+
+// writeAtAndClose writes data at offset into file and closes it.
+func writeAtAndClose(file *os.File, displayPath string, offset int64, data []byte) error {
+	defer func() {
+		_ = file.Close()
+	}()
 
 	info, err := file.Stat()
 	if err != nil {
-		return fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
+		return fmt.Errorf("stat %q: %w", displayPath, err)
 	}
 	if !info.Mode().IsRegular() {
 		return ErrNotFile
@@ -236,7 +277,7 @@ func (r Root) WriteAt(ctx context.Context, logicalPath string, offset int64, dat
 
 	_, err = file.WriteAt(data, offset)
 	if err != nil {
-		return fmt.Errorf("write %q at offset %d: %w", logicalPath, offset, err)
+		return fmt.Errorf("write %q at offset %d: %w", displayPath, offset, err)
 	}
 	return nil
 }
@@ -262,17 +303,23 @@ func (r contextReader) Read(buffer []byte) (int, error) {
 	return r.reader.Read(buffer)
 }
 
-func createTemporaryFile(root *os.Root, parent string) (*os.File, string, error) {
+// temporaryWriteName returns a random reserved name for a staged write.
+func temporaryWriteName() string {
 	var randomBytes [16]byte
+	_, _ = rand.Read(randomBytes[:])
+	var filename [len(temporaryWritePrefix) + 2*len(randomBytes)]byte
+	copy(filename[:], temporaryWritePrefix)
+	hex.Encode(filename[len(temporaryWritePrefix):], randomBytes[:])
+	return string(filename[:])
+}
+
+// createTemporaryFile creates a uniquely named temporary file in files.
+func createTemporaryFile(files *dir) (*os.File, string, error) {
 	for range 10 {
-		if _, err := rand.Read(randomBytes[:]); err != nil {
-			return nil, "", fmt.Errorf("generate temporary filename: %w", err)
-		}
-		filename := temporaryWritePrefix + hex.EncodeToString(randomBytes[:])
-		temporaryPath := path.Join(parent, filename)
-		file, err := root.OpenFile(temporaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		name := temporaryWriteName()
+		file, err := files.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
-			return file, temporaryPath, nil
+			return file, name, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, "", fmt.Errorf("create temporary file: %w", err)
@@ -281,8 +328,10 @@ func createTemporaryFile(root *os.Root, parent string) (*os.File, string, error)
 	return nil, "", errors.New("could not allocate a unique temporary file")
 }
 
-func writeFromRoot(ctx context.Context, root *os.Root, logicalPath, targetPath string, source io.Reader, expectedSize int64, mode os.FileMode) (int64, error) {
-	temporaryFile, temporaryPath, err := createTemporaryFile(root, path.Dir(targetPath))
+// writeFromRoot stages expectedSize bytes from source in files and renames the
+// staged file onto targetName, reporting ErrReplaced if either name is swapped.
+func writeFromRoot(ctx context.Context, files *dir, displayPath, targetName string, source io.Reader, expectedSize int64, mode os.FileMode) (int64, error) {
+	temporaryFile, temporaryName, err := createTemporaryFile(files)
 	if err != nil {
 		return 0, err
 	}
@@ -290,7 +339,7 @@ func writeFromRoot(ctx context.Context, root *os.Root, logicalPath, targetPath s
 	defer func() {
 		_ = temporaryFile.Close()
 		if !committed {
-			_ = root.Remove(temporaryPath)
+			_ = files.Remove(temporaryName)
 		}
 	}()
 
@@ -317,15 +366,29 @@ func writeFromRoot(ctx context.Context, root *os.Root, logicalPath, targetPath s
 	if err != nil {
 		return written, fmt.Errorf("sync temporary file: %w", err)
 	}
+	if beforePublish != nil {
+		beforePublish(temporaryName)
+	}
+	err = files.verifyPublished(temporaryName, temporaryFile)
+	if err != nil {
+		committed = true
+		return written, err
+	}
+	err = files.renameTo(temporaryName, files, targetName)
+	if err != nil {
+		return written, fmt.Errorf("replace %q: %w", displayPath, err)
+	}
+	committed = true
+	if afterPublish != nil {
+		afterPublish()
+	}
+	err = files.verifyPublished(targetName, temporaryFile)
+	if err != nil {
+		return written, err
+	}
 	err = temporaryFile.Close()
 	if err != nil {
 		return written, fmt.Errorf("close temporary file: %w", err)
 	}
-	err = root.Rename(temporaryPath, targetPath)
-	if err != nil {
-		return written, fmt.Errorf("replace %q: %w", logicalPath, err)
-	}
-
-	committed = true
 	return written, nil
 }

@@ -12,71 +12,94 @@ import (
 	kitfs "kit.getarcane.app/fs"
 )
 
-// Rename moves sourceLogical onto targetLogical within a single workspace
-// root, with plain os.Rename semantics: an existing file or empty directory at
-// the target is replaced, and a non-empty directory target reports ErrNotEmpty.
-//
-// Both parent directories are resolved through symbolic links; neither final
-// component is followed, so renaming a symlink moves the link itself. Renaming
-// the workspace root reports ErrRootRemoval and a target nested inside the
-// source reports ErrInvalidPath.
-//
-// A cross-device rename (EXDEV) is returned unchanged. Staying on one device is
-// the caller's contract — staging directories created with MkdirTemp under the
-// same root always satisfy it.
+// Rename moves sourceLogical onto targetLogical inside the root like os.Rename,
+// without following either final component. A cross-device rename reports EXDEV.
 func (r Root) Rename(ctx context.Context, sourceLogical, targetLogical string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	resolveEndpoint := func(root *os.Root, logicalPath string) (string, error) {
-		relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-		if err != nil {
-			return "", err
-		}
-		err = rejectReservedPath(relativePath)
-		if err != nil {
-			return "", err
-		}
-		if relativePath == "." {
-			return "", ErrRootRemoval
-		}
-
-		resolvedParent, base, err := resolveParent(root, relativePath)
-		if err != nil {
-			return "", err
-		}
-		return path.Join(resolvedParent, base), nil
-	}
-
-	root, err := os.OpenRoot(r.Path)
-	if err != nil {
-		return fmt.Errorf("open workspace root: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-
-	sourcePath, err := resolveEndpoint(root, sourceLogical)
+	mutation, err := openMutationRoot(r.Path)
 	if err != nil {
 		return err
 	}
-	targetPath, err := resolveEndpoint(root, targetLogical)
+	defer func() {
+		_ = mutation.Close()
+	}()
+
+	root, err := mutation.workspace()
 	if err != nil {
-		if errors.Is(err, ErrRootRemoval) {
-			return fmt.Errorf("%w: cannot rename onto the workspace root", ErrInvalidPath)
-		}
 		return err
 	}
-
+	sourceDir, sourceBase, err := resolveRenameEndpoint(root, sourceLogical)
+	if err != nil {
+		return err
+	}
+	targetDir, targetBase, err := resolveRenameEndpoint(root, targetLogical)
+	if errors.Is(err, ErrRootRemoval) {
+		return fmt.Errorf("%w: cannot rename onto the workspace root", ErrInvalidPath)
+	}
+	if err != nil {
+		return err
+	}
+	sourcePath := path.Join(sourceDir, sourceBase)
+	targetPath := path.Join(targetDir, targetBase)
 	if strings.HasPrefix(targetPath, sourcePath+"/") {
 		return fmt.Errorf("%w: target %q is inside source %q", ErrInvalidPath, targetLogical, sourceLogical)
 	}
 
-	err = root.Rename(sourcePath, targetPath)
-	if err != nil {
-		if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
-			return fmt.Errorf("%w: %q", ErrNotEmpty, targetLogical)
+	openEndpointParent := func(relativePath string) (*dir, error) {
+		parent, openErr := mutation.top.openDir(relativePath, dirOptions{})
+		if errors.Is(openErr, syscall.ENOTDIR) {
+			openErr = &os.LinkError{Op: "renameat", Old: sourcePath, New: targetPath, Err: syscall.ENOTDIR}
+			return nil, renameError(openErr, sourceLogical, targetLogical)
 		}
-		return fmt.Errorf("rename %q to %q: %w", sourceLogical, targetLogical, err)
+		return parent, openErr
 	}
-	return nil
+	sourceParent, err := openEndpointParent(sourceDir)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = sourceParent.Close()
+	}()
+	targetParent := sourceParent
+	if targetDir != sourceDir {
+		targetParent, err = openEndpointParent(targetDir)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = targetParent.Close()
+		}()
+	}
+
+	return renameError(sourceParent.renameTo(sourceBase, targetParent, targetBase), sourceLogical, targetLogical)
+}
+
+// renameError wraps a rename error, reporting ErrNotEmpty for a non-empty target.
+func renameError(err error, source, target string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+		return fmt.Errorf("%w: %q", ErrNotEmpty, target)
+	}
+	return fmt.Errorf("rename %q to %q: %w", source, target, err)
+}
+
+// resolveRenameEndpoint resolves the parent and base name of a rename endpoint.
+func resolveRenameEndpoint(root *os.Root, logicalPath string) (string, string, error) {
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return "", "", err
+	}
+	err = rejectReservedPath(relativePath)
+	if err != nil {
+		return "", "", err
+	}
+	if relativePath == "." {
+		return "", "", ErrRootRemoval
+	}
+	return resolveParent(root, relativePath)
 }
