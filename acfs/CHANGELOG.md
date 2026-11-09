@@ -1,3 +1,13 @@
+## acfs/v0.10.0
+
+### New features
+
+* add missing file system apis([153e344](https://github.com/getarcaneapp/kit/commit/153e344bdc9bd054e0cb7ba43280c21c1315887c) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/acfs/v0.9.0...acfs/v0.10.0
+
 ## acfs/v0.9.0
 
 ### New features
