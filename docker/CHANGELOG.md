@@ -1,3 +1,13 @@
+## docker/v0.3.1
+
+### Bug fixes
+
+* bump golang deps([7efb0f2](https://github.com/getarcaneapp/kit/commit/7efb0f2fab12e5bcddc7b82435f0df3606700d3d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.3.0...docker/v0.3.1
+
 ## docker/v0.3.0
 
 ### New features

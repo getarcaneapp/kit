@@ -9,7 +9,7 @@ require (
 	github.com/moby/moby/client v0.6.2
 	github.com/samber/mo v1.17.0
 	github.com/stretchr/testify v1.12.1
-	kit.getarcane.app v0.6.0
+	kit.getarcane.app v0.7.1
 )
 
 require (
