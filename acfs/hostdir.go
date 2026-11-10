@@ -14,39 +14,44 @@ import (
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
-// ListEach visits the children of a host directory in name order.
-func (Host) ListEach(ctx context.Context, hostPath string, visit func(acfstypes.Entry) error) error {
+// ListEach visits the children of a host directory in name order, bounded by
+// options like Root.ListEach.
+func (Host) ListEach(ctx context.Context, hostPath string, options acfstypes.ListOptions, visit func(acfstypes.Entry) error) (acfstypes.ListResult, error) {
 	if visit == nil {
-		return errors.New("visit callback is required")
+		return acfstypes.ListResult{}, errors.New("visit callback is required")
+	}
+	if options.MaxEntries < 0 {
+		return acfstypes.ListResult{}, errors.New("list limit must be non-negative")
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return acfstypes.ListResult{}, err
 	}
 	directoryPath, err := cleanHostPath(hostPath)
 	if err != nil {
-		return err
+		return acfstypes.ListResult{}, err
 	}
 
 	// os.Root only stats children relative to the descriptor; nothing is confined.
 	directory, err := os.OpenRoot(directoryPath)
 	if err != nil {
-		return fmt.Errorf("open directory %q: %w", directoryPath, err)
+		return acfstypes.ListResult{}, fmt.Errorf("open directory %q: %w", directoryPath, err)
 	}
 	defer func() {
 		_ = directory.Close()
 	}()
-	names, err := readDirectory(ctx, directory, ".", directoryPath)
+	names, truncated, err := readDirectory(ctx, directory, ".", directoryPath, options.MaxEntries)
 	if err != nil {
-		return err
+		return acfstypes.ListResult{}, err
 	}
 
-	return visitChildren(ctx, directory, names, kit.Ternary(filepath.Dir(directoryPath) == directoryPath, directoryPath, directoryPath+string(filepath.Separator)), true, visit)
+	count, err := visitChildren(ctx, directory, names, kit.Ternary(filepath.Dir(directoryPath) == directoryPath, directoryPath, directoryPath+string(filepath.Separator)), true, visit)
+	return acfstypes.ListResult{Count: count, Truncated: truncated}, err
 }
 
 // List returns the direct children of a host directory.
 func (h Host) List(ctx context.Context, hostPath string) ([]acfstypes.Entry, error) {
 	entries := make([]acfstypes.Entry, 0)
-	err := h.ListEach(ctx, hostPath, func(entry acfstypes.Entry) error {
+	_, err := h.ListEach(ctx, hostPath, acfstypes.ListOptions{}, func(entry acfstypes.Entry) error {
 		entries = append(entries, entry)
 		return nil
 	})

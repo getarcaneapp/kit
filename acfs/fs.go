@@ -14,7 +14,7 @@ type (
 	// Root-only; Host has CopyDir and MirrorDir.
 	FS interface {
 		List(ctx context.Context, path string) ([]acfstypes.Entry, error)
-		ListEach(ctx context.Context, path string, visit func(acfstypes.Entry) error) error
+		ListEach(ctx context.Context, path string, options acfstypes.ListOptions, visit func(acfstypes.Entry) error) (acfstypes.ListResult, error)
 		Stat(ctx context.Context, path string, options acfstypes.StatOptions) (acfstypes.Entry, error)
 		Exists(ctx context.Context, path string) (bool, error)
 

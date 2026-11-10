@@ -45,26 +45,31 @@ const (
 )
 
 // ListEach visits the children of a root-confined directory in name order.
-func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfstypes.Entry) error) error {
+// With options.MaxEntries, it visits only the first MaxEntries names and holds
+// no more than twice that many in memory.
+func (r Root) ListEach(ctx context.Context, logicalPath string, options acfstypes.ListOptions, visit func(acfstypes.Entry) error) (acfstypes.ListResult, error) {
 	if visit == nil {
-		return errors.New("visit callback is required")
+		return acfstypes.ListResult{}, errors.New("visit callback is required")
+	}
+	if options.MaxEntries < 0 {
+		return acfstypes.ListResult{}, errors.New("list limit must be non-negative")
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return acfstypes.ListResult{}, err
 	}
 
 	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
 	if err != nil {
-		return err
+		return acfstypes.ListResult{}, err
 	}
 	err = rejectReservedPath(relativePath)
 	if err != nil {
-		return err
+		return acfstypes.ListResult{}, err
 	}
 
 	root, err := os.OpenRoot(r.Path)
 	if err != nil {
-		return fmt.Errorf("open workspace root: %w", err)
+		return acfstypes.ListResult{}, fmt.Errorf("open workspace root: %w", err)
 	}
 	defer func() {
 		_ = root.Close()
@@ -72,28 +77,29 @@ func (r Root) ListEach(ctx context.Context, logicalPath string, visit func(acfst
 
 	resolvedPath, _, err := resolvePath(root, relativePath, resolveOptions{FollowFinal: true})
 	if err != nil {
-		return err
+		return acfstypes.ListResult{}, err
 	}
 
-	names, err := readDirectory(ctx, root, resolvedPath, logicalPath)
+	names, truncated, err := readDirectory(ctx, root, resolvedPath, logicalPath, options.MaxEntries)
 	if err != nil {
-		return err
+		return acfstypes.ListResult{}, err
 	}
 
 	directory, err := root.OpenRoot(resolvedPath)
 	if err != nil {
-		return fmt.Errorf("open directory %q: %w", logicalPath, err)
+		return acfstypes.ListResult{}, fmt.Errorf("open directory %q: %w", logicalPath, err)
 	}
 	defer func() {
 		_ = directory.Close()
 	}()
-	return visitChildren(ctx, directory, names, kit.Ternary(resolvedPath == ".", "/", "/"+resolvedPath+"/"), false, visit)
+	count, err := visitChildren(ctx, directory, names, kit.Ternary(resolvedPath == ".", "/", "/"+resolvedPath+"/"), false, visit)
+	return acfstypes.ListResult{Count: count, Truncated: truncated}, err
 }
 
 // List returns the direct children of a root-confined directory.
 func (r Root) List(ctx context.Context, logicalPath string) ([]acfstypes.Entry, error) {
 	entries := make([]acfstypes.Entry, 0)
-	err := r.ListEach(ctx, logicalPath, func(entry acfstypes.Entry) error {
+	_, err := r.ListEach(ctx, logicalPath, acfstypes.ListOptions{}, func(entry acfstypes.Entry) error {
 		entries = append(entries, entry)
 		return nil
 	})
@@ -103,32 +109,56 @@ func (r Root) List(ctx context.Context, logicalPath string) ([]acfstypes.Entry, 
 	return entries, nil
 }
 
-// readDirectory returns the sorted child names of resolvedPath.
-func readDirectory(ctx context.Context, root *os.Root, resolvedPath, displayPath string) ([]string, error) {
+// readDirectory returns the sorted child names of resolvedPath, without
+// reserved temporary names. With maxEntries, it keeps only the first maxEntries
+// names and reports whether it dropped any.
+func readDirectory(ctx context.Context, root *os.Root, resolvedPath, displayPath string, maxEntries int) ([]string, bool, error) {
 	directory, err := root.OpenFile(resolvedPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, fmt.Errorf("open directory %q: %w", displayPath, err)
+		return nil, false, fmt.Errorf("open directory %q: %w", displayPath, err)
 	}
 	defer func() {
 		_ = directory.Close()
 	}()
 
 	var names []string
+	truncated := false
 	for {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+			return nil, false, ctxErr
 		}
 		batch, readErr := directory.Readdirnames(directoryReadBatchSize)
-		names = append(names, batch...)
+		for _, name := range batch {
+			if !strings.HasPrefix(name, temporaryWritePrefix) {
+				names = append(names, name)
+			}
+		}
+		// Trimming at twice the cap bounds memory with amortized O(n log cap) sorting.
+		if maxEntries > 0 && len(names) >= 2*maxEntries {
+			names = sortAndTrim(names, maxEntries)
+			truncated = true
+		}
 		if errors.Is(readErr, io.EOF) {
 			break
 		}
 		if readErr != nil {
-			return nil, fmt.Errorf("read directory %q: %w", displayPath, readErr)
+			return nil, false, fmt.Errorf("read directory %q: %w", displayPath, readErr)
 		}
 	}
+	if maxEntries > 0 && len(names) > maxEntries {
+		truncated = true
+	}
+	return sortAndTrim(names, maxEntries), truncated, nil
+}
+
+// sortAndTrim sorts names and keeps at most maxEntries of them; zero keeps all.
+func sortAndTrim(names []string, maxEntries int) []string {
 	slices.Sort(names)
-	return names, nil
+	if maxEntries == 0 || len(names) <= maxEntries {
+		return names
+	}
+	clear(names[maxEntries:])
+	return names[:maxEntries]
 }
 
 // Stat returns metadata for a root-confined path, following the final
@@ -218,7 +248,7 @@ func (r Root) Walk(ctx context.Context, logicalPath string, options acfstypes.Wa
 		}
 		directories = directories[:last]
 
-		err := r.ListEach(ctx, w.level.directory.path, visitEntry)
+		_, err := r.ListEach(ctx, w.level.directory.path, acfstypes.ListOptions{}, visitEntry)
 		if errors.Is(err, fs.SkipAll) {
 			return w.result, nil
 		}
@@ -257,7 +287,7 @@ func (w *walker) entry(entry acfstypes.Entry) error {
 
 	depth := w.level.directory.depth + 1
 	if w.options.MaxDepth > 0 && depth >= w.options.MaxDepth {
-		err := w.root.ListEach(w.ctx, entry.Path, func(acfstypes.Entry) error {
+		_, err := w.root.ListEach(w.ctx, entry.Path, acfstypes.ListOptions{MaxEntries: 1}, func(acfstypes.Entry) error {
 			w.result.Truncated = true
 			return fs.SkipAll
 		})

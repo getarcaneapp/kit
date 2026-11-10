@@ -61,6 +61,18 @@ type (
 		FollowFinal bool
 	}
 
+	// ListOptions bounds a directory listing. Zero values are unlimited.
+	ListOptions struct {
+		MaxEntries int
+	}
+
+	// ListResult summarizes a bounded directory listing. Truncated reports that
+	// the directory held more than MaxEntries visible names.
+	ListResult struct {
+		Count     int
+		Truncated bool
+	}
+
 	// WalkOptions bounds a recursive traversal. Zero values are unlimited.
 	WalkOptions struct {
 		MaxDepth   int
