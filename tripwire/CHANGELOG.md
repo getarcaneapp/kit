@@ -1,3 +1,13 @@
+## tripwire/v0.1.2
+
+### Bug fixes
+
+* bump golang deps([7efb0f2](https://github.com/getarcaneapp/kit/commit/7efb0f2fab12e5bcddc7b82435f0df3606700d3d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/tripwire/v0.1.1...tripwire/v0.1.2
+
 ## tripwire/v0.1.1
 
 ### Bug fixes
