@@ -1,3 +1,14 @@
+## updater/v0.12.2
+
+### Bug fixes
+
+* tidy go.mod([721d71f](https://github.com/getarcaneapp/kit/commit/721d71f023ceaf62c9d37e364d34336da85ab9c5) by @kmendell)
+* bump golang deps([7efb0f2](https://github.com/getarcaneapp/kit/commit/7efb0f2fab12e5bcddc7b82435f0df3606700d3d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.12.1...updater/v0.12.2
+
 ## updater/v0.12.1
 
 ### Bug fixes
