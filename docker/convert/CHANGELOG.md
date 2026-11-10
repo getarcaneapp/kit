@@ -1,3 +1,13 @@
+## docker/convert/v0.4.2
+
+### Bug fixes
+
+* bump golang deps([7efb0f2](https://github.com/getarcaneapp/kit/commit/7efb0f2fab12e5bcddc7b82435f0df3606700d3d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.4.1...docker/convert/v0.4.2
+
 ## docker/convert/v0.4.1
 
 ### Bug fixes
