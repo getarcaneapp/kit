@@ -1,3 +1,13 @@
+## sys/cgroup/v0.3.2
+
+### Bug fixes
+
+* bump golang deps([7efb0f2](https://github.com/getarcaneapp/kit/commit/7efb0f2fab12e5bcddc7b82435f0df3606700d3d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.3.1...sys/cgroup/v0.3.2
+
 ## sys/cgroup/v0.3.1
 
 ### Bug fixes
