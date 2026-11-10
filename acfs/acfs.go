@@ -287,12 +287,16 @@ func (w *walker) entry(entry acfstypes.Entry) error {
 
 	depth := w.level.directory.depth + 1
 	if w.options.MaxDepth > 0 && depth >= w.options.MaxDepth {
-		_, err := w.root.ListEach(w.ctx, entry.Path, acfstypes.ListOptions{MaxEntries: 1}, func(acfstypes.Entry) error {
+		probe, err := w.root.ListEach(w.ctx, entry.Path, acfstypes.ListOptions{MaxEntries: 1}, func(acfstypes.Entry) error {
 			w.result.Truncated = true
 			return fs.SkipAll
 		})
 		if err != nil && !errors.Is(err, fs.SkipAll) {
 			return err
+		}
+		// A truncated probe saw a second child even if the first vanished.
+		if probe.Truncated {
+			w.result.Truncated = true
 		}
 		return nil
 	}
