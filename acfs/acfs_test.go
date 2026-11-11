@@ -470,7 +470,7 @@ func TestListEachSeesChangesMadeByVisit(t *testing.T) {
 	}
 
 	var visited []acfstypes.Entry
-	err := Root{Path: root}.ListEach(t.Context(), "/parent/child", func(entry acfstypes.Entry) error {
+	_, err := Root{Path: root}.ListEach(t.Context(), "/parent/child", acfstypes.ListOptions{}, func(entry acfstypes.Entry) error {
 		if entry.Name == "a" {
 			if err := os.Remove(filepath.Join(directory, "b")); err != nil {
 				return err
@@ -497,6 +497,58 @@ func TestListEachSeesChangesMadeByVisit(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("ListEach entries = %q, want %q", got, want)
+	}
+}
+
+func TestListEachMaxEntries(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	names := []string{"g", "c", "j", "a", "e", "h", "b", "i", "d", "f"}
+	for _, name := range names {
+		writeFixtureFile(t, filepath.Join(root, name), "x", 0o600)
+	}
+	// A reserved name sorts first; it must not take a slot.
+	writeFixtureFile(t, filepath.Join(root, temporaryWritePrefix+"fixture"), "x", 0o600)
+
+	tests := []struct {
+		name          string
+		want          []string
+		maxEntries    int
+		wantTruncated bool
+	}{
+		{name: "unlimited", maxEntries: 0, want: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}},
+		{name: "trimmed while reading", maxEntries: 2, want: []string{"a", "b"}, wantTruncated: true},
+		{name: "trimmed after reading", maxEntries: 6, want: []string{"a", "b", "c", "d", "e", "f"}, wantTruncated: true},
+		{name: "exactly full", maxEntries: 10, want: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []string
+			result, err := Root{Path: root}.ListEach(t.Context(), "/", acfstypes.ListOptions{MaxEntries: test.maxEntries}, func(entry acfstypes.Entry) error {
+				got = append(got, entry.Name)
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("ListEach names = %q, want %q", got, test.want)
+			}
+			want := acfstypes.ListResult{Count: len(test.want), Truncated: test.wantTruncated}
+			if result != want {
+				t.Fatalf("ListEach result = %+v, want %+v", result, want)
+			}
+		})
+	}
+
+	_, err := Root{Path: root}.ListEach(t.Context(), "/", acfstypes.ListOptions{MaxEntries: -1}, func(acfstypes.Entry) error {
+		return nil
+	})
+	if err == nil {
+		t.Fatal("ListEach accepted a negative limit")
 	}
 }
 
@@ -551,7 +603,7 @@ func BenchmarkListEach(b *testing.B) {
 	writeBenchmarkEntries(b, root, 1_000)
 	b.ReportAllocs()
 	for b.Loop() {
-		err := Root{Path: root}.ListEach(b.Context(), "/", func(acfstypes.Entry) error {
+		_, err := Root{Path: root}.ListEach(b.Context(), "/", acfstypes.ListOptions{}, func(acfstypes.Entry) error {
 			return nil
 		})
 		if err != nil {

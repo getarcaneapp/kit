@@ -62,17 +62,15 @@ func entryLinkTarget(directory *os.Root, name, relativePath string, info os.File
 	}
 }
 
-// visitChildren visits the Entry of each child of directory, hiding reserved
-// temporary names. Each child is stat'ed afresh, so changes made by visit are seen.
-func visitChildren(ctx context.Context, directory *os.Root, names []string, pathPrefix string, host bool, visit func(acfstypes.Entry) error) error {
+// visitChildren visits the Entry of each child of directory and returns how many
+// it visited. Each child is stat'ed afresh, so changes made by visit are seen.
+func visitChildren(ctx context.Context, directory *os.Root, names []string, pathPrefix string, host bool, visit func(acfstypes.Entry) error) (int, error) {
 	var modeText string
 	var lastMode os.FileMode
+	count := 0
 	for _, name := range names {
-		if strings.HasPrefix(name, temporaryWritePrefix) {
-			continue
-		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return count, err
 		}
 
 		logicalPath := pathPrefix + name
@@ -82,14 +80,14 @@ func visitChildren(ctx context.Context, directory *os.Root, names []string, path
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("stat %q: %w", logicalPath, rootPathError("statat", relativePath, err))
+			return count, fmt.Errorf("stat %q: %w", logicalPath, rootPathError("statat", relativePath, err))
 		}
 		linkTarget, err := entryLinkTarget(directory, name, relativePath, info, host)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return err
+			return count, err
 		}
 		if modeText == "" || info.Mode() != lastMode {
 			lastMode, modeText = info.Mode(), kitfs.FormatMode(info.Mode())
@@ -97,10 +95,11 @@ func visitChildren(ctx context.Context, directory *os.Root, names []string, path
 
 		err = visit(newEntry(name, logicalPath, modeText, linkTarget, info))
 		if err != nil {
-			return fmt.Errorf("visit %q: %w", logicalPath, err)
+			return count, fmt.Errorf("visit %q: %w", logicalPath, err)
 		}
+		count++
 	}
-	return nil
+	return count, nil
 }
 
 // rootPathError rewrites an error from a call relative to an opened directory

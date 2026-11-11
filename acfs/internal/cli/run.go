@@ -149,27 +149,15 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 	bufferedOutput := bufio.NewWriterSize(temporaryOutput, 64*1024)
 
 	started := false
-	count := 0
-	errLimitReached := errors.New("list limit reached")
 	var encodedEntry bytes.Buffer
 	entryEncoder := json.NewEncoder(&encodedEntry)
 	entryEncoder.SetEscapeHTML(false)
-	err = acfs.Root{Path: values.root}.ListEach(ctx, values.path, func(entry acfstypes.Entry) error {
-		if *limit > 0 && count == *limit {
-			return errLimitReached
+	result, err := acfs.Root{Path: values.root}.ListEach(ctx, values.path, acfstypes.ListOptions{MaxEntries: *limit}, func(entry acfstypes.Entry) error {
+		separator := kit.Ternary(started, ",", `{"entries":[`)
+		if _, writeErr := io.WriteString(bufferedOutput, separator); writeErr != nil {
+			return fmt.Errorf("write list entry: %w", writeErr)
 		}
-		if !started {
-			if _, writeErr := io.WriteString(bufferedOutput, `{"entries":[`); writeErr != nil {
-				return fmt.Errorf("write list prefix: %w", writeErr)
-			}
-			started = true
-		}
-		if count > 0 {
-			if _, writeErr := io.WriteString(bufferedOutput, ","); writeErr != nil {
-				return fmt.Errorf("write list delimiter: %w", writeErr)
-			}
-		}
-		count++
+		started = true
 
 		encodedEntry.Reset()
 		if encodeErr := entryEncoder.Encode(entry); encodeErr != nil {
@@ -181,8 +169,7 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 		}
 		return nil
 	})
-	truncated := errors.Is(err, errLimitReached)
-	if err != nil && !truncated {
+	if err != nil {
 		return err
 	}
 	if !started {
@@ -191,7 +178,7 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 			return fmt.Errorf("write list prefix: %w", err)
 		}
 	}
-	_, err = fmt.Fprintf(bufferedOutput, `]%s,"version":%d}`+"\n", kit.Ternary(truncated, `,"truncated":true`, ""), acfstypes.ProtocolVersion)
+	_, err = fmt.Fprintf(bufferedOutput, `]%s,"version":%d}`+"\n", kit.Ternary(result.Truncated, `,"truncated":true`, ""), acfstypes.ProtocolVersion)
 	if err != nil {
 		return fmt.Errorf("write list suffix: %w", err)
 	}
