@@ -1,12 +1,14 @@
 package tripwire
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
@@ -14,19 +16,31 @@ import (
 
 type (
 	// tree tracks which directories are subscribed and how real paths map back
-	// to logical paths under the root. It is owned by one goroutine at a time and
-	// is not safe for concurrent use.
+	// to logical paths under the roots. It is owned by one goroutine at a time
+	// and is not safe for concurrent use.
 	tree struct {
-		// aliases maps a followed symlink target (real dir) to the logical dir
-		// where the link lives. Only symlink points are stored; everything below
-		// them resolves by walking up to the nearest alias.
-		aliases  map[string]string
+		// aliases maps a followed symlink target (real dir) to the logical dirs
+		// where links to it live, ordered by root precedence. The first entry
+		// wins; the next takes over when it is forgotten. Only symlink points
+		// are stored; everything below them resolves by walking up to the
+		// nearest alias.
+		aliases map[string][]string
+		// lost holds roots whose subscription is gone and is being retried.
+		lost     map[string]struct{}
 		skip     func(name string) bool
 		log      *slog.Logger
-		root     string
-		prefix   string // root with a trailing separator
+		roots    []rootDir
 		maxDepth int
 		follow   bool
+	}
+
+	// rootDir is one watched root.
+	rootDir struct {
+		path   string
+		prefix string // path with a trailing separator
+		// real is path made absolute with symlinks resolved, set each time the
+		// root is subscribed. Symlink targets are compared against it.
+		real string
 	}
 
 	// frame is one directory waiting to be walked.
@@ -48,15 +62,46 @@ const (
 	sep = string(os.PathSeparator)
 )
 
-// logical maps a real path to its logical path under the root. It costs one
+// newTree builds an empty tree for already validated roots and a resolved
+// config.
+func newTree[K comparable](roots []string, cfg Config[K]) *tree {
+	dirs := make([]rootDir, 0, len(roots))
+	for _, root := range roots {
+		dirs = append(dirs, rootDir{path: root, prefix: withSep(root)})
+	}
+	return &tree{
+		aliases:  make(map[string][]string),
+		lost:     make(map[string]struct{}),
+		skip:     cfg.SkipDir,
+		log:      cfg.Logger,
+		roots:    dirs,
+		maxDepth: cfg.MaxDepth,
+		follow:   cfg.FollowSymlinks,
+	}
+}
+
+// withSep returns path with exactly one trailing separator.
+func withSep(path string) string {
+	return strings.TrimSuffix(path, sep) + sep
+}
+
+// logical maps a real path to its logical path under a root. It costs one
 // map lookup per path component, independent of how many dirs are watched.
+// When several links share a target, the first one that keeps the path within
+// the depth limit is used, so a deeper link under an earlier root does not
+// hide events a shallower link is entitled to.
 func (t *tree) logical(realPath string) string {
 	if len(t.aliases) == 0 {
 		return realPath
 	}
 	for dir := realPath; ; {
-		if logical, ok := t.aliases[dir]; ok {
-			return logical + realPath[len(dir):]
+		if links, ok := t.aliases[dir]; ok {
+			for _, link := range links {
+				if _, rel := t.locate(link + realPath[len(dir):]); t.maxDepth == 0 || depth(rel) <= t.maxDepth+1 {
+					return link + realPath[len(dir):]
+				}
+			}
+			return links[0] + realPath[len(dir):]
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -66,19 +111,18 @@ func (t *tree) logical(realPath string) string {
 	}
 }
 
-// rel returns logical relative to the root. Paths outside the root start
-// with "..".
-func (t *tree) rel(logical string) string {
-	if logical == t.root {
-		return "."
+// locate returns the index of the root containing logical and logical
+// relative to that root. Paths outside every root return -1 and "..".
+func (t *tree) locate(logical string) (int, string) {
+	for i, root := range t.roots {
+		switch {
+		case logical == root.path:
+			return i, "."
+		case strings.HasPrefix(logical, root.prefix):
+			return i, logical[len(root.prefix):]
+		}
 	}
-	if strings.HasPrefix(logical, t.prefix) {
-		return logical[len(t.prefix):]
-	}
-	if rel, err := filepath.Rel(t.root, logical); err == nil {
-		return rel
-	}
-	return ".."
+	return -1, ".."
 }
 
 // depth returns how many levels below the root rel is: 0 for the root and
@@ -94,10 +138,63 @@ func depth(rel string) int {
 	}
 }
 
+// add subscribes root i and every directory below it.
+func (t *tree) add(ctx context.Context, fsw *fsnotify.Watcher, i int) error {
+	if err := t.subscribe(fsw, i); err != nil {
+		return err
+	}
+	return t.walkRoot(ctx, fsw, i)
+}
+
+// subscribe watches root i itself and records its resolved path.
+func (t *tree) subscribe(fsw *fsnotify.Watcher, i int) error {
+	root := t.roots[i]
+	if err := fsw.Add(root.path); err != nil {
+		return err
+	}
+	resolved, err := filepath.EvalSymlinks(root.path)
+	if err != nil {
+		return errors.Join(err, fsw.Remove(root.path))
+	}
+	full, err := filepath.Abs(resolved)
+	if err != nil {
+		return errors.Join(err, fsw.Remove(root.path))
+	}
+	t.roots[i] = rootDir{
+		path:   root.path,
+		prefix: root.prefix,
+		real:   full,
+	}
+	return nil
+}
+
+// walkRoot watches every directory below the subscribed root i. A root that
+// cannot be read as a directory is unsubscribed and its error returned.
+func (t *tree) walkRoot(ctx context.Context, fsw *fsnotify.Watcher, i int) error {
+	root := t.roots[i].path
+	if err := t.walk(ctx, fsw, frame{dir: root, logical: root}, nil); err != nil {
+		_ = fsw.Remove(root) // already gone is fine
+		return err
+	}
+	return nil
+}
+
+// detach drops every subscription and alias belonging to root, so a moved
+// root's subtree stops reporting under its old path.
+func (t *tree) detach(fsw *fsnotify.Watcher, root rootDir) {
+	t.forget(fsw, root.path)
+	for _, watched := range fsw.WatchList() {
+		if watched == root.path || strings.HasPrefix(watched, root.prefix) {
+			_ = fsw.Remove(watched) // already gone is fine
+		}
+	}
+}
+
 // attach subscribes a newly created directory (and everything below it) if it
 // is inside the depth limit. Entries already inside it are passed to emit.
 func (t *tree) attach(ctx context.Context, fsw *fsnotify.Watcher, realPath, logical string, emit emitFunc) {
-	d := depth(t.rel(logical))
+	_, rel := t.locate(logical)
+	d := depth(rel)
 	if d <= 0 || (t.maxDepth > 0 && d > t.maxDepth) {
 		return
 	}
@@ -118,7 +215,9 @@ func (t *tree) attach(ctx context.Context, fsw *fsnotify.Watcher, realPath, logi
 
 // dirTarget reports whether path is a directory to watch and returns the
 // path to subscribe: path itself, or its resolved target for a followed
-// symlink.
+// symlink. A symlink whose target is a root, lies inside one, or contains one
+// is not followed: the root already watches those directories under its own
+// path, and following would report its events under the link instead.
 func (t *tree) dirTarget(path string) (string, bool) {
 	info, err := os.Lstat(path)
 	switch {
@@ -133,6 +232,17 @@ func (t *tree) dirTarget(path string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	full, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", false
+	}
+	for _, root := range t.roots {
+		if root.real != "" && (full == root.real ||
+			strings.HasPrefix(full, withSep(root.real)) ||
+			strings.HasPrefix(root.real, withSep(full))) {
+			return "", false
+		}
+	}
 	info, err = os.Stat(resolved)
 	if err != nil || !info.IsDir() {
 		return "", false
@@ -141,12 +251,16 @@ func (t *tree) dirTarget(path string) (string, bool) {
 }
 
 // walk subscribes start and every directory below it, iteratively. The start
-// frame itself is subscribed only when it is below the root; the caller owns
-// the root subscription. Only an unreadable root is returned as an error.
+// frame itself is subscribed only when it is below a root; the caller owns
+// the root subscription. Only an unreadable start directory at depth 0 or a
+// done ctx is returned as an error.
 func (t *tree) walk(ctx context.Context, fsw *fsnotify.Watcher, start frame, emit emitFunc) error {
 	visited := map[fileID]struct{}{}
 	stack := []frame{start}
 	for len(stack) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		f := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
@@ -154,7 +268,7 @@ func (t *tree) walk(ctx context.Context, fsw *fsnotify.Watcher, start frame, emi
 			continue
 		}
 		if f.link {
-			t.aliases[f.dir] = f.logical
+			t.alias(f.dir, f.logical)
 		}
 		if f.depth > 0 {
 			t.watch(ctx, fsw, f.dir)
@@ -181,6 +295,23 @@ func (t *tree) walk(ctx context.Context, fsw *fsnotify.Watcher, start frame, emi
 		}
 	}
 	return nil
+}
+
+// alias records that the symlink at logical points at target. A link under
+// an earlier root in Config.Roots takes precedence; within one root the
+// first link recorded wins.
+func (t *tree) alias(target, logical string) {
+	links := t.aliases[target]
+	if slices.Contains(links, logical) {
+		return
+	}
+	links = append(links, logical)
+	slices.SortStableFunc(links, func(a, b string) int {
+		ia, _ := t.locate(a)
+		ib, _ := t.locate(b)
+		return cmp.Compare(ia, ib)
+	})
+	t.aliases[target] = links
 }
 
 // child classifies one directory entry. It returns a frame to walk for
@@ -232,19 +363,27 @@ func (t *tree) watch(ctx context.Context, fsw *fsnotify.Watcher, path string) {
 	}
 }
 
-// forget drops followed symlinks at or below a removed logical path, and the
-// subscriptions on their targets. Plain directories need nothing: the OS
-// drops a watch when its directory goes away.
+// forget drops followed symlinks at or below a removed logical path. A
+// target's subscriptions are removed only once no link points at it any
+// more. Plain directories need nothing: the OS drops a watch when its
+// directory goes away.
 func (t *tree) forget(fsw *fsnotify.Watcher, logical string) {
 	if len(t.aliases) == 0 {
 		return
 	}
+	prefix := withSep(logical)
+	gone := func(link string) bool { return link == logical || strings.HasPrefix(link, prefix) }
 	var targets []string
-	for target, link := range t.aliases {
-		if link == logical || strings.HasPrefix(link, logical+sep) {
-			delete(t.aliases, target)
-			targets = append(targets, target)
+	for target, links := range t.aliases {
+		if !slices.ContainsFunc(links, gone) {
+			continue
 		}
+		if kept := slices.DeleteFunc(links, gone); len(kept) > 0 {
+			t.aliases[target] = kept
+			continue
+		}
+		delete(t.aliases, target)
+		targets = append(targets, target)
 	}
 	if len(targets) == 0 {
 		return

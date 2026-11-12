@@ -1,20 +1,14 @@
 package tripwire
 
 import (
-	"log/slog"
+	"errors"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 )
 
-func testTree(root string) *tree {
-	return &tree{
-		aliases: make(map[string]string),
-		skip:    func(string) bool { return false },
-		log:     slog.Default(),
-		root:    root,
-		prefix:  strings.TrimSuffix(root, sep) + sep,
-	}
+func testTree(roots ...string) *tree {
+	return newTree(roots, Config[string]{}.resolve())
 }
 
 func TestDepth(t *testing.T) {
@@ -36,34 +30,37 @@ func TestDepth(t *testing.T) {
 	}
 }
 
-func TestRel(t *testing.T) {
-	tr := testTree("/srv/projects")
+func TestLocate(t *testing.T) {
+	tr := testTree("/srv/projects", "/opt/stacks")
 	tests := []struct {
 		logical string
-		want    string
+		rel     string
+		root    int
 	}{
-		{logical: "/srv/projects", want: "."},
-		{logical: "/srv/projects/a/compose.yaml", want: filepath.Join("a", "compose.yaml")},
-		{logical: "/srv/projectsX/a", want: filepath.Join("..", "projectsX", "a")},
-		{logical: "/elsewhere", want: filepath.Join("..", "..", "elsewhere")},
+		{logical: "/srv/projects", root: 0, rel: "."},
+		{logical: "/srv/projects/a/compose.yaml", root: 0, rel: filepath.Join("a", "compose.yaml")},
+		{logical: "/opt/stacks", root: 1, rel: "."},
+		{logical: "/opt/stacks/b", root: 1, rel: "b"},
+		{logical: "/srv/projectsX/a", root: -1, rel: ".."},
+		{logical: "/elsewhere", root: -1, rel: ".."},
 	}
 	for _, tt := range tests {
-		if got := tr.rel(tt.logical); got != tt.want {
-			t.Errorf("rel(%q) = %q, want %q", tt.logical, got, tt.want)
+		if root, rel := tr.locate(tt.logical); root != tt.root || rel != tt.rel {
+			t.Errorf("locate(%q) = %d, %q, want %d, %q", tt.logical, root, rel, tt.root, tt.rel)
 		}
 	}
 }
 
-func TestRelAtFilesystemRoot(t *testing.T) {
-	if got := testTree("/").rel("/a/b"); got != filepath.Join("a", "b") {
-		t.Errorf("rel at / = %q", got)
+func TestLocateAtFilesystemRoot(t *testing.T) {
+	if root, rel := testTree("/").locate("/a/b"); root != 0 || rel != filepath.Join("a", "b") {
+		t.Errorf("locate at / = %d, %q", root, rel)
 	}
 }
 
 func TestLogical(t *testing.T) {
 	tr := testTree("/srv/projects")
-	tr.aliases["/data/real"] = "/srv/projects/linked"
-	tr.aliases["/data/real/inner-target"] = "/srv/projects/linked/inner"
+	tr.aliases["/data/real"] = []string{"/srv/projects/linked"}
+	tr.aliases["/data/real/inner-target"] = []string{"/srv/projects/linked/inner"}
 
 	tests := []struct {
 		real string
@@ -80,6 +77,48 @@ func TestLogical(t *testing.T) {
 		if got := tr.logical(tt.real); got != tt.want {
 			t.Errorf("logical(%q) = %q, want %q", tt.real, got, tt.want)
 		}
+	}
+}
+
+func TestAliasPrefersEarlierRoot(t *testing.T) {
+	tr := testTree("/a", "/b")
+	tr.alias("/data/shared", "/b/link")
+	tr.alias("/data/shared", "/a/link")
+	tr.alias("/data/shared", "/a/link")
+
+	if got := tr.aliases["/data/shared"]; !slices.Equal(got, []string{"/a/link", "/b/link"}) {
+		t.Fatalf("aliases = %q, want /a/link first", got)
+	}
+	if got := tr.logical("/data/shared/x"); got != "/a/link/x" {
+		t.Errorf("logical = %q, want /a/link/x", got)
+	}
+}
+
+func TestConfigRoots(t *testing.T) {
+	tests := []struct {
+		err   error
+		name  string
+		roots []string
+		want  []string
+	}{
+		{name: "nil", err: ErrNoRoot},
+		{name: "empty path", roots: []string{"/a", ""}, err: ErrNoRoot},
+		{name: "cleaned", roots: []string{"/a/../b/", "/c//d"}, want: []string{"/b", "/c/d"}},
+		{name: "duplicates", roots: []string{"/a", "/b", "/a/"}, want: []string{"/a", "/b"}},
+		{name: "nested", roots: []string{"/a", "/a/b"}, err: ErrNestedRoots},
+		{name: "nested reversed", roots: []string{"/a/b", "/a"}, err: ErrNestedRoots},
+		{name: "sibling prefix", roots: []string{"/a", "/ab"}, want: []string{"/a", "/ab"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Config[string]{Roots: tt.roots}.roots()
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("err = %v, want %v", err, tt.err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("roots = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

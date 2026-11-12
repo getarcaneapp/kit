@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +28,11 @@ const (
 	waitFor      = 3 * time.Second
 	quietFor     = 500 * time.Millisecond
 )
+
+var fastBackoff = Backoff{
+	Initial: 20 * time.Millisecond,
+	Max:     50 * time.Millisecond,
+}
 
 // composeKey stands in for arcane's project-file filter.
 func composeKey(e Event) (string, bool) {
@@ -71,9 +78,9 @@ func (r *recorder[K]) none(t *testing.T, why string) {
 	}
 }
 
-func start[K comparable](t *testing.T, root string, cfg Config[K]) *Watcher[K] {
+func start[K comparable](t *testing.T, cfg Config[K]) *Watcher[K] {
 	t.Helper()
-	w, err := New(root, cfg)
+	w, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -114,6 +121,13 @@ func write(t *testing.T, parts ...string) {
 	}
 }
 
+func chmod(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func symlink(t *testing.T, target, link string) {
 	t.Helper()
 	if err := os.Symlink(target, link); err != nil {
@@ -125,17 +139,85 @@ func hasKey(want string) func(Batch[string]) bool {
 	return func(b Batch[string]) bool { return slices.Contains(b.Keys, want) }
 }
 
-func TestNewValidates(t *testing.T) {
-	if _, err := New("", Config[string]{Key: PathOf}); !errors.Is(err, ErrNoRoot) {
-		t.Errorf("empty root: got %v, want ErrNoRoot", err)
+func isResync[K comparable](b Batch[K]) bool { return b.Resync }
+
+// sawAll reports true once every wanted key has appeared in some batch.
+func sawAll(want ...string) func(Batch[string]) bool {
+	seen := map[string]struct{}{}
+	return func(b Batch[string]) bool {
+		for _, k := range b.Keys {
+			seen[k] = struct{}{}
+		}
+		for _, k := range want {
+			if _, ok := seen[k]; !ok {
+				return false
+			}
+		}
+		return true
 	}
-	if _, err := New(t.TempDir(), Config[string]{}); !errors.Is(err, ErrNoKey) {
-		t.Errorf("nil key: got %v, want ErrNoKey", err)
+}
+
+// rewriteUntil writes dir/compose.yaml until a batch reports it, so a write
+// that lands before a watch is restored is retried instead of lost. It
+// reports whether any batch on the way had Resync set.
+func rewriteUntil(t *testing.T, rec *recorder[string], dir, why string) bool {
+	t.Helper()
+	want := filepath.Join(dir, "compose.yaml")
+	resync := false
+	for deadline := time.Now().Add(waitFor); time.Now().Before(deadline); {
+		write(t, dir, "compose.yaml")
+		select {
+		case b := <-rec.batches:
+			resync = resync || b.Resync
+			if slices.Contains(b.Keys, want) {
+				return resync
+			}
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	t.Fatalf("timed out: %s", why)
+	return false
+}
+
+func TestNewValidates(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		want  error
+		key   func(Event) (string, bool)
+		name  string
+		roots []string
+	}{
+		{name: "no roots", key: PathOf, want: ErrNoRoot},
+		{name: "empty path", key: PathOf, roots: []string{dir, ""}, want: ErrNoRoot},
+		{name: "nested", key: PathOf, roots: []string{dir, filepath.Join(dir, "sub")}, want: ErrNestedRoots},
+		{name: "nil key", roots: []string{dir}, want: ErrNoKey},
+		{name: "duplicates", key: PathOf, roots: []string{dir, dir + "/", filepath.Join(dir, "x", "..")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, err := New(Config[string]{Roots: tt.roots, Key: tt.key})
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("New: got %v, want %v", err, tt.want)
+			}
+			if err == nil && !slices.Equal(w.roots, []string{dir}) {
+				t.Errorf("roots = %q, want [%s]", w.roots, dir)
+			}
+		})
+	}
+}
+
+func TestNestedRootsErrorNamesBothPaths(t *testing.T) {
+	_, err := New(Config[string]{Roots: []string{"/srv/a", "/srv/a/b"}, Key: PathOf})
+	if !errors.Is(err, ErrNestedRoots) || !strings.Contains(err.Error(), "/srv/a/b") || !strings.Contains(err.Error(), "/srv/a ") {
+		t.Errorf("got %v, want ErrNestedRoots naming both paths", err)
 	}
 }
 
 func TestStartFailsOnMissingRootAndIsSpent(t *testing.T) {
-	w, err := New(filepath.Join(t.TempDir(), "missing"), Config[string]{Key: PathOf})
+	w, err := New(Config[string]{
+		Roots: []string{filepath.Join(t.TempDir(), "missing")},
+		Key:   PathOf,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +236,8 @@ func TestWatchesExistingSymlinkDirectoriesWhenEnabled(t *testing.T) {
 	symlink(t, target, filepath.Join(root, "linked-project"))
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:          []string{root},
 		Key:            composeKey,
 		OnBatch:        rec.onBatch,
 		Debounce:       fastDebounce,
@@ -173,7 +256,8 @@ func TestWatchesNewDirectoriesInsideSymlinkDirectoriesWhenEnabled(t *testing.T) 
 	symlink(t, target, filepath.Join(root, "linked-project"))
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:          []string{root},
 		Key:            composeKey,
 		OnBatch:        rec.onBatch,
 		Debounce:       fastDebounce,
@@ -193,7 +277,8 @@ func TestIgnoresNonProjectFileWritesInsideProjectDir(t *testing.T) {
 	build := mkdir(t, root, "demo", ".esphome", "build", "node-1", ".piolibdeps", "node-1", "ESPMicroSpeechFeatures")
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -215,7 +300,8 @@ func TestIgnoresChmodOnNonProjectFiles(t *testing.T) {
 	}
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -232,7 +318,8 @@ func TestFiresOnComposeFileDroppedIntoNewlyCreatedDirectory(t *testing.T) {
 	root := t.TempDir()
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -249,7 +336,8 @@ func TestCatchesFilesInsideMovedInDirectory(t *testing.T) {
 	root := t.TempDir()
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -273,7 +361,8 @@ func TestSkipsExistingSymlinkDirectoriesWhenDisabled(t *testing.T) {
 	symlink(t, target, filepath.Join(root, "linked-project"))
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -289,7 +378,8 @@ func TestTriggersOnNestedProjectFileBeyondDepthOne(t *testing.T) {
 	nested := mkdir(t, root, "main-project", "sub-project1")
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -304,7 +394,8 @@ func TestDoesNotTriggerBeyondConfiguredDepth(t *testing.T) {
 	nested := mkdir(t, root, "main-project", "sub-project1")
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -320,7 +411,8 @@ func TestTriggersOnDirectChildAtConfiguredDepth(t *testing.T) {
 	project := mkdir(t, root, "main-project")
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -335,7 +427,8 @@ func TestIgnoresBareNestedDirectoryCreateAndRemove(t *testing.T) {
 	root := t.TempDir()
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
@@ -355,7 +448,8 @@ func TestSkipDirIsNotWatched(t *testing.T) {
 	trash := mkdir(t, root, ".arcane-trash-demo")
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		SkipDir:  func(name string) bool { return name == ".arcane-trash-demo" },
@@ -367,7 +461,7 @@ func TestSkipDirIsNotWatched(t *testing.T) {
 }
 
 func TestStopIsIdempotentAfterStart(t *testing.T) {
-	w, err := New(t.TempDir(), Config[string]{Key: PathOf})
+	w, err := New(Config[string]{Roots: []string{t.TempDir()}, Key: PathOf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +476,7 @@ func TestStopIsIdempotentAfterStart(t *testing.T) {
 }
 
 func TestStopIsSafeBeforeStart(t *testing.T) {
-	w, err := New(t.TempDir(), Config[string]{Key: PathOf})
+	w, err := New(Config[string]{Roots: []string{t.TempDir()}, Key: PathOf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +488,8 @@ func TestMaxDelayFlushesUnderContinuousWrites(t *testing.T) {
 	root := t.TempDir()
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: 200 * time.Millisecond,
@@ -435,8 +530,9 @@ func TestSignalCoalescesBurstIntoOneBatch(t *testing.T) {
 
 	var calls atomic.Int32
 	rec := &recorder[struct{}]{batches: make(chan Batch[struct{}], 64)}
-	start(t, root, Config[struct{}]{
-		Key: Signal,
+	start(t, Config[struct{}]{
+		Roots: []string{root},
+		Key:   Signal,
 		OnBatch: func(ctx context.Context, b Batch[struct{}]) {
 			calls.Add(1)
 			rec.onBatch(ctx, b)
@@ -462,8 +558,9 @@ func TestPanickingOnBatchDoesNotStopDelivery(t *testing.T) {
 
 	var calls atomic.Int32
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
-		Key: composeKey,
+	start(t, Config[string]{
+		Roots: []string{root},
+		Key:   composeKey,
 		OnBatch: func(ctx context.Context, b Batch[string]) {
 			if calls.Add(1) == 1 {
 				panic("boom")
@@ -490,30 +587,26 @@ func TestRootRemovedAndRecreatedResyncs(t *testing.T) {
 	root := mkdir(t, t.TempDir(), "projects")
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      composeKey,
 		OnBatch:  rec.onBatch,
 		Debounce: fastDebounce,
-		Backoff: Backoff{
-			Initial: 20 * time.Millisecond,
-			Max:     50 * time.Millisecond,
-		},
+		Backoff:  fastBackoff,
 	})
 
 	if err := os.RemoveAll(root); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	demo := mkdir(t, root, "demo")
+	rec.until(t, "losing the root should emit a resync batch", isResync)
 
-	rec.until(t, "reconnect should emit a resync batch", func(b Batch[string]) bool { return b.Resync })
-
-	write(t, demo, "compose.yaml")
-	rec.until(t, "recreated root should be watched", hasKey(filepath.Join(demo, "compose.yaml")))
+	if !rewriteUntil(t, rec, mkdir(t, root, "demo"), "recreated root should be watched") {
+		t.Error("restoring the root should emit a resync batch")
+	}
 }
 
 func TestOverflowRequestsResync(t *testing.T) {
-	w, err := New(t.TempDir(), Config[string]{Key: PathOf})
+	w, err := New(Config[string]{Roots: []string{t.TempDir()}, Key: PathOf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +626,8 @@ func TestSymlinkCycleTerminates(t *testing.T) {
 	symlink(t, root, filepath.Join(a, "loop"))
 
 	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
-	start(t, root, Config[string]{
+	start(t, Config[string]{
+		Roots:          []string{root},
 		Key:            composeKey,
 		OnBatch:        rec.onBatch,
 		Debounce:       fastDebounce,
@@ -546,7 +640,8 @@ func TestSymlinkCycleTerminates(t *testing.T) {
 
 func TestStopDuringEventStorm(t *testing.T) {
 	root := t.TempDir()
-	w := start(t, root, Config[string]{
+	w := start(t, Config[string]{
+		Roots:    []string{root},
 		Key:      PathOf,
 		OnBatch:  func(context.Context, Batch[string]) { time.Sleep(time.Millisecond) },
 		Debounce: time.Millisecond,
@@ -564,4 +659,411 @@ func TestStopDuringEventStorm(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	stopWithin(t, w)
 	<-done
+}
+
+func TestChangesAcrossRootsShareOneBatch(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+
+	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+	start(t, Config[string]{
+		Roots:    []string{a, b},
+		Key:      composeKey,
+		OnBatch:  rec.onBatch,
+		Debounce: 200 * time.Millisecond,
+	})
+
+	write(t, a, "compose.yaml")
+	write(t, b, "compose.yaml")
+
+	got := rec.next(t, "changes in both roots should produce a batch")
+	want := []string{filepath.Join(a, "compose.yaml"), filepath.Join(b, "compose.yaml")}
+	slices.Sort(got.Keys)
+	slices.Sort(want)
+	if !slices.Equal(got.Keys, want) {
+		t.Errorf("keys = %q, want %q in one batch", got.Keys, want)
+	}
+}
+
+func TestEventRootAndRel(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	target := mkdir(t, t.TempDir(), "real")
+	mkdir(t, a, "x")
+	mkdir(t, b, "y", "z")
+	symlink(t, target, filepath.Join(b, "link"))
+
+	rec := &recorder[Event]{batches: make(chan Batch[Event], 64)}
+	start(t, Config[Event]{
+		Roots: []string{a, b},
+		// Op is dropped so repeated operations on one path match a single want.
+		Key: func(e Event) (Event, bool) {
+			return Event{
+				Path:    e.Path,
+				Logical: e.Logical,
+				Root:    e.Root,
+				Rel:     e.Rel,
+			}, true
+		},
+		OnBatch:        rec.onBatch,
+		Debounce:       fastDebounce,
+		FollowSymlinks: true,
+	})
+
+	tests := []struct {
+		change func(t *testing.T)
+		name   string
+		want   Event
+	}{
+		{
+			name:   "root itself",
+			change: func(t *testing.T) { chmod(t, a, 0o750) },
+			want: Event{
+				Path:    a,
+				Logical: a,
+				Root:    a,
+				Rel:     ".",
+			},
+		},
+		{
+			name:   "first root",
+			change: func(t *testing.T) { write(t, a, "x", "compose.yaml") },
+			want: Event{
+				Path:    filepath.Join(a, "x", "compose.yaml"),
+				Logical: filepath.Join(a, "x", "compose.yaml"),
+				Root:    a,
+				Rel:     filepath.Join("x", "compose.yaml"),
+			},
+		},
+		{
+			name:   "second root nested",
+			change: func(t *testing.T) { write(t, b, "y", "z", "compose.yaml") },
+			want: Event{
+				Path:    filepath.Join(b, "y", "z", "compose.yaml"),
+				Logical: filepath.Join(b, "y", "z", "compose.yaml"),
+				Root:    b,
+				Rel:     filepath.Join("y", "z", "compose.yaml"),
+			},
+		},
+		{
+			name:   "followed symlink",
+			change: func(t *testing.T) { write(t, target, "compose.yaml") },
+			want: Event{
+				Path:    filepath.Join(target, "compose.yaml"),
+				Logical: filepath.Join(b, "link", "compose.yaml"),
+				Root:    b,
+				Rel:     filepath.Join("link", "compose.yaml"),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.change(t)
+			rec.until(t, "event should carry its root and relative path", func(b Batch[Event]) bool {
+				return slices.Contains(b.Keys, tt.want)
+			})
+		})
+	}
+}
+
+func TestMaxDepthAppliesPerRoot(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	for _, root := range []string{a, b} {
+		mkdir(t, root, "p", "q")
+	}
+
+	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+	start(t, Config[string]{
+		Roots:    []string{a, b},
+		Key:      composeKey,
+		OnBatch:  rec.onBatch,
+		Debounce: fastDebounce,
+		MaxDepth: 1,
+	})
+
+	write(t, a, "p", "q", "compose.yaml")
+	write(t, b, "p", "q", "compose.yaml")
+	rec.none(t, "files beyond MaxDepth in any root must not trigger a batch")
+
+	write(t, a, "p", "compose.yaml")
+	write(t, b, "p", "compose.yaml")
+	rec.until(t, "files at MaxDepth in every root should be reported",
+		sawAll(filepath.Join(a, "p", "compose.yaml"), filepath.Join(b, "p", "compose.yaml")))
+}
+
+func TestStartFailsWhenOneRootIsMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	w, err := New(Config[string]{
+		Roots: []string{t.TempDir(), missing},
+		Key:   PathOf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startErr := w.Start(t.Context()); startErr == nil || !strings.Contains(startErr.Error(), missing) {
+		t.Fatalf("Start: got %v, want an error naming %s", startErr, missing)
+	}
+	if startErr := w.Start(t.Context()); !errors.Is(startErr, ErrStopped) {
+		t.Errorf("second Start: got %v, want ErrStopped", startErr)
+	}
+	stopWithin(t, w)
+}
+
+func TestLosingOneRootKeepsOthersWatched(t *testing.T) {
+	tests := []struct {
+		// lose takes root away and returns where its demo dir ended up, or ""
+		// if it no longer exists.
+		lose func(t *testing.T, root string) string
+		name string
+	}{
+		{
+			name: "removed",
+			lose: func(t *testing.T, root string) string {
+				if err := os.RemoveAll(root); err != nil {
+					t.Fatal(err)
+				}
+				return ""
+			},
+		},
+		{
+			name: "renamed",
+			lose: func(t *testing.T, root string) string {
+				if err := os.Rename(root, root+".old"); err != nil {
+					t.Fatal(err)
+				}
+				return filepath.Join(root+".old", "demo")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parent := t.TempDir()
+			a, b := mkdir(t, parent, "a"), mkdir(t, parent, "b")
+			mkdir(t, a, "demo")
+
+			rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+			start(t, Config[string]{
+				Roots:    []string{a, b},
+				Key:      composeKey,
+				OnBatch:  rec.onBatch,
+				Debounce: fastDebounce,
+				Backoff:  fastBackoff,
+			})
+
+			if moved := tt.lose(t, a); moved != "" {
+				write(t, moved, "compose.yaml")
+			}
+			write(t, b, "compose.yaml")
+			stale := filepath.Join(a, "demo", "compose.yaml")
+			resync := false
+			rec.until(t, "the remaining root should keep delivering", func(batch Batch[string]) bool {
+				if slices.Contains(batch.Keys, stale) {
+					t.Errorf("lost root reported %s after it moved away", stale)
+				}
+				resync = resync || batch.Resync
+				return slices.Contains(batch.Keys, filepath.Join(b, "compose.yaml"))
+			})
+			if !resync {
+				t.Error("losing a root should emit a resync batch")
+			}
+
+			if !rewriteUntil(t, rec, mkdir(t, a, "demo"), "recreated root should be watched") {
+				t.Error("restoring a root should emit a resync batch")
+			}
+			write(t, b, "docker-compose.yml")
+			rec.until(t, "the other root should still deliver after the restore",
+				hasKey(filepath.Join(b, "docker-compose.yml")))
+		})
+	}
+}
+
+func TestSharedSymlinkTargetPrefersEarlierRoot(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	target := mkdir(t, t.TempDir(), "shared")
+	symlink(t, target, filepath.Join(a, "link"))
+	symlink(t, target, filepath.Join(b, "link"))
+
+	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+	start(t, Config[string]{
+		Roots:          []string{b, a},
+		Key:            composeKey,
+		OnBatch:        rec.onBatch,
+		Debounce:       fastDebounce,
+		FollowSymlinks: true,
+	})
+
+	write(t, target, "compose.yaml")
+	got := rec.until(t, "a change in a shared target should be reported once",
+		hasKey(filepath.Join(b, "link", "compose.yaml")))
+	if slices.Contains(got.Keys, filepath.Join(a, "link", "compose.yaml")) {
+		t.Errorf("keys = %q, want only the earlier root's link", got.Keys)
+	}
+
+	if err := os.Remove(filepath.Join(b, "link")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, target, "compose.yaml")
+	rec.until(t, "the remaining link should take over the shared target",
+		hasKey(filepath.Join(a, "link", "compose.yaml")))
+}
+
+func TestStopWithMultipleRootsLeavesNoGoroutines(t *testing.T) {
+	before := runtime.NumGoroutine()
+	parent := t.TempDir()
+	a, b := mkdir(t, parent, "a"), mkdir(t, parent, "b")
+
+	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+	w, err := New(Config[string]{
+		Roots:    []string{a, b},
+		Key:      composeKey,
+		OnBatch:  rec.onBatch,
+		Debounce: fastDebounce,
+		Backoff:  fastBackoff,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startErr := w.Start(t.Context()); startErr != nil {
+		t.Fatal(startErr)
+	}
+	if removeErr := os.RemoveAll(a); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	rec.until(t, "losing a root should emit a resync batch", isResync)
+	stopWithin(t, w)
+
+	for deadline := time.Now().Add(waitFor); runtime.NumGoroutine() > before; {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines: %d after Stop, %d before Start", runtime.NumGoroutine(), before)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// rootRelKey keys compose files by the root and relative path they are
+// reported under.
+func rootRelKey(e Event) (string, bool) {
+	return e.Root + "|" + e.Rel, filepath.Base(e.Path) == "compose.yaml"
+}
+
+func TestSymlinkToAnotherRootsTreeIsNotFollowed(t *testing.T) {
+	tests := []struct {
+		// setup builds the roots (in Config.Roots order) and returns them with
+		// the directory to write in and the key that write must produce.
+		setup func(t *testing.T, parent string) (roots []string, dir, want string)
+		name  string
+	}{
+		{
+			name: "link to an ancestor of another root",
+			setup: func(t *testing.T, parent string) ([]string, string, string) {
+				r1 := mkdir(t, parent, "outer", "r1")
+				r2 := mkdir(t, parent, "r2")
+				symlink(t, filepath.Join(parent, "outer"), filepath.Join(r2, "up"))
+				return []string{r1, r2}, mkdir(t, r1, "proj"), r1 + "|" + filepath.Join("proj", "compose.yaml")
+			},
+		},
+		{
+			name: "absolute link into a later relative root",
+			setup: func(t *testing.T, parent string) ([]string, string, string) {
+				t.Chdir(parent)
+				sub := mkdir(t, parent, "a", "sub")
+				mkdir(t, parent, "b")
+				symlink(t, sub, filepath.Join(parent, "b", "l"))
+				return []string{"b", "a"}, sub, "a|" + filepath.Join("sub", "compose.yaml")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			roots, dir, want := tt.setup(t, t.TempDir())
+
+			rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+			start(t, Config[string]{
+				Roots:          roots,
+				Key:            rootRelKey,
+				OnBatch:        rec.onBatch,
+				Debounce:       fastDebounce,
+				FollowSymlinks: true,
+			})
+
+			write(t, dir, "compose.yaml")
+			got := rec.next(t, "a change under a root should be reported")
+			if !slices.Equal(got.Keys, []string{want}) {
+				t.Errorf("keys = %q, want only %q", got.Keys, want)
+			}
+		})
+	}
+}
+
+func TestSharedSymlinkTargetRespectsMaxDepth(t *testing.T) {
+	r1, r2 := t.TempDir(), t.TempDir()
+	target := mkdir(t, t.TempDir(), "shared")
+	sub := mkdir(t, target, "sub")
+	symlink(t, target, filepath.Join(mkdir(t, r1, "x"), "l"))
+	symlink(t, target, filepath.Join(r2, "l"))
+
+	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+	start(t, Config[string]{
+		Roots:          []string{r1, r2},
+		Key:            rootRelKey,
+		OnBatch:        rec.onBatch,
+		Debounce:       fastDebounce,
+		MaxDepth:       2,
+		FollowSymlinks: true,
+	})
+
+	write(t, sub, "compose.yaml")
+	got := rec.next(t, "the shallower link should report what the deeper one cannot")
+	if want := r2 + "|" + filepath.Join("l", "sub", "compose.yaml"); !slices.Equal(got.Keys, []string{want}) {
+		t.Errorf("keys = %q, want only %q", got.Keys, want)
+	}
+
+	write(t, target, "compose.yaml")
+	got = rec.next(t, "the earlier root should report what is within its depth")
+	if want := r1 + "|" + filepath.Join("x", "l", "compose.yaml"); !slices.Equal(got.Keys, []string{want}) {
+		t.Errorf("keys = %q, want only %q", got.Keys, want)
+	}
+}
+
+func TestStartFailsWhenRootIsAFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	write(t, file)
+	w, err := New(Config[string]{
+		Roots: []string{t.TempDir(), file},
+		Key:   PathOf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startErr := w.Start(t.Context()); startErr == nil || !strings.Contains(startErr.Error(), file) {
+		t.Fatalf("Start: got %v, want an error naming %s", startErr, file)
+	}
+	stopWithin(t, w)
+}
+
+func TestRootReplacedByFileIsLostUntilItIsADirectoryAgain(t *testing.T) {
+	parent := t.TempDir()
+	a, b := mkdir(t, parent, "a"), mkdir(t, parent, "b")
+
+	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+	start(t, Config[string]{
+		Roots:    []string{a, b},
+		Key:      composeKey,
+		OnBatch:  rec.onBatch,
+		Debounce: fastDebounce,
+		Backoff:  fastBackoff,
+	})
+
+	if err := os.Remove(a); err != nil {
+		t.Fatal(err)
+	}
+	write(t, a)
+	rec.until(t, "losing a root should emit a resync batch", isResync)
+	write(t, b, "compose.yaml")
+	rec.until(t, "the other root should keep delivering", hasKey(filepath.Join(b, "compose.yaml")))
+
+	if err := os.Remove(a); err != nil {
+		t.Fatal(err)
+	}
+	if !rewriteUntil(t, rec, mkdir(t, a, "demo"), "root should be watched once it is a directory again") {
+		t.Error("restoring a root should emit a resync batch")
+	}
 }

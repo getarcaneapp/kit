@@ -13,7 +13,7 @@ func BenchmarkLogical(b *testing.B) {
 		b.Run(strconv.Itoa(n), func(b *testing.B) {
 			tr := testTree("/srv/projects")
 			for i := range n {
-				tr.aliases["/data/target-"+strconv.Itoa(i)] = "/srv/projects/link-" + strconv.Itoa(i)
+				tr.aliases["/data/target-"+strconv.Itoa(i)] = []string{"/srv/projects/link-" + strconv.Itoa(i)}
 			}
 			realPath := "/data/target-" + strconv.Itoa(n/2) + "/app/config/compose.yaml"
 			b.ReportAllocs()
@@ -26,15 +26,18 @@ func BenchmarkLogical(b *testing.B) {
 
 // BenchmarkOffer measures the per-event cost of keying and deduplicating.
 func BenchmarkOffer(b *testing.B) {
-	w, err := New("/srv/projects", Config[string]{Key: composeKey})
+	w, err := New(Config[string]{
+		Roots: []string{"/srv/projects", "/opt/stacks"},
+		Key:   composeKey,
+	})
 	if err != nil {
 		b.Fatal(err)
 	}
-	tr := testTree("/srv/projects")
+	tr := testTree("/srv/projects", "/opt/stacks")
 	p := &pending[string]{keys: map[string]struct{}{}}
 	paths := make([]string, 256)
 	for i := range paths {
-		paths[i] = "/srv/projects/app-" + strconv.Itoa(i) + "/compose.yaml"
+		paths[i] = tr.roots[i%2].path + "/app-" + strconv.Itoa(i) + "/compose.yaml"
 	}
 	b.ReportAllocs()
 	i := 0

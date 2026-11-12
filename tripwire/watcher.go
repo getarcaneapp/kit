@@ -3,11 +3,11 @@ package tripwire
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,15 +15,26 @@ import (
 )
 
 type (
-	// Watcher watches a directory tree and delivers debounced batches of keys.
-	// Create one with [New]. A Watcher runs once: after Stop it cannot restart.
+	// Watcher watches one or more directory trees through a single
+	// subscription and delivers debounced batches of keys. Changes under any
+	// root share one debounce window, so a burst spanning several roots
+	// arrives as one [Batch]. Create one with [New]. A Watcher runs once:
+	// after Stop it cannot restart.
+	//
+	// Roots are lost and restored independently. When a root is removed or
+	// renamed its watches are dropped, a Resync batch is requested straight
+	// away (its contents vanished without per-file events), and the other
+	// roots keep delivering. Lost roots are retried together on one
+	// [Config.Backoff] schedule, which restarts at Backoff.Initial whenever
+	// another root is lost. A root that comes back is walked again and a
+	// second Resync batch is requested.
 	Watcher[K comparable] struct {
 		closeErr error
 		ready    map[K]struct{}
 		wake     chan struct{}
 		done     chan struct{}
 		cancel   context.CancelFunc
-		root     string
+		roots    []string
 		cfg      Config[K]
 		delivery sync.WaitGroup
 		stopOnce sync.Once
@@ -51,18 +62,24 @@ const (
 var (
 	// ErrNoKey is returned by [New] when [Config.Key] is nil.
 	ErrNoKey = errors.New("tripwire: Config.Key is required")
-	// ErrNoRoot is returned by [New] when the root path is empty.
-	ErrNoRoot = errors.New("tripwire: root path is required")
+	// ErrNoRoot is returned by [New] when [Config.Roots] is empty or holds an
+	// empty path.
+	ErrNoRoot = errors.New("tripwire: Config.Roots needs at least one non-empty path")
+	// ErrNestedRoots is returned by [New], wrapped with both paths, when one
+	// root lies inside another. The check is lexical; symlinks are not
+	// resolved.
+	ErrNestedRoots = errors.New("tripwire: roots must not be nested")
 	// ErrStopped is returned by [Watcher.Start] after Stop or a failed Start.
 	ErrStopped = errors.New("tripwire: watcher stopped")
 )
 
-// New returns a watcher for root. It does not touch the filesystem until
-// [Watcher.Start].
-func New[K comparable](root string, cfg Config[K]) (*Watcher[K], error) {
+// New returns a watcher for cfg.Roots. It validates the config but does not
+// touch the filesystem until [Watcher.Start].
+func New[K comparable](cfg Config[K]) (*Watcher[K], error) {
+	roots, err := cfg.roots()
 	switch {
-	case root == "":
-		return nil, ErrNoRoot
+	case err != nil:
+		return nil, err
 	case cfg.Key == nil:
 		return nil, ErrNoKey
 	}
@@ -71,15 +88,17 @@ func New[K comparable](root string, cfg Config[K]) (*Watcher[K], error) {
 		ready: make(map[K]struct{}),
 		wake:  make(chan struct{}, 1),
 		done:  make(chan struct{}),
-		root:  filepath.Clean(root),
+		roots: roots,
 	}, nil
 }
 
-// Start subscribes to the tree and begins delivering batches. When Start
-// returns nil, every existing directory within the depth limit is watched.
-// The watcher runs until Stop is called or ctx is done. Start is a no-op on a
-// running watcher and returns [ErrStopped] after Stop. If Start fails, the watcher is spent and Start returns the
-// error; calling Stop afterwards is safe but not required.
+// Start subscribes to every root and begins delivering batches. When Start
+// returns nil, every root and every existing directory within the depth limit
+// under each root is watched. If any root cannot be subscribed, Start returns
+// the joined errors naming each failed root, releases the subscription, and
+// the watcher is spent; calling Stop afterwards is safe but not required. The
+// watcher runs until Stop is called or ctx is done. Start is a no-op on a
+// running watcher and returns [ErrStopped] after Stop.
 func (w *Watcher[K]) Start(ctx context.Context) error {
 	w.lifeMu.Lock()
 	defer w.lifeMu.Unlock()
@@ -91,19 +110,15 @@ func (w *Watcher[K]) Start(ctx context.Context) error {
 		return nil
 	}
 
-	t := &tree{
-		aliases:  make(map[string]string),
-		skip:     w.cfg.SkipDir,
-		log:      w.cfg.Logger,
-		root:     w.root,
-		prefix:   strings.TrimSuffix(w.root, sep) + sep,
-		maxDepth: w.cfg.MaxDepth,
-		follow:   w.cfg.FollowSymlinks,
-	}
-	fsw, err := w.open(ctx, t)
+	t := newTree(w.roots, w.cfg)
+	fsw, err := fsnotify.NewBufferedWatcher(eventBuffer)
 	if err != nil {
 		w.stopped = true
 		return err
+	}
+	if addErr := w.addRoots(ctx, fsw, t); addErr != nil {
+		w.stopped = true
+		return errors.Join(addErr, fsw.Close())
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -133,24 +148,34 @@ func (w *Watcher[K]) Stop() error {
 	return w.closeErr
 }
 
-// open creates a subscription with the root and every directory below it.
-func (w *Watcher[K]) open(ctx context.Context, t *tree) (*fsnotify.Watcher, error) {
-	fsw, err := fsnotify.NewBufferedWatcher(eventBuffer)
-	if err != nil {
-		return nil, err
-	}
-	if addErr := fsw.Add(w.root); addErr != nil {
-		return nil, errors.Join(addErr, fsw.Close())
-	}
+// addRoots subscribes every root on a fresh fsw. Roots that fail are marked
+// lost and their errors are joined into the result. Every root is subscribed
+// before any is walked, so links between roots are recognised whatever the
+// order.
+func (w *Watcher[K]) addRoots(ctx context.Context, fsw *fsnotify.Watcher, t *tree) error {
 	clear(t.aliases)
-	if walkErr := t.walk(ctx, fsw, frame{dir: w.root, logical: w.root}, nil); walkErr != nil {
-		w.cfg.Logger.WarnContext(ctx, "tripwire: failed to watch some directories", "path", w.root, "error", walkErr)
+	clear(t.lost)
+	var errs []error
+	for i, root := range t.roots {
+		if err := t.subscribe(fsw, i); err != nil {
+			t.lost[root.path] = struct{}{}
+			errs = append(errs, fmt.Errorf("tripwire: watch root %s: %w", root.path, err))
+		}
 	}
-	return fsw, nil
+	for i, root := range t.roots {
+		if _, gone := t.lost[root.path]; gone {
+			continue
+		}
+		if err := t.walkRoot(ctx, fsw, i); err != nil {
+			t.lost[root.path] = struct{}{}
+			errs = append(errs, fmt.Errorf("tripwire: watch root %s: %w", root.path, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
-// run owns the subscription, the tree, and the debounce timer. Nothing else
-// touches them, so reconnecting never races with Stop.
+// run owns the subscription, the tree, and the debounce and retry timers.
+// Nothing else touches them, so reconnecting never races with Stop.
 func (w *Watcher[K]) run(ctx context.Context, fsw *fsnotify.Watcher, t *tree) {
 	defer close(w.done)
 	defer func() { w.closeErr = fsw.Close() }()
@@ -159,38 +184,103 @@ func (w *Watcher[K]) run(ctx context.Context, fsw *fsnotify.Watcher, t *tree) {
 	timer.Stop()
 	defer timer.Stop()
 
+	// retry fires while roots are lost; delay is its current backoff.
+	retry := time.NewTimer(time.Hour)
+	retry.Stop()
+	defer retry.Stop()
+	var delay time.Duration
+
 	p := &pending[K]{keys: make(map[K]struct{})}
 	for {
-		var lost bool
+		lostBefore := len(t.lost)
+		closed := false
 		select {
 		case <-ctx.Done():
 			return
 		case ev, ok := <-fsw.Events:
-			// A closed channel or the root itself going away both need a
-			// fresh subscription.
-			lost = !ok || (ev.Name == w.root && ev.Has(fsnotify.Remove|fsnotify.Rename))
-			if !lost && w.handle(ctx, fsw, t, ev, p) {
+			closed = !ok
+			switch {
+			case closed:
+			case w.lose(ctx, fsw, t, ev):
+				p.resync = true
+				w.schedule(timer, p)
+			case w.handle(ctx, fsw, t, ev, p):
 				w.schedule(timer, p)
 			}
 		case err, ok := <-fsw.Errors:
-			lost = !ok
-			if !lost && w.handleErr(ctx, err, p) {
+			closed = !ok
+			if !closed && w.handleErr(ctx, err, p) {
 				w.schedule(timer, p)
 			}
 		case <-timer.C:
 			w.flush(p)
+		case <-retry.C:
+			if w.restore(ctx, fsw, t) {
+				p.resync = true
+				w.schedule(timer, p)
+			}
+			if len(t.lost) > 0 {
+				delay = min(delay*2, w.cfg.Backoff.Max)
+				retry.Reset(delay)
+			}
 		}
-		if !lost {
+		if closed {
+			next, ok := w.reopen(ctx, fsw, t)
+			fsw = next
+			if !ok {
+				return
+			}
+			p.resync = true
+			w.schedule(timer, p)
+		}
+		if len(t.lost) > lostBefore {
+			delay = w.cfg.Backoff.Initial
+			retry.Reset(delay)
+		}
+	}
+}
+
+// lose reports whether ev removed or renamed a watched root. If so, the root
+// is detached and re-added once straight away in case it was replaced in the
+// same step; if that fails it is marked lost for the retry timer.
+func (w *Watcher[K]) lose(ctx context.Context, fsw *fsnotify.Watcher, t *tree, ev fsnotify.Event) bool {
+	if !ev.Has(fsnotify.Remove | fsnotify.Rename) {
+		return false
+	}
+	i, rel := t.locate(ev.Name)
+	if i < 0 || rel != "." {
+		return false
+	}
+	root := t.roots[i]
+	if _, gone := t.lost[root.path]; gone {
+		return true
+	}
+	t.detach(fsw, root)
+	if err := t.add(ctx, fsw, i); err == nil {
+		w.cfg.Logger.InfoContext(ctx, "tripwire: root replaced; resubscribed", "path", root.path)
+		return true
+	}
+	t.lost[root.path] = struct{}{}
+	w.cfg.Logger.WarnContext(ctx, "tripwire: root lost; retrying", "path", root.path, "op", ev.Op.String())
+	return true
+}
+
+// restore retries every lost root once and reports whether any came back.
+func (w *Watcher[K]) restore(ctx context.Context, fsw *fsnotify.Watcher, t *tree) bool {
+	restored := false
+	for i, root := range t.roots {
+		if _, gone := t.lost[root.path]; !gone {
 			continue
 		}
-		next, ok := w.reconnect(ctx, fsw, t)
-		fsw = next
-		if !ok {
-			return
+		if err := t.add(ctx, fsw, i); err != nil {
+			w.cfg.Logger.DebugContext(ctx, "tripwire: root still unavailable", "path", root.path, "error", err)
+			continue
 		}
-		p.resync = true
-		w.schedule(timer, p)
+		delete(t.lost, root.path)
+		w.cfg.Logger.InfoContext(ctx, "tripwire: root restored", "path", root.path)
+		restored = true
 	}
+	return restored
 }
 
 // handle updates subscriptions for one event and offers it to Key. It
@@ -210,15 +300,22 @@ func (w *Watcher[K]) handle(ctx context.Context, fsw *fsnotify.Watcher, t *tree,
 	return w.offer(t, ev.Name, logical, ev.Op, p) || added
 }
 
-// offer maps one change to a key and adds it to the pending batch.
+// offer maps one change to a key and adds it to the pending batch. Changes
+// outside every root, under a lost root, or deeper than the entries of a
+// MaxDepth directory are dropped; the last can happen below a symlink target
+// that another root reaches at a shallower depth.
 func (w *Watcher[K]) offer(t *tree, realPath, logical string, op Op, p *pending[K]) bool {
-	rel := t.rel(logical)
-	if depth(rel) < 0 {
+	i, rel := t.locate(logical)
+	if i < 0 || (t.maxDepth > 0 && depth(rel) > t.maxDepth+1) {
+		return false
+	}
+	if _, gone := t.lost[t.roots[i].path]; gone {
 		return false
 	}
 	key, ok := w.cfg.Key(Event{
 		Path:    realPath,
 		Logical: logical,
+		Root:    t.roots[i].path,
 		Rel:     rel,
 		Op:      op,
 	})
@@ -231,11 +328,11 @@ func (w *Watcher[K]) offer(t *tree, realPath, logical string, op Op, p *pending[
 // handleErr reports whether the error needs a resync batch.
 func (w *Watcher[K]) handleErr(ctx context.Context, err error, p *pending[K]) bool {
 	if errors.Is(err, fsnotify.ErrEventOverflow) {
-		w.cfg.Logger.WarnContext(ctx, "tripwire: event queue overflowed; requesting resync", "path", w.root)
+		w.cfg.Logger.WarnContext(ctx, "tripwire: event queue overflowed; requesting resync", "roots", w.roots)
 		p.resync = true
 		return true
 	}
-	w.cfg.Logger.WarnContext(ctx, "tripwire: watch error", "path", w.root, "error", err)
+	w.cfg.Logger.WarnContext(ctx, "tripwire: watch error", "roots", w.roots, "error", err)
 	return false
 }
 
@@ -298,7 +395,7 @@ func (w *Watcher[K]) call(ctx context.Context, batch Batch[K]) {
 	defer func() {
 		if r := recover(); r != nil {
 			w.cfg.Logger.ErrorContext(ctx, "tripwire: OnBatch panicked",
-				"path", w.root,
+				"roots", w.roots,
 				"panic", r,
 				"stack", string(debug.Stack()))
 		}
@@ -306,10 +403,13 @@ func (w *Watcher[K]) call(ctx context.Context, batch Batch[K]) {
 	w.cfg.OnBatch(ctx, batch)
 }
 
-// reconnect replaces a lost subscription, retrying with backoff until it
-// succeeds or ctx is done. On failure it returns the closed old watcher so
+// reopen replaces a subscription whose channels closed and re-adds every
+// root. Creating the subscription is retried with backoff until it succeeds
+// or ctx is done; with no subscription there are no events to fall behind
+// on. Roots that cannot be re-added, even all of them, are left lost for the
+// run loop's retry timer. On failure it returns the closed old watcher so
 // the caller always holds a non-nil value.
-func (w *Watcher[K]) reconnect(ctx context.Context, old *fsnotify.Watcher, t *tree) (*fsnotify.Watcher, bool) {
+func (w *Watcher[K]) reopen(ctx context.Context, old *fsnotify.Watcher, t *tree) (*fsnotify.Watcher, bool) {
 	if err := old.Close(); err != nil {
 		w.cfg.Logger.DebugContext(ctx, "tripwire: closing lost subscription", "error", err)
 	}
@@ -321,13 +421,16 @@ func (w *Watcher[K]) reconnect(ctx context.Context, old *fsnotify.Watcher, t *tr
 			}
 			delay = min(delay*2, w.cfg.Backoff.Max)
 		}
-		fsw, err := w.open(ctx, t)
+		fsw, err := fsnotify.NewBufferedWatcher(eventBuffer)
 		if err == nil {
-			w.cfg.Logger.InfoContext(ctx, "tripwire: subscription restored", "path", w.root)
+			if addErr := w.addRoots(ctx, fsw, t); addErr != nil {
+				w.cfg.Logger.WarnContext(ctx, "tripwire: some roots unavailable after resubscribing; retrying", "error", addErr)
+			}
+			w.cfg.Logger.InfoContext(ctx, "tripwire: subscription restored", "roots", w.roots)
 			return fsw, true
 		}
 		if attempt == 0 {
-			w.cfg.Logger.WarnContext(ctx, "tripwire: subscription lost; retrying", "path", w.root, "error", err)
+			w.cfg.Logger.WarnContext(ctx, "tripwire: subscription lost; retrying", "roots", w.roots, "error", err)
 		}
 		if ctx.Err() != nil {
 			return old, false

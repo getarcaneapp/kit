@@ -6,16 +6,18 @@ type (
 	// Op is a bitmask of filesystem operations.
 	Op = fsnotify.Op
 
-	// Event is one filesystem change under the watched root.
+	// Event is one filesystem change under one of the watched roots.
 	Event struct {
 		// Path is the real path reported by the OS. Inside a followed symlinked
 		// directory this is the path under the symlink target.
 		Path string
-		// Logical is Path as seen from the root, with followed symlinked
+		// Logical is Path as seen from its root, with followed symlinked
 		// directories mapped back to the link's location.
 		Logical string
-		// Rel is Logical relative to the root, using the OS path separator.
-		// It is "." for the root itself.
+		// Root is the cleaned entry of [Config.Roots] that Logical lies under.
+		Root string
+		// Rel is Logical relative to Root, using the OS path separator. It is
+		// "." for the root itself.
 		Rel string
 		// Op is the set of operations in this event. Entries discovered inside a
 		// newly created directory are reported as [Create].
