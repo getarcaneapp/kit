@@ -1,3 +1,13 @@
+## tripwire/v0.2.0
+
+### New features
+
+* watch multiple roots with one watcher([f383e9d](https://github.com/getarcaneapp/kit/commit/f383e9db5cd7ff7d73dc4715ec2a008ce5fc1d48) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/tripwire/v0.1.2...tripwire/v0.2.0
+
 ## tripwire/v0.1.2
 
 ### Bug fixes
