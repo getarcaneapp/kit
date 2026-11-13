@@ -129,28 +129,30 @@ func compileField(field reflect.StructField, seen map[reflect.Type]*plan) (field
 	for fieldType.Kind() == reflect.Pointer {
 		fieldType = fieldType.Elem()
 	}
-	minimum, maximum := 0, -1
-	if hasTrim || hasNorm {
-		if fieldType.Kind() != reflect.String || !field.IsExported() {
-			return fieldPlan{}, false, errors.New("normalization tags require an exported string or string pointer")
+	if (hasTrim || hasNorm) && (fieldType.Kind() != reflect.String || !field.IsExported()) {
+		return fieldPlan{}, false, errors.New("normalization tags require an exported string or string pointer")
+	}
+	lengthTag := func(name string, fallback int) (int, error) {
+		raw, ok := field.Tag.Lookup(name)
+		if !ok || !hasTrim && !hasNorm {
+			return fallback, nil
 		}
-		for _, constraint := range []struct {
-			target *int
-			name   string
-		}{{name: "minLength", target: &minimum}, {name: "maxLength", target: &maximum}} {
-			raw, ok := field.Tag.Lookup(constraint.name)
-			if !ok {
-				continue
-			}
-			length, err := strconv.Atoi(raw)
-			if err != nil || length < 0 {
-				return fieldPlan{}, false, fmt.Errorf("%s must be a nonnegative integer, got %q", constraint.name, raw)
-			}
-			*constraint.target = length
+		length, err := strconv.Atoi(raw)
+		if err != nil || length < 0 {
+			return 0, fmt.Errorf("%s must be a nonnegative integer, got %q", name, raw)
 		}
-		if maximum >= 0 && minimum > maximum {
-			return fieldPlan{}, false, errors.New("minLength exceeds maxLength")
-		}
+		return length, nil
+	}
+	minimum, err := lengthTag("minLength", 0)
+	if err != nil {
+		return fieldPlan{}, false, err
+	}
+	maximum, err := lengthTag("maxLength", -1)
+	if err != nil {
+		return fieldPlan{}, false, err
+	}
+	if maximum >= 0 && minimum > maximum {
+		return fieldPlan{}, false, errors.New("minLength exceeds maxLength")
 	}
 	jsonTag := strings.Split(field.Tag.Get("json"), ",")
 	if !field.IsExported() {

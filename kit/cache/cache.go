@@ -8,6 +8,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"kit.getarcane.app"
 )
 
 type (
@@ -87,10 +89,7 @@ func (c *Cache[K, V]) GetOrLoad(key K, load func(K) (V, bool, error)) (V, bool, 
 		e := el.Value.(*entry[K, V])
 		if !e.expired(now) {
 			c.order.MoveToFront(el)
-			reload := c.Revalidate
-			if reload == nil {
-				reload = load
-			}
+			reload := kit.Ternary(c.Revalidate != nil, c.Revalidate, load)
 			if _, busy := c.inflight[key]; reload != nil && !busy && e.stale(now) {
 				cl := c.startLocked(key)
 				go func() {
@@ -284,18 +283,14 @@ func (c *Cache[K, V]) run(key K, load func(K) (V, bool, error), cl *call[V], sta
 }
 
 func (c *Cache[K, V]) setLocked(key K, value V, found bool, ttl time.Duration) {
-	var fresh, dead time.Time
-	if ttl > 0 {
-		fresh = time.Now().Add(ttl)
-		dead = fresh.Add(c.RevalidateAfter)
-	}
+	fresh := kit.Ternary(ttl > 0, time.Now().Add(ttl), time.Time{})
 	e := &entry[K, V]{
 		key:   key,
 		value: value,
 		ttl:   ttl,
 		found: found,
 		fresh: fresh,
-		dead:  dead,
+		dead:  kit.Ternary(ttl > 0, fresh.Add(c.RevalidateAfter), time.Time{}),
 	}
 	if el, ok := c.items[key]; ok {
 		el.Value = e

@@ -77,26 +77,21 @@ var (
 		{Suffix: 'K', Size: uint64(Kilobyte)},
 	}
 
-	// unitMapDecimal holds the base 10 (SI) suffixes, e.g. "G" for Gigabyte.
-	unitMapDecimal = map[byte]Capacity{
-		'E': Exabyte,
-		'P': Petabyte,
-		'T': Terabyte,
-		'G': Gigabyte,
-		'M': Megabyte,
-		'K': Kilobyte,
-	}
-
-	// unitMapBinary holds the base 2 (IEC) suffixes, e.g. "Gi" for Gibibyte. It
-	// is keyed on the leading byte only; ParseCapacity has already checked the
-	// trailing 'i'.
-	unitMapBinary = map[byte]Capacity{
-		'E': Exbibyte,
-		'P': Pebibyte,
-		'T': Tebibyte,
-		'G': Gibibyte,
-		'M': Mebibyte,
-		'K': Kibibyte,
+	// unitSuffixes maps the base 10 (SI) suffixes, e.g. "G", and the base 2
+	// (IEC) suffixes, e.g. "Gi", to their sizes.
+	unitSuffixes = map[string]Capacity{
+		"E":  Exabyte,
+		"P":  Petabyte,
+		"T":  Terabyte,
+		"G":  Gigabyte,
+		"M":  Megabyte,
+		"K":  Kilobyte,
+		"Ei": Exbibyte,
+		"Pi": Pebibyte,
+		"Ti": Tebibyte,
+		"Gi": Gibibyte,
+		"Mi": Mebibyte,
+		"Ki": Kibibyte,
 	}
 )
 
@@ -229,22 +224,7 @@ func ParseCapacity(s string) (Capacity, error) {
 		return Capacity(c), nil
 	}
 
-	var unitMap map[byte]Capacity
-	switch len(s) {
-	case 2:
-		if s[1] != 'i' {
-			return 0, parseError(strconv.Quote(orig))
-		}
-		// base 2 unit, e.g. "Gi"
-		unitMap = unitMapBinary
-	case 1:
-		// base 10 unit, e.g. "G"
-		unitMap = unitMapDecimal
-	default:
-		return 0, parseError(strconv.Quote(orig))
-	}
-
-	unit, ok := unitMap[s[0]]
+	unit, ok := unitSuffixes[s]
 	if !ok {
 		return 0, parseError(strconv.Quote(orig))
 	}
