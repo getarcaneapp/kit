@@ -264,6 +264,16 @@ func TestPreserveVolumeMounts(t *testing.T) {
 	}
 }
 
+func TestBindMountsKeepPropagation(t *testing.T) {
+	mounts := []containertypes.MountPoint{
+		{Type: mounttypes.TypeBind, Source: "/host/data", Destination: "/app/data", RW: true, Propagation: mounttypes.PropagationRShared},
+	}
+	want := &mounttypes.BindOptions{Propagation: mounttypes.PropagationRShared}
+
+	require.Equal(t, want, MountForDestination(mounts, "/app/data", "/target").BindOptions)
+	require.Equal(t, want, MountForSubpath(mounts, "/app/data/sub", "/target").BindOptions)
+}
+
 func TestMountForEnclosingPath(t *testing.T) {
 	mounts := []containertypes.MountPoint{
 		{Type: mounttypes.TypeVolume, Name: "arcane-data", Destination: "/app/data", RW: true},

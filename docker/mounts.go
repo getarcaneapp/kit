@@ -70,10 +70,11 @@ func MountForSubpath(mounts []container.MountPoint, containerPath, target string
 			return nil
 		}
 		return &mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   kit.Ternary(relative != "", strings.TrimRight(best.Source, "/")+"/"+relative, best.Source),
-			Target:   target,
-			ReadOnly: !best.RW,
+			Type:        mount.TypeBind,
+			Source:      kit.Ternary(relative != "", strings.TrimRight(best.Source, "/")+"/"+relative, best.Source),
+			Target:      target,
+			ReadOnly:    !best.RW,
+			BindOptions: kit.Ternary(best.Propagation == "", nil, &mount.BindOptions{Propagation: best.Propagation}),
 		}
 	case mount.TypeVolume:
 		if strings.TrimSpace(best.Name) == "" {
@@ -197,10 +198,11 @@ func MountForDestination(mounts []container.MountPoint, destination, target stri
 				return nil
 			}
 			return &mount.Mount{
-				Type:     mount.TypeBind,
-				Source:   m.Source,
-				Target:   target,
-				ReadOnly: !m.RW,
+				Type:        mount.TypeBind,
+				Source:      m.Source,
+				Target:      target,
+				ReadOnly:    !m.RW,
+				BindOptions: kit.Ternary(m.Propagation == "", nil, &mount.BindOptions{Propagation: m.Propagation}),
 			}
 		case mount.TypeTmpfs:
 			return nil
