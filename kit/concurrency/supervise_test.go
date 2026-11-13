@@ -107,3 +107,27 @@ func TestSuperviseRestartCancelsCurrentRun(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSuperviseFillsZeroBackoffFields(t *testing.T) {
+	var calls atomic.Int32
+	supervisor := Supervise(t.Context(), SuperviseConfig{
+		Name:    "partial",
+		Backoff: Backoff{Max: time.Minute},
+		Run: func(context.Context) error {
+			calls.Add(1)
+			return errors.New("down")
+		},
+	})
+
+	state := waitForStatus(t, supervisor, SupervisorRetrying)
+	if wait := state.NextRetry.Sub(state.UpdatedAt); wait < defaultSupervisorBackoff.Base/2 {
+		t.Fatalf("retry delay = %v, want at least %v", wait, defaultSupervisorBackoff.Base/2)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("runs = %d, want 1 while waiting for the default base delay", got)
+	}
+	if err := supervisor.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}

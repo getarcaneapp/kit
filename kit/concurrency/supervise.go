@@ -66,10 +66,15 @@ func Supervise(ctx context.Context, cfg SuperviseConfig) *Supervisor {
 		},
 	}
 	go s.loop(loopCtx, SuperviseConfig{
-		Run:     cfg.Run,
-		Logger:  cmp.Or(cfg.Logger, slog.Default()),
-		Name:    cfg.Name,
-		Backoff: cmp.Or(cfg.Backoff, defaultSupervisorBackoff),
+		Run:    cfg.Run,
+		Logger: cmp.Or(cfg.Logger, slog.Default()),
+		Name:   cfg.Name,
+		Backoff: Backoff{
+			Base:    cmp.Or(cfg.Backoff.Base, defaultSupervisorBackoff.Base),
+			Max:     cmp.Or(cfg.Backoff.Max, defaultSupervisorBackoff.Max),
+			Strikes: cmp.Or(cfg.Backoff.Strikes, defaultSupervisorBackoff.Strikes),
+			Jitter:  cmp.Or(cfg.Backoff, defaultSupervisorBackoff).Jitter,
+		},
 	})
 	return s
 }
