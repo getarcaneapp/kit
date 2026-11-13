@@ -322,8 +322,21 @@ func (d *dir) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error
 	return os.NewFile(uintptr(fd), d.rootName+"/"+path.Join(d.path, name)), nil
 }
 
-// ReadFile reads name, which must be a regular file.
+// ReadFile reads name, which must be a regular file. It checks the type before
+// opening so a device node is never opened.
 func (d *dir) ReadFile(name string) ([]byte, error) {
+	var stat unix.Stat_t
+	err := unix.Fstatat(d.fd, name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	if err != nil {
+		return nil, &fs.PathError{
+			Op:   "statat",
+			Path: d.errorPath(name),
+			Err:  err,
+		}
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return nil, fmt.Errorf("%w: %s", kit.Ternary(stat.Mode&unix.S_IFMT == unix.S_IFLNK, ErrSymlink, ErrNotFile), d.display(name))
+	}
 	file, err := d.OpenFile(name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err

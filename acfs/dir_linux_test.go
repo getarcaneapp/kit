@@ -218,6 +218,66 @@ func TestCopyToRaceDoesNotListOutsideRoot(t *testing.T) {
 	}
 }
 
+// requireNotOpened fails t if run opens the file name.
+func requireNotOpened(t *testing.T, name string, run func()) {
+	t.Helper()
+	fd, err := unix.InotifyInit1(unix.IN_NONBLOCK | unix.IN_CLOEXEC)
+	if err != nil {
+		t.Skipf("inotify unavailable: %v", err)
+	}
+	defer func() {
+		_ = unix.Close(fd)
+	}()
+	if _, err = unix.InotifyAddWatch(fd, name, unix.IN_OPEN); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	var events [unix.SizeofInotifyEvent + unix.PathMax]byte
+	if n, readErr := unix.Read(fd, events[:]); n > 0 {
+		t.Errorf("%s was opened", name)
+	} else if !errors.Is(readErr, unix.EAGAIN) {
+		t.Fatal(readErr)
+	}
+}
+
+func TestNonRegularFilesAreNeverOpened(t *testing.T) {
+	t.Parallel()
+
+	source, destination := t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(source, "file"), "source")
+	for _, root := range []string{source, destination} {
+		if err := unix.Mkfifo(filepath.Join(root, "fifo"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := unix.Mkfifo(filepath.Join(destination, "file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	requireNotOpened(t, filepath.Join(source, "fifo"), func() {
+		if _, _, err := (Root{Path: source}).OpenReadSeek(t.Context(), "/fifo"); !errors.Is(err, ErrNotFile) {
+			t.Errorf("OpenReadSeek fifo = %v, want ErrNotFile", err)
+		}
+	})
+	requireNotOpened(t, filepath.Join(destination, "file"), func() {
+		if _, err := (Root{Path: source}).CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{}); !errors.Is(err, ErrNotFile) {
+			t.Errorf("CopyTo onto fifo = %v, want ErrNotFile", err)
+		}
+	})
+	mutation, err := openMutationRoot(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = mutation.Close()
+	}()
+	requireNotOpened(t, filepath.Join(destination, "fifo"), func() {
+		if _, err := mutation.top.ReadFile("fifo"); !errors.Is(err, ErrNotFile) {
+			t.Errorf("ReadFile fifo = %v, want ErrNotFile", err)
+		}
+	})
+}
+
 func TestRootAttributeRaceLeavesSibling(t *testing.T) {
 	stamp := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
 	tests := []struct {

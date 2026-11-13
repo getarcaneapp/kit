@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 
+	"kit.getarcane.app"
+
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
@@ -292,12 +294,19 @@ func (c *directoryCopy) copyFile(source *os.File, relativePath string, mode os.F
 		retErr = errors.Join(retErr, parent.Close())
 	}()
 	base := path.Base(relativePath)
+	existingInfo, err := parent.Lstat(base)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return true, err
+	}
+	if err == nil && !existingInfo.Mode().IsRegular() {
+		return true, fmt.Errorf("%w: %s", kit.Ternary(existingInfo.Mode()&os.ModeSymlink != 0, ErrSymlink, ErrNotFile), parent.display(base))
+	}
 
-	if c.mirror {
+	if c.mirror && err == nil && existingInfo.Size() == sourceInfo.Size() {
 		existing, openErr := parent.OpenFile(base, os.O_RDONLY, 0)
 		if openErr == nil {
-			existingInfo, statErr := existing.Stat()
-			same := statErr == nil && existingInfo.Mode().IsRegular() && existingInfo.Size() == sourceInfo.Size()
+			openedInfo, statErr := existing.Stat()
+			same := statErr == nil && openedInfo.Mode().IsRegular() && openedInfo.Size() == sourceInfo.Size()
 			if same {
 				same, err = equalContent(existing, source, c.buffer)
 			}

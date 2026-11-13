@@ -128,23 +128,31 @@ func (r Root) OpenReadSeek(ctx context.Context, logicalPath string) (io.ReadSeek
 		_ = root.Close()
 	}()
 
-	resolvedPath, _, err := resolvePath(root, relativePath, resolveOptions{FollowFinal: true})
+	resolvedPath, info, err := resolvePath(root, relativePath, resolveOptions{FollowFinal: true})
 	if err != nil {
 		return nil, 0, err
+	}
+	if info == nil {
+		info, err = root.Stat(resolvedPath)
+		if err != nil {
+			return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
+		}
+	}
+	if info.IsDir() {
+		return nil, 0, ErrIsDirectory
+	}
+	if !info.Mode().IsRegular() {
+		return nil, 0, ErrNotFile
 	}
 
 	file, err := root.OpenFile(resolvedPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open %q: %w", kitfs.LogicalPath(resolvedPath), err)
 	}
-	info, err := file.Stat()
+	info, err = file.Stat()
 	if err != nil {
 		_ = file.Close()
 		return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
-	}
-	if info.IsDir() {
-		_ = file.Close()
-		return nil, 0, ErrIsDirectory
 	}
 	if !info.Mode().IsRegular() {
 		_ = file.Close()
