@@ -36,12 +36,20 @@ func TestCaptureStoresUpToLimit(t *testing.T) {
 func TestCaptureNonPositiveLimitCapturesNothing(t *testing.T) {
 	t.Parallel()
 
-	capture := New(0)
-	if n, err := capture.Write([]byte("dropped")); n != 7 || err != nil {
-		t.Fatalf("Write = (%d, %v), want (7, nil)", n, err)
-	}
-	if got := capture.String(); got != "" {
-		t.Fatalf("String = %q, want empty", got)
+	for _, limit := range []int{0, -1} {
+		capture := New(limit)
+		if n, err := capture.Write(nil); n != 0 || err != nil || capture.Truncated() {
+			t.Fatalf("limit %d: empty Write = (%d, %v), truncated %t; want (0, nil), false", limit, n, err, capture.Truncated())
+		}
+		if n, err := capture.Write([]byte("dropped")); n != 7 || err != nil {
+			t.Fatalf("limit %d: Write = (%d, %v), want (7, nil)", limit, n, err)
+		}
+		if got := capture.String(); got != "" {
+			t.Fatalf("limit %d: String = %q, want empty", limit, got)
+		}
+		if !capture.Truncated() {
+			t.Fatalf("limit %d: Truncated = false after dropping output", limit)
+		}
 	}
 }
 

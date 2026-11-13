@@ -29,16 +29,12 @@ func New(maxBytes int) *Capture {
 }
 
 func (c *Capture) Write(p []byte) (int, error) {
-	if c.maxBytes <= 0 {
-		return len(p), nil
-	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	remaining := c.maxBytes - c.buf.Len()
+	remaining := max(c.maxBytes-c.buf.Len(), 0)
 	_, _ = c.buf.Write(p[:min(len(p), remaining)])
-	c.truncated = c.truncated || remaining <= 0 || len(p) > remaining
+	c.truncated = c.truncated || len(p) > remaining
 
 	return len(p), nil
 }
