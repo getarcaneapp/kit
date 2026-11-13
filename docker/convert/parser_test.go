@@ -47,6 +47,7 @@ func TestParseSplitsStatements(t *testing.T) {
 		{name: "trailing operator", input: "docker run alpine;", want: [][]string{{"alpine"}}},
 		{name: "leading operator", input: "; docker run alpine", want: [][]string{{"alpine"}}},
 		{name: "doubled operator", input: "docker run alpine;; docker run busybox", want: [][]string{{"alpine"}, {"busybox"}}},
+		{name: "long bool flags honour explicit values", input: "docker run --privileged=false --read-only=true --init=0 --rm=FALSE alpine", want: [][]string{{"read_only=true", "alpine"}}},
 		{name: "non-ascii before operator", input: "docker run --label note=héllo✓ alpine;docker run busybox", want: [][]string{{"labels=note=héllo✓", "alpine"}, {"busybox"}}},
 	}
 
@@ -71,6 +72,7 @@ func TestParseRejectsRedirectionsAndBadQuoting(t *testing.T) {
 		"docker run alpine &> out.log",
 		"docker run alpine < in",
 		"docker run -e 'X=1 alpine",
+		"docker run --privileged=maybe alpine",
 	} {
 		t.Run(input, func(t *testing.T) {
 			_, err := convert.Parse(input)

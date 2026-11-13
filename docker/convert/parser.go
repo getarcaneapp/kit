@@ -2,6 +2,7 @@ package convert
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mattn/go-shellwords"
@@ -228,7 +229,14 @@ func parseFlag(token string, tokens []string, index int) (string, string, int, e
 	if strings.HasPrefix(token, "--") {
 		name, value, hasValue := strings.Cut(token, "=")
 		if mapped, ok := boolFlags[name]; ok {
-			return mapped, "true", 0, nil
+			if !hasValue {
+				return mapped, "true", 0, nil
+			}
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return "", "", 0, types.NewParseError("invalid boolean %q for %s flag", value, name)
+			}
+			return kit.Ternary(enabled, mapped, ""), "true", 0, nil
 		}
 		if mapped, ok := valueFlags[name]; ok {
 			if hasValue {
