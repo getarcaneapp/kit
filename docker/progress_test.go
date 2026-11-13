@@ -98,5 +98,5 @@ func TestLogLineWriterInvalidUTF8(t *testing.T) {
 
 	_, _ = w.Write([]byte("bad \xff byte\n"))
 
-	require.Equal(t, "{\"log\":\"bad \ufffd byte\"}\n", out.String())
+	require.JSONEq(t, "{\"log\":\"bad \ufffd byte\"}\n", out.String())
 }

@@ -26,7 +26,7 @@ func TestStreamContainerLogsNonTTYFollowDemultiplexesStdoutAndStderr(t *testing.
 
 	logsChan := make(chan string, 4)
 
-	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, LogOptions{Follow: true})
+	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, LogOptions{})
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, []string{"stdout line", "[STDERR] stderr line"}, drainLogLines(logsChan))
@@ -35,7 +35,7 @@ func TestStreamContainerLogsNonTTYFollowDemultiplexesStdoutAndStderr(t *testing.
 func TestStreamContainerLogsTTYFollowStreamsRawOutput(t *testing.T) {
 	logsChan := make(chan string, 4)
 
-	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader("first line\nsecond line")), logsChan, LogOptions{Follow: true, TTY: true})
+	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader("first line\nsecond line")), logsChan, LogOptions{TTY: true})
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"first line", "second line"}, drainLogLines(logsChan))
@@ -67,7 +67,7 @@ func TestStreamContainerLogsTTYHandlesLongLinesAndPartialEOF(t *testing.T) {
 	longLine := strings.Repeat("a", 70*1024)
 	logsChan := make(chan string, 4)
 
-	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader(longLine+"\npartial tail")), logsChan, LogOptions{Follow: true, TTY: true})
+	err := StreamContainerLogs(t.Context(), io.NopCloser(strings.NewReader(longLine+"\npartial tail")), logsChan, LogOptions{TTY: true})
 	require.NoError(t, err)
 
 	require.Equal(t, []string{longLine, "partial tail"}, drainLogLines(logsChan))
@@ -94,7 +94,7 @@ func TestStreamContainerLogsTTYPythonLikeFollowDoesNotReturnEmptyLogs(t *testing
 		t.Context(),
 		io.NopCloser(strings.NewReader("2026-03-22 10:15:00 - INFO - Starting miner\n2026-03-22 10:15:01 - INFO - Connected")),
 		logsChan,
-		LogOptions{Follow: true, TTY: true},
+		LogOptions{TTY: true},
 	)
 	require.NoError(t, err)
 
@@ -135,12 +135,12 @@ func TestStreamMultiplexedLogsContextCancelDoesNotDeadlock(t *testing.T) {
 	}
 }
 
-func TestReadAllLogsStreamsBeforeEOF(t *testing.T) {
+func TestStreamMultiplexedLogsStreamsBeforeEOF(t *testing.T) {
 	pr, pw := io.Pipe()
 	logsChan := make(chan string, 4)
 	done := make(chan error, 1)
 	go func() {
-		done <- ReadAllLogs(t.Context(), pr, logsChan)
+		done <- StreamMultiplexedLogs(t.Context(), pr, logsChan)
 	}()
 
 	var frame bytes.Buffer
@@ -152,7 +152,7 @@ func TestReadAllLogsStreamsBeforeEOF(t *testing.T) {
 	case line := <-logsChan:
 		require.Equal(t, "[STDERR] early stderr", line)
 	case <-time.After(time.Second):
-		require.FailNow(t, "ReadAllLogs buffered output until EOF")
+		require.FailNow(t, "StreamMultiplexedLogs buffered output until EOF")
 	}
 
 	require.NoError(t, pw.Close())
@@ -178,42 +178,6 @@ func TestStreamMultiplexedLogsContextCancelClosesReader(t *testing.T) {
 	case <-reader.closeCalled:
 	case <-time.After(time.Second):
 		require.FailNow(t, "StreamMultiplexedLogs did not close the reader on cancellation")
-	}
-}
-
-func TestReadAllLogsContextCancelClosesReader(t *testing.T) {
-	logsChan := make(chan string, 1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	reader := &blockingReadCloser{
-		readStarted: make(chan struct{}),
-		closeCalled: make(chan struct{}),
-	}
-	done := make(chan error, 1)
-	go func() {
-		done <- ReadAllLogs(ctx, reader, logsChan)
-	}()
-
-	select {
-	case <-reader.readStarted:
-	case <-time.After(time.Second):
-		require.FailNow(t, "ReadAllLogs did not start reading")
-	}
-
-	cancel()
-
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(time.Second):
-		require.FailNow(t, "ReadAllLogs did not exit after cancellation")
-	}
-
-	select {
-	case <-reader.closeCalled:
-	case <-time.After(time.Second):
-		require.FailNow(t, "ReadAllLogs did not close the reader on cancellation")
 	}
 }
 

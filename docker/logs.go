@@ -16,11 +16,15 @@ import (
 type (
 	// LogOptions describes the log stream StreamContainerLogs reads.
 	LogOptions struct {
-		// Follow streams logs until the reader ends instead of reading a snapshot.
-		Follow bool
 		// TTY marks a raw TTY stream; otherwise the stream is stdout/stderr multiplexed.
 		TTY bool
 	}
+)
+
+const (
+	// maxLogLineBytes caps one log line so output without newlines cannot grow
+	// unbounded; longer runs are split into maxLogLineBytes chunks.
+	maxLogLineBytes = 1 << 20
 )
 
 // StreamContainerLogs streams Docker container logs, handling TTY raw streams
@@ -29,10 +33,7 @@ func StreamContainerLogs(ctx context.Context, logs io.ReadCloser, logsChan chan<
 	if opts.TTY {
 		return ReadLogLines(ctx, logs, logsChan, "")
 	}
-	if opts.Follow {
-		return StreamMultiplexedLogs(ctx, logs, logsChan)
-	}
-	return ReadAllLogs(ctx, logs, logsChan)
+	return StreamMultiplexedLogs(ctx, logs, logsChan)
 }
 
 // StreamMultiplexedLogs demultiplexes a Docker stdout/stderr log stream and
@@ -103,16 +104,6 @@ func StreamMultiplexedLogs(ctx context.Context, logs io.ReadCloser, logsChan cha
 		}
 	}
 }
-
-// ReadAllLogs reads a non-follow Docker multiplexed log stream and sends
-// non-empty stdout/stderr lines to logsChan as they are demultiplexed, until EOF.
-func ReadAllLogs(ctx context.Context, logs io.ReadCloser, logsChan chan<- string) error {
-	return StreamMultiplexedLogs(ctx, logs, logsChan)
-}
-
-// maxLogLineBytes caps one log line so output without newlines cannot grow
-// unbounded; longer runs are split into maxLogLineBytes chunks.
-const maxLogLineBytes = 1 << 20
 
 // ReadLogLines sends each non-empty line from reader to logsChan, prepending
 // prefix, until EOF or ctx is done. Lines longer than 1 MiB are split.
