@@ -77,6 +77,7 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 
 	// keep: req is a by-value copy; a full 22-field BuildRequest literal reads worse
 	req.Tags = utils.NormalizeSet(req.Tags)
+	req.Platforms = kit.TrimNonEmpty(req.Platforms)
 	req.Push = req.Push || (!req.Load && providerName == "depot")
 	req.Load = req.Load || (!req.Push && providerName != "depot")
 

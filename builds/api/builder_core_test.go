@@ -3,11 +3,18 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	configtypes "github.com/docker/cli/cli/config/types"
 	"github.com/moby/buildkit/session/auth/authprovider"
 	dockerregistry "github.com/moby/moby/api/types/registry"
+	moby "github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -132,4 +139,43 @@ func TestNewServiceRequiresProviders(t *testing.T) {
 
 	_, err = NewService(Config{SettingsProvider: testSettingsProvider{}})
 	require.ErrorAs(t, err, new(*types.BuildDockerServiceUnavailableError))
+}
+
+func TestBuildImage_DropsBlankPlatforms(t *testing.T) {
+	t.Setenv("DOCKER_CONFIG", t.TempDir())
+	contextDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM alpine:3.20\n"), 0o644))
+
+	platformCh := make(chan []string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/build") {
+			_, _ = io.Copy(io.Discard, r.Body)
+			platformCh <- r.URL.Query()["platform"]
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	dockerClient, err := moby.New(
+		moby.WithHost("tcp://"+server.Listener.Addr().String()),
+		moby.WithAPIVersion("1.54"),
+	)
+	require.NoError(t, err)
+	defer func() { _ = dockerClient.Close() }()
+
+	service, err := NewService(Config{
+		SettingsProvider:     testSettingsProvider{},
+		DockerClientProvider: testDockerClientProvider{client: dockerClient},
+	})
+	require.NoError(t, err)
+
+	_, err = service.BuildImage(t.Context(), types.BuildRequest{
+		ContextDir: contextDir,
+		Tags:       []string{"arcane.local/app:test"},
+		Platforms:  []string{" ", "linux/amd64", ""},
+	}, io.Discard, "")
+	require.Error(t, err)
+	var multiPlatformErr *types.DockerBuildMultiPlatformUnsupportedError
+	require.NotErrorAs(t, err, &multiPlatformErr)
+	assert.Len(t, <-platformCh, 1)
 }
