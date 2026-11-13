@@ -86,8 +86,12 @@ func TestParseRejectsRedirectionsAndBadQuoting(t *testing.T) {
 	}
 }
 
-func TestParseBareDashDoesNotPanic(t *testing.T) {
-	if _, err := convert.Parse("docker run - nginx"); err != nil {
-		t.Logf("parse error: %v", err)
+func TestParseBareDashIsIgnored(t *testing.T) {
+	commands, err := convert.Parse("docker run - nginx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := summarizeCommands(commands), [][]string{{"ignored=-", "nginx"}}; !slices.EqualFunc(got, want, slices.Equal) {
+		t.Fatalf("commands = %v, want %v", got, want)
 	}
 }
