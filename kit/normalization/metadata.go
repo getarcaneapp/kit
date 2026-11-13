@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"kit.getarcane.app"
 )
 
 type (
@@ -19,6 +21,7 @@ type (
 		minLength int
 		maxLength int
 		inline    bool
+		omitJSON  bool
 		text      TextOptions
 	}
 
@@ -150,14 +153,15 @@ func compileField(field reflect.StructField, seen map[reflect.Type]*plan) (field
 		}
 	}
 	jsonTag := strings.Split(field.Tag.Get("json"), ",")
-	if !field.IsExported() || jsonTag[0] == "-" {
+	if !field.IsExported() {
 		return fieldPlan{}, false, nil
 	}
 	child, err := compile(field.Type, seen)
 	return fieldPlan{
-		index:  field.Index[0],
-		name:   cmp.Or(jsonTag[0], field.Name),
-		inline: (field.Anonymous && jsonTag[0] == "" && fieldType.Kind() == reflect.Struct) || slices.Contains(jsonTag[1:], "inline"),
+		index:    field.Index[0],
+		name:     kit.Ternary(jsonTag[0] == "-", field.Name, cmp.Or(jsonTag[0], field.Name)),
+		inline:   (field.Anonymous && jsonTag[0] == "" && fieldType.Kind() == reflect.Struct) || slices.Contains(jsonTag[1:], "inline"),
+		omitJSON: jsonTag[0] == "-",
 		text: TextOptions{
 			Trim: hasTrim,
 			NFC:  hasNorm,

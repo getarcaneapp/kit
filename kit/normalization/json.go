@@ -71,6 +71,9 @@ func normalizeJSON(data []byte, p *plan) ([]byte, error) {
 
 func normalizeObject(fields map[string]jsontext.Value, p *plan) error {
 	for _, f := range p.fields {
+		if f.omitJSON {
+			continue
+		}
 		child := f.plan
 		for child.kind == reflect.Pointer {
 			child = child.element

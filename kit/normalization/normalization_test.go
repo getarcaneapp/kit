@@ -347,3 +347,24 @@ func TestNormalizeJSONSortsObjectKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeAppliesTagsToJSONOmittedFields(t *testing.T) {
+	type input struct {
+		Hidden string `json:"-" trim:"true" minLength:"1"`
+		Name   string `json:"name" trim:"true"`
+	}
+	value := input{Hidden: " secret ", Name: " name "}
+	if err := Normalize(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value.Hidden != "secret" || value.Name != "name" {
+		t.Fatalf("got %+v", value)
+	}
+	if err := Normalize(&input{Hidden: "  "}); err == nil || !strings.Contains(err.Error(), "Hidden:") {
+		t.Fatalf("minLength on a json:\"-\" field not checked: %v", err)
+	}
+	got, err := NormalizeJSON([]byte(`{"-":" x ","Hidden":" y ","name":" n "}`), reflect.TypeFor[input]())
+	if err != nil || string(got) != `{"-":" x ","Hidden":" y ","name":"n"}` {
+		t.Fatalf("JSON path touched an omitted field: %s, %v", got, err)
+	}
+}
