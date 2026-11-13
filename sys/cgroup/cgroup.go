@@ -178,8 +178,8 @@ var (
 // the current process. It returns an error when the process is not running
 // under a cgroup with explicit limits.
 func DetectLimits() (*Limits, error) {
-	info, err := host.Info()
-	guest := err == nil && info.VirtualizationSystem != "" && strings.EqualFold(info.VirtualizationRole, "guest")
+	system, role, err := host.Virtualization()
+	guest := err == nil && system != "" && strings.EqualFold(role, "guest")
 
 	paths, err := readProcFile("/proc/self/cgroup", parseProcCgroup)
 	mounts, _ := readProcFile("/proc/self/mountinfo", parseCgroupMounts) // unresolved paths fall back to the hierarchy roots
