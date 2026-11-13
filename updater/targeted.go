@@ -239,7 +239,14 @@ func (s *Service) collectTargetRecord(
 }
 
 // targetRecordPlan validates that record still applies to the container under its current policy.
-func (s *Service) targetRecordPlan(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, record ImageUpdateRecord, excluded map[string]bool, exclusions exclusionPolicy) (*restartPlan, string, error) {
+func (s *Service) targetRecordPlan(
+	ctx context.Context,
+	cnt container.Summary,
+	inspect container.InspectResponse,
+	record ImageUpdateRecord,
+	excluded map[string]bool,
+	exclusions exclusionPolicy,
+) (*restartPlan, string, error) {
 	if reason := s.containerEligibility(inspect, excluded, exclusions); reason != "" {
 		return nil, reason, nil
 	}

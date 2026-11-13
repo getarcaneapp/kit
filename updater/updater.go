@@ -6,14 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"sync/atomic"
-	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"kit.getarcane.app"
 )
-
-// detachedTimeout bounds detached recreate and rollback work when Config.OperationTimeout is zero.
-const detachedTimeout = 10 * time.Minute
 
 type (
 	// Service coordinates Docker image updates, container recreation, and the host adapters configured

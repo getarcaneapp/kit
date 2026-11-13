@@ -218,9 +218,9 @@ func (s *Service) updateComposeOrStandalone(ctx context.Context, target containe
 			if err != nil {
 				return err
 			}
-			dockerClient, err := s.dockerClient(ctx)
-			if err != nil {
-				return err
+			dockerClient, clientErr := s.dockerClient(ctx)
+			if clientErr != nil {
+				return clientErr
 			}
 			// A forced update of an unchanged image can only be checked to be running.
 			pulled, pulledErr := dockerClient.ImageInspect(ctx, newRef)

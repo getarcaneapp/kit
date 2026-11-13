@@ -15,6 +15,10 @@ import (
 	"kit.getarcane.app/updater/labels"
 )
 
+type (
+	notifierFunc func(Notification)
+)
+
 func TestRestartContainersUsingOldImagesRestartsDependenciesInWatchtowerOrder(t *testing.T) {
 	var operations []string
 	createIDs := map[string]string{"db": "new-db-id", "web": "new-web-id"}
@@ -411,8 +415,6 @@ func TestRestartContainersUsingOldImagesVerifiesComposeServiceAfterProjectError(
 		t.Fatalf("project updater calls = %#v, want one call", projectUpdater.updateCalls)
 	}
 }
-
-type notifierFunc func(Notification)
 
 func (f notifierFunc) Notify(_ context.Context, notification Notification) error {
 	f(notification)

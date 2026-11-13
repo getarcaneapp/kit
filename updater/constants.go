@@ -1,5 +1,7 @@
 package updater
 
+import "time"
+
 type (
 	// UpdateType distinguishes the two kinds of image update the updater applies.
 	UpdateType string
@@ -13,6 +15,9 @@ type (
 )
 
 const (
+	// detachedTimeout bounds detached recreate and rollback work when Config.OperationTimeout is zero.
+	detachedTimeout = 10 * time.Minute
+
 	// UpdateTypeDigest identifies an image update where the tag is unchanged but the digest changed.
 	UpdateTypeDigest UpdateType = "digest"
 	// UpdateTypeTag identifies an image update where the target tag changes.
