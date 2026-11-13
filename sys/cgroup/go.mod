@@ -7,7 +7,7 @@ replace kit.getarcane.app => ../../kit
 require (
 	github.com/shirou/gopsutil/v4 v4.26.10
 	github.com/stretchr/testify v1.12.1
-	kit.getarcane.app v0.7.1
+	kit.getarcane.app v0.7.2
 )
 
 require (

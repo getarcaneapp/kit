@@ -1,3 +1,21 @@
+## sys/cgroup/v0.3.3
+
+### Bug fixes
+
+* keep v1 limits read from the controller root([b5d1c04](https://github.com/getarcaneapp/kit/commit/b5d1c04e4877a2e2979d00312db5cecde67b505d) by @kmendell)
+* match v1 controllers exactly with a path per controller([377e98e](https://github.com/getarcaneapp/kit/commit/377e98eac1086c8caa05cba033519e4be5712fba) by @kmendell)
+* resolve the process cgroup through mountinfo([d6733bd](https://github.com/getarcaneapp/kit/commit/d6733bdabca26b6cc0a8159d9e2190451857f6d5) by @kmendell)
+* resolve lint issues in v1 cpu path fallback([bdf0cac](https://github.com/getarcaneapp/kit/commit/bdf0cac07c59a68e2e8cabf86f0959517e8cba52) by @kmendell)
+* bump deps([a7c1bfe](https://github.com/getarcaneapp/kit/commit/a7c1bfea542b3fb145814e95a2ec01de83791002) by @kmendell)
+
+### Performance improvements
+
+* probe only virtualization instead of full host info([77abd04](https://github.com/getarcaneapp/kit/commit/77abd041a35ed83b4a7e57da8f1cbcff382f1151) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.3.2...sys/cgroup/v0.3.3
+
 ## sys/cgroup/v0.3.2
 
 ### Bug fixes
