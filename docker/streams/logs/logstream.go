@@ -200,9 +200,7 @@ func (h *slogHandler) Handle(ctx context.Context, r slog.Record) error {
 			}
 			target := groupMap(attrs, h.group)
 			r.Attrs(func(a slog.Attr) bool {
-				if a.Key != "" {
-					target[a.Key] = normalizeAttrValue(a.Value)
-				}
+				setAttr(target, a)
 				return true
 			})
 			return kit.Ternary(len(attrs) == 0, nil, attrs)
@@ -275,10 +273,21 @@ func groupMap(dst map[string]any, groups []string) map[string]any {
 func addAttrsToMap(dst map[string]any, groups []string, attrs []slog.Attr) {
 	target := groupMap(dst, groups)
 	for _, attr := range attrs {
-		if attr.Key == "" {
-			continue
+		setAttr(target, attr)
+	}
+}
+
+// setAttr stores attr in dst, inlining the attrs of an empty-key group as slog
+// requires and dropping other empty-key attrs.
+func setAttr(dst map[string]any, attr slog.Attr) {
+	if attr.Key != "" {
+		dst[attr.Key] = normalizeAttrValue(attr.Value)
+		return
+	}
+	if value := attr.Value.Resolve(); value.Kind() == slog.KindGroup {
+		for _, member := range value.Group() {
+			setAttr(dst, member)
 		}
-		target[attr.Key] = normalizeAttrValue(attr.Value)
 	}
 }
 
@@ -344,10 +353,7 @@ func normalizeAnyValue(value any) any {
 func normalizeGroupAttrs(attrs []slog.Attr) map[string]any {
 	out := make(map[string]any, len(attrs))
 	for _, attr := range attrs {
-		if attr.Key == "" {
-			continue
-		}
-		out[attr.Key] = normalizeAttrValue(attr.Value)
+		setAttr(out, attr)
 	}
 	return out
 }

@@ -61,6 +61,29 @@ func TestSlogHandlerNoAttrsLeavesAttrsNil(t *testing.T) {
 	}
 }
 
+func TestSlogHandlerInlinesEmptyKeyGroups(t *testing.T) {
+	b := New(Config{Capacity: 10})
+	h := NewSlogHandler(slog.DiscardHandler, b).WithAttrs([]slog.Attr{slog.Group("", "bound", 1)})
+	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelInfo, "inline", 0)
+	record.AddAttrs(
+		slog.Group("", "top", "a"),
+		slog.Group("request", slog.Group("", "method", "GET")),
+	)
+
+	if err := h.Handle(t.Context(), record); err != nil {
+		t.Fatalf("Handle failed: %v", err)
+	}
+
+	want := map[string]any{
+		"bound":   int64(1),
+		"top":     "a",
+		"request": map[string]any{"method": "GET"},
+	}
+	if got := b.Recent()[0].Attrs; !reflect.DeepEqual(got, want) {
+		t.Fatalf("attrs = %#v, want %#v", got, want)
+	}
+}
+
 func TestSlogHandlerNormalizesErrors(t *testing.T) {
 	b := New(Config{Capacity: 10})
 	h := NewSlogHandler(slog.DiscardHandler, b)
