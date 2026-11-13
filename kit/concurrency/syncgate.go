@@ -37,10 +37,11 @@ func (g *SyncGate) Begin(ctx context.Context, scope, key string, body []byte) (u
 	if err != nil {
 		return false, nil, err
 	}
+	digest := sha256.Sum256(body)
 	g.mu.Lock()
 	epoch := g.epochs[scope]
 	entry, ok := g.sent[scope][key]
-	unchanged = ok && entry.digest == sha256.Sum256(body) && (g.Expiry <= 0 || time.Since(entry.sentAt) < g.Expiry)
+	unchanged = ok && entry.digest == digest && (g.Expiry <= 0 || time.Since(entry.sentAt) < g.Expiry)
 	g.mu.Unlock()
 	if unchanged {
 		unlock()
@@ -62,7 +63,7 @@ func (g *SyncGate) Begin(ctx context.Context, scope, key string, body []byte) (u
 		if g.sent[scope] == nil {
 			g.sent[scope] = make(map[string]syncGateEntry)
 		}
-		g.sent[scope][key] = syncGateEntry{digest: sha256.Sum256(body), sentAt: time.Now()}
+		g.sent[scope][key] = syncGateEntry{digest: digest, sentAt: time.Now()}
 	}, nil
 }
 
