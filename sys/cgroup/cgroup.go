@@ -237,7 +237,7 @@ func DetectLimits() (*Limits, error) {
 			return max(int((quota+period-1)/period), 1)
 		}(),
 	}
-	if !guest && (cgroupPath == "" || !isFiniteLimit(limits.MemoryLimit) && limits.CPUCount < 0) {
+	if !guest && !isFiniteLimit(limits.MemoryLimit) && limits.CPUCount < 0 {
 		return nil, errors.New("not running in a cgroup")
 	}
 	return limits, nil
