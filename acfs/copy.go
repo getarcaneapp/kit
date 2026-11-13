@@ -204,7 +204,7 @@ func copyDirectoryContents(ctx context.Context, sourceDir, destinationDir string
 			return err
 		}
 
-		err = writeCopiedFile(destination, filepath.ToSlash(relativePath), content, info.Mode()&chmodModeMask, mirror)
+		err = writeCopiedFile(destination, filepath.ToSlash(relativePath), content, info.Mode().Perm()|info.Mode()&os.ModeSticky, mirror)
 		if mirror && errors.Is(err, os.ErrPermission) {
 			record(relativePath)
 			return nil

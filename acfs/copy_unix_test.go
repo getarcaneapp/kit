@@ -70,3 +70,32 @@ func TestCopyToRefusesNonRegularDestination(t *testing.T) {
 		t.Fatalf("CopyTo onto fifo = %v, want ErrNotFile", err)
 	}
 }
+
+func TestCopyToStripsSetuidAndSetgid(t *testing.T) {
+	t.Parallel()
+
+	source, destination := t.TempDir(), t.TempDir()
+	// Empty, so no write clears the bits when tests run unprivileged.
+	writeFixtureFile(t, filepath.Join(source, "tool"), "", 0o755)
+	if err := os.Chmod(filepath.Join(source, "tool"), 0o755|os.ModeSetuid|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(source, "tool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSetuid == 0 {
+		t.Skip("filesystem does not keep the setuid bit")
+	}
+
+	if _, err := (Root{Path: source}).CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{}); err != nil {
+		t.Fatalf("CopyTo: %v", err)
+	}
+	copied, err := os.Stat(filepath.Join(destination, "tool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied.Mode() != 0o755 {
+		t.Fatalf("copied mode = %v, want -rwxr-xr-x", copied.Mode())
+	}
+}
