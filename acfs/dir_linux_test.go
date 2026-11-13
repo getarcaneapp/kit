@@ -245,10 +245,8 @@ func TestNonRegularFilesAreNeverOpened(t *testing.T) {
 
 	source, destination := t.TempDir(), t.TempDir()
 	writeTestFile(t, filepath.Join(source, "file"), "source")
-	for _, root := range []string{source, destination} {
-		if err := unix.Mkfifo(filepath.Join(root, "fifo"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := unix.Mkfifo(filepath.Join(source, "fifo"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	if err := unix.Mkfifo(filepath.Join(destination, "file"), 0o600); err != nil {
 		t.Fatal(err)
@@ -262,18 +260,6 @@ func TestNonRegularFilesAreNeverOpened(t *testing.T) {
 	requireNotOpened(t, filepath.Join(destination, "file"), func() {
 		if _, err := (Root{Path: source}).CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{}); !errors.Is(err, ErrNotFile) {
 			t.Errorf("CopyTo onto fifo = %v, want ErrNotFile", err)
-		}
-	})
-	mutation, err := openMutationRoot(destination)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = mutation.Close()
-	}()
-	requireNotOpened(t, filepath.Join(destination, "fifo"), func() {
-		if _, err := mutation.top.ReadFile("fifo"); !errors.Is(err, ErrNotFile) {
-			t.Errorf("ReadFile fifo = %v, want ErrNotFile", err)
 		}
 	})
 }

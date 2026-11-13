@@ -203,11 +203,6 @@ func (d *dir) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error
 	return file, nil
 }
 
-func (d *dir) ReadFile(name string) ([]byte, error) {
-	data, err := d.root.ReadFile(name)
-	return data, d.rootError(err)
-}
-
 func (d *dir) Readlink(name string) (string, error) {
 	target, err := d.root.Readlink(name)
 	return target, d.rootError(err)

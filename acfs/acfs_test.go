@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	acfstypes "kit.getarcane.app/acfs/types"
 )
@@ -322,6 +323,32 @@ func TestWriteAtWritesInPlaceAndGrowsSparsely(t *testing.T) {
 	contents, err = os.ReadFile(destination)
 	if err != nil || string(contents) != "short" {
 		t.Fatalf("atomic Write changed symlink target: %q, %v", contents, err)
+	}
+}
+
+func TestWriteInPlaceComparesAcrossChunks(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	destination := filepath.Join(root, "data")
+	content := strings.Repeat("a", 3*compareChunkSize)
+	writeFixtureFile(t, destination, content+"old", 0o640)
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(destination, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (Root{Path: root}).Write(t.Context(), "/data", []byte(content+"old"), WriteOptions{Mode: 0o640, InPlace: true}); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(destination); err != nil || !info.ModTime().Equal(past) {
+		t.Fatalf("identical in-place Write rewrote the file: %v", err)
+	}
+	if err := (Root{Path: root}).Write(t.Context(), "/data", []byte(content+"new"), WriteOptions{Mode: 0o640, InPlace: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(destination); err != nil || string(got) != content+"new" {
+		t.Fatalf("in-place Write left %d bytes ending %q, %v", len(got), got[max(len(got)-3, 0):], err)
 	}
 }
 

@@ -178,12 +178,16 @@ func writeInPlace(ctx context.Context, files *dir, targetPath string, data []byt
 		return ErrIsDirectory
 	case !info.Mode().IsRegular():
 		return ErrNotFile
-	default:
-		existing, readErr := files.ReadFile(targetPath)
-		if readErr != nil {
-			return fmt.Errorf("read %q: %w", files.display(targetPath), readErr)
+	case info.Size() == int64(len(data)):
+		existing, openErr := files.OpenFile(targetPath, os.O_RDONLY, 0)
+		if openErr != nil {
+			return fmt.Errorf("read %q: %w", files.display(targetPath), openErr)
 		}
-		identical = bytes.Equal(existing, data)
+		identical, err = equalContent(existing, bytes.NewReader(data), make([]byte, 2*compareChunkSize))
+		_ = existing.Close()
+		if err != nil {
+			return fmt.Errorf("read %q: %w", files.display(targetPath), err)
+		}
 		if identical && info.Mode()&chmodModeMask == mode {
 			return ctx.Err()
 		}
