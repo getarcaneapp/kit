@@ -121,6 +121,7 @@ func TestWalkReportsExactTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	writeFixtureFile(t, filepath.Join(emptyRoot, "empty", temporaryWritePrefix+"staged"), "x", 0o600)
 	result, err = Root{Path: emptyRoot}.Walk(t.Context(), "/", acfstypes.WalkOptions{MaxDepth: 1}, func(acfstypes.Entry) error {
 		return nil
 	})
@@ -128,7 +129,7 @@ func TestWalkReportsExactTruncation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Truncated {
-		t.Fatal("empty directory at the depth boundary was incorrectly reported as truncated")
+		t.Fatal("directory holding only reserved names at the depth boundary was reported as truncated")
 	}
 }
 

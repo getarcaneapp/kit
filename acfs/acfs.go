@@ -21,12 +21,14 @@ import (
 
 type (
 	walker struct {
-		ctx     context.Context
-		root    Root
-		visit   func(acfstypes.Entry) error
-		level   walkLevel
-		options acfstypes.WalkOptions
-		result  acfstypes.WalkResult
+		ctx  context.Context
+		root Root
+		// workspace probes directories at MaxDepth for children.
+		workspace *os.Root
+		visit     func(acfstypes.Entry) error
+		level     walkLevel
+		options   acfstypes.WalkOptions
+		result    acfstypes.WalkResult
 	}
 
 	walkDirectory struct {
@@ -228,11 +230,19 @@ func (r Root) Walk(ctx context.Context, logicalPath string, options acfstypes.Wa
 		return acfstypes.WalkResult{}, errors.New("walk limits must be non-negative")
 	}
 
+	workspace, err := os.OpenRoot(r.Path)
+	if err != nil {
+		return acfstypes.WalkResult{}, fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() {
+		_ = workspace.Close()
+	}()
 	w := &walker{
-		ctx:     ctx,
-		root:    r,
-		options: options,
-		visit:   visit,
+		ctx:       ctx,
+		root:      r,
+		workspace: workspace,
+		options:   options,
+		visit:     visit,
 	}
 	visitEntry := w.entry
 	directories := []walkDirectory{{path: logicalPath}}
@@ -287,18 +297,28 @@ func (w *walker) entry(entry acfstypes.Entry) error {
 
 	depth := w.level.directory.depth + 1
 	if w.options.MaxDepth > 0 && depth >= w.options.MaxDepth {
-		probe, err := w.root.ListEach(w.ctx, entry.Path, acfstypes.ListOptions{MaxEntries: 1}, func(acfstypes.Entry) error {
-			w.result.Truncated = true
-			return fs.SkipAll
-		})
-		if err != nil && !errors.Is(err, fs.SkipAll) {
-			return err
+		directory, err := w.workspace.Open(entry.Path[1:])
+		if err != nil {
+			return fmt.Errorf("open directory %q: %w", entry.Path, err)
 		}
-		// A truncated probe saw a second child even if the first vanished.
-		if probe.Truncated {
-			w.result.Truncated = true
+		defer func() {
+			_ = directory.Close()
+		}()
+		for {
+			names, readErr := directory.Readdirnames(16)
+			if slices.ContainsFunc(names, func(name string) bool {
+				return !strings.HasPrefix(name, temporaryWritePrefix)
+			}) {
+				w.result.Truncated = true
+				return nil
+			}
+			if errors.Is(readErr, io.EOF) {
+				return nil
+			}
+			if readErr != nil {
+				return fmt.Errorf("read directory %q: %w", entry.Path, readErr)
+			}
 		}
-		return nil
 	}
 	w.level.children = append(w.level.children, walkDirectory{path: entry.Path, depth: depth})
 	return nil
