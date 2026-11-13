@@ -22,8 +22,9 @@ func (h Host) OpenRead(ctx context.Context, hostPath string, maxBytes int64) (io
 	if info.Mode().IsRegular() {
 		size := kit.Ternary(maxBytes > 0, min(maxBytes, info.Size()), info.Size())
 		return &contextReadCloser{
-			contextReader: contextReader{ctx: ctx, reader: io.LimitReader(file, size)},
-			Closer:        file,
+			ctx:    ctx,
+			reader: io.LimitReader(file, size),
+			Closer: file,
 		}, size, nil
 	}
 	reader := io.Reader(file)
@@ -31,8 +32,9 @@ func (h Host) OpenRead(ctx context.Context, hostPath string, maxBytes int64) (io
 		reader = io.LimitReader(file, maxBytes)
 	}
 	return &contextReadCloser{
-		contextReader: contextReader{ctx: ctx, reader: reader},
-		Closer:        file,
+		ctx:    ctx,
+		reader: reader,
+		Closer: file,
 	}, -1, nil
 }
 

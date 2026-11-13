@@ -106,7 +106,15 @@ func visitChildren(ctx context.Context, directory *os.Root, names []string, path
 // to report rootPath.
 func rootPathError(op, rootPath string, err error) error {
 	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
-		return &fs.PathError{Op: op, Path: rootPath, Err: pathErr.Err}
+		return &fs.PathError{
+			Op:   op,
+			Path: rootPath,
+			Err:  pathErr.Err,
+		}
 	}
-	return &fs.PathError{Op: op, Path: rootPath, Err: err}
+	return &fs.PathError{
+		Op:   op,
+		Path: rootPath,
+		Err:  err,
+	}
 }

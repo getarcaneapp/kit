@@ -61,7 +61,11 @@ func openHostDir(hostPath string) (*dir, error) {
 	if afterOpenDir != nil {
 		afterOpenDir(hostPath)
 	}
-	return &dir{root: root, path: ".", host: hostPath}, nil
+	return &dir{
+		root: root,
+		path: ".",
+		host: hostPath,
+	}, nil
 }
 
 func (d *dir) Close() error {
@@ -73,11 +77,20 @@ func (d *dir) Close() error {
 func (d *dir) rootError(err error) error {
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {
-		return &fs.PathError{Op: pathErr.Op, Path: d.errorPath(pathErr.Path), Err: pathErr.Err}
+		return &fs.PathError{
+			Op:   pathErr.Op,
+			Path: d.errorPath(pathErr.Path),
+			Err:  pathErr.Err,
+		}
 	}
 	var linkErr *os.LinkError
 	if errors.As(err, &linkErr) {
-		return &os.LinkError{Op: linkErr.Op, Old: d.errorPath(linkErr.Old), New: d.errorPath(linkErr.New), Err: linkErr.Err}
+		return &os.LinkError{
+			Op:  linkErr.Op,
+			Old: d.errorPath(linkErr.Old),
+			New: d.errorPath(linkErr.New),
+			Err: linkErr.Err,
+		}
 	}
 	return err
 }
@@ -85,7 +98,11 @@ func (d *dir) rootError(err error) error {
 func (d *dir) open(relativePath string, options dirOptions) (*dir, error) {
 	current, err := d.root.OpenRoot(".")
 	if err != nil {
-		return nil, &fs.PathError{Op: "openat", Path: d.errorPath("."), Err: unwrapPathError(err)}
+		return nil, &fs.PathError{
+			Op:   "openat",
+			Path: d.errorPath("."),
+			Err:  unwrapPathError(err),
+		}
 	}
 	if relativePath == "." {
 		return &dir{
@@ -119,21 +136,37 @@ func (d *dir) walkComponent(parent *os.Root, name, walked string, options dirOpt
 	if errors.Is(err, fs.ErrNotExist) && options.Create {
 		err = parent.Mkdir(name, options.Mode)
 		if err != nil && !errors.Is(err, fs.ErrExist) {
-			return nil, &fs.PathError{Op: "mkdirat", Path: errorPath, Err: unwrapPathError(err)}
+			return nil, &fs.PathError{
+				Op:   "mkdirat",
+				Path: errorPath,
+				Err:  unwrapPathError(err),
+			}
 		}
 		info, err = parent.Lstat(name)
 	}
 	switch {
 	case err != nil:
-		return nil, &fs.PathError{Op: "openat", Path: errorPath, Err: unwrapPathError(err)}
+		return nil, &fs.PathError{
+			Op:   "openat",
+			Path: errorPath,
+			Err:  unwrapPathError(err),
+		}
 	case info.Mode()&os.ModeSymlink != 0:
 		return nil, fmt.Errorf("%w: %s", ErrSymlink, d.display(walked))
 	case !info.IsDir():
-		return nil, &fs.PathError{Op: "openat", Path: errorPath, Err: syscall.ENOTDIR}
+		return nil, &fs.PathError{
+			Op:   "openat",
+			Path: errorPath,
+			Err:  syscall.ENOTDIR,
+		}
 	}
 	child, err := parent.OpenRoot(name)
 	if err != nil {
-		return nil, &fs.PathError{Op: "openat", Path: errorPath, Err: unwrapPathError(err)}
+		return nil, &fs.PathError{
+			Op:   "openat",
+			Path: errorPath,
+			Err:  unwrapPathError(err),
+		}
 	}
 	return child, nil
 }

@@ -71,7 +71,11 @@ func openMutationRoot(rootPath string) (*mutationRoot, error) {
 		return unix.Open(rootPath, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("open workspace root: %w", &fs.PathError{Op: "open", Path: rootPath, Err: err})
+		return nil, fmt.Errorf("open workspace root: %w", &fs.PathError{
+			Op:   "open",
+			Path: rootPath,
+			Err:  err,
+		})
 	}
 	return &mutationRoot{
 		top: &dir{
@@ -89,12 +93,21 @@ func openHostDir(hostPath string) (*dir, error) {
 		return unix.Open(hostPath, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	})
 	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: hostPath, Err: err}
+		return nil, &fs.PathError{
+			Op:   "open",
+			Path: hostPath,
+			Err:  err,
+		}
 	}
 	if afterOpenDir != nil {
 		afterOpenDir(hostPath)
 	}
-	return &dir{rootName: hostPath, path: ".", host: hostPath, fd: fd}, nil
+	return &dir{
+		rootName: hostPath,
+		path:     ".",
+		host:     hostPath,
+		fd:       fd,
+	}, nil
 }
 
 // statWithoutLinks stats rootPath/relativePath in one openat2 that refuses
@@ -182,7 +195,13 @@ func (d *dir) Close() error {
 // any failure, including EAGAIN after a concurrent rename.
 func (d *dir) open(relativePath string, options dirOptions) (*dir, error) {
 	if relativePath == "." {
-		return &dir{rootName: d.rootName, path: d.path, host: d.host, fd: d.fd, borrowed: true}, nil
+		return &dir{
+			rootName: d.rootName,
+			path:     d.path,
+			host:     d.host,
+			fd:       d.fd,
+			borrowed: true,
+		}, nil
 	}
 	if !forceOpenatWalk && openat2Available() {
 		fd, err := ignoringEINTR(func() (int, error) {
@@ -237,7 +256,11 @@ func (d *dir) walkComponent(parent int, name, walked string, options dirOptions)
 	if errors.Is(err, unix.ENOENT) && options.Create {
 		err = unix.Mkdirat(parent, name, syscallMode(options.Mode))
 		if err != nil && !errors.Is(err, unix.EEXIST) {
-			return -1, &fs.PathError{Op: "mkdirat", Path: d.errorPath(walked), Err: err}
+			return -1, &fs.PathError{
+				Op:   "mkdirat",
+				Path: d.errorPath(walked),
+				Err:  err,
+			}
 		}
 		fd, err = open()
 	}
@@ -247,10 +270,18 @@ func (d *dir) walkComponent(parent int, name, walked string, options dirOptions)
 		if unix.Fstatat(parent, name, &stat, unix.AT_SYMLINK_NOFOLLOW) == nil && stat.Mode&unix.S_IFMT == unix.S_IFLNK {
 			return -1, fmt.Errorf("%w: %s", ErrSymlink, d.display(walked))
 		}
-		return -1, &fs.PathError{Op: "openat", Path: d.errorPath(walked), Err: syscall.ENOTDIR}
+		return -1, &fs.PathError{
+			Op:   "openat",
+			Path: d.errorPath(walked),
+			Err:  syscall.ENOTDIR,
+		}
 	}
 	if err != nil {
-		return -1, &fs.PathError{Op: "openat", Path: d.errorPath(walked), Err: err}
+		return -1, &fs.PathError{
+			Op:   "openat",
+			Path: d.errorPath(walked),
+			Err:  err,
+		}
 	}
 	return fd, nil
 }
@@ -258,10 +289,18 @@ func (d *dir) walkComponent(parent int, name, walked string, options dirOptions)
 func (d *dir) sameAs(other *dir) (bool, error) {
 	var current, live unix.Stat_t
 	if err := unix.Fstat(d.fd, &current); err != nil {
-		return false, &fs.PathError{Op: "fstat", Path: d.errorPath("."), Err: err}
+		return false, &fs.PathError{
+			Op:   "fstat",
+			Path: d.errorPath("."),
+			Err:  err,
+		}
 	}
 	if err := unix.Fstat(other.fd, &live); err != nil {
-		return false, &fs.PathError{Op: "fstat", Path: other.errorPath("."), Err: err}
+		return false, &fs.PathError{
+			Op:   "fstat",
+			Path: other.errorPath("."),
+			Err:  err,
+		}
 	}
 	return current.Dev == live.Dev && current.Ino == live.Ino, nil
 }
@@ -271,11 +310,19 @@ func (d *dir) isFile(name string, f *os.File) (bool, error) {
 	var entry, opened unix.Stat_t
 	err := unix.Fstatat(d.fd, name, &entry, unix.AT_SYMLINK_NOFOLLOW)
 	if err != nil {
-		return false, &fs.PathError{Op: "statat", Path: d.errorPath(name), Err: err}
+		return false, &fs.PathError{
+			Op:   "statat",
+			Path: d.errorPath(name),
+			Err:  err,
+		}
 	}
 	err = unix.Fstat(int(f.Fd()), &opened)
 	if err != nil {
-		return false, &fs.PathError{Op: "fstat", Path: f.Name(), Err: err}
+		return false, &fs.PathError{
+			Op:   "fstat",
+			Path: f.Name(),
+			Err:  err,
+		}
 	}
 	return entry.Dev == opened.Dev && entry.Ino == opened.Ino, nil
 }
@@ -286,7 +333,11 @@ func (d *dir) Lstat(name string) (os.FileInfo, error) {
 		return unix.Openat(d.fd, name, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	})
 	if err != nil {
-		return nil, &fs.PathError{Op: "statat", Path: d.errorPath(name), Err: err}
+		return nil, &fs.PathError{
+			Op:   "statat",
+			Path: d.errorPath(name),
+			Err:  err,
+		}
 	}
 	file := os.NewFile(uintptr(fd), name)
 	defer func() {
@@ -307,12 +358,20 @@ func (d *dir) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error
 	case errors.Is(err, unix.ENXIO):
 		return nil, fmt.Errorf("%w: %s", ErrNotFile, d.display(name))
 	case err != nil:
-		return nil, &fs.PathError{Op: "openat", Path: d.errorPath(name), Err: err}
+		return nil, &fs.PathError{
+			Op:   "openat",
+			Path: d.errorPath(name),
+			Err:  err,
+		}
 	}
 	if flag&unix.O_EXCL == 0 {
 		if err = unix.SetNonblock(fd, false); err != nil {
 			_ = unix.Close(fd)
-			return nil, &fs.PathError{Op: "fcntl", Path: d.errorPath(name), Err: err}
+			return nil, &fs.PathError{
+				Op:   "fcntl",
+				Path: d.errorPath(name),
+				Err:  err,
+			}
 		}
 	}
 	if d.host != "" {
@@ -326,7 +385,11 @@ func (d *dir) Readlink(name string) (string, error) {
 		buffer := make([]byte, size)
 		n, err := unix.Readlinkat(d.fd, name, buffer)
 		if err != nil {
-			return "", &fs.PathError{Op: "readlinkat", Path: d.errorPath(name), Err: err}
+			return "", &fs.PathError{
+				Op:   "readlinkat",
+				Path: d.errorPath(name),
+				Err:  err,
+			}
 		}
 		if n < size {
 			return string(buffer[:n]), nil
@@ -337,7 +400,11 @@ func (d *dir) Readlink(name string) (string, error) {
 func (d *dir) Mkdir(name string, mode os.FileMode) error {
 	err := unix.Mkdirat(d.fd, name, syscallMode(mode))
 	if err != nil {
-		return &fs.PathError{Op: "mkdirat", Path: d.errorPath(name), Err: err}
+		return &fs.PathError{
+			Op:   "mkdirat",
+			Path: d.errorPath(name),
+			Err:  err,
+		}
 	}
 	return nil
 }
@@ -345,7 +412,12 @@ func (d *dir) Mkdir(name string, mode os.FileMode) error {
 func (d *dir) Symlink(target, name string) error {
 	err := unix.Symlinkat(target, d.fd, name)
 	if err != nil {
-		return &os.LinkError{Op: "symlinkat", Old: target, New: d.errorPath(name), Err: err}
+		return &os.LinkError{
+			Op:  "symlinkat",
+			Old: target,
+			New: d.errorPath(name),
+			Err: err,
+		}
 	}
 	return nil
 }
@@ -353,7 +425,12 @@ func (d *dir) Symlink(target, name string) error {
 func (d *dir) Link(oldname, newname string) error {
 	err := unix.Linkat(d.fd, oldname, d.fd, newname, 0)
 	if err != nil {
-		return &os.LinkError{Op: "linkat", Old: d.errorPath(oldname), New: d.errorPath(newname), Err: err}
+		return &os.LinkError{
+			Op:  "linkat",
+			Old: d.errorPath(oldname),
+			New: d.errorPath(newname),
+			Err: err,
+		}
 	}
 	return nil
 }
@@ -372,14 +449,22 @@ func (d *dir) Remove(name string) error {
 	if !errors.Is(directoryErr, unix.ENOTDIR) {
 		err = directoryErr
 	}
-	return &fs.PathError{Op: "removeat", Path: d.errorPath(name), Err: err}
+	return &fs.PathError{
+		Op:   "removeat",
+		Path: d.errorPath(name),
+		Err:  err,
+	}
 }
 
 // RemoveAll removes name and its children like os.RemoveAll without following links.
 func (d *dir) RemoveAll(name string) error {
 	err := removeAllAt(d.fd, name, d.errorPath(name))
 	if err != nil {
-		return &fs.PathError{Op: "RemoveAll", Path: d.errorPath(name), Err: unwrapPathError(err)}
+		return &fs.PathError{
+			Op:   "RemoveAll",
+			Path: d.errorPath(name),
+			Err:  unwrapPathError(err),
+		}
 	}
 	return nil
 }
@@ -392,7 +477,11 @@ func removeAllAt(parent int, name, display string) error {
 	}
 	// EPERM or EACCES may still be a directory whose contents can be removed.
 	if !errors.Is(unlinkErr, unix.EISDIR) && !errors.Is(unlinkErr, unix.EPERM) && !errors.Is(unlinkErr, unix.EACCES) {
-		return &fs.PathError{Op: "unlinkat", Path: display, Err: unlinkErr}
+		return &fs.PathError{
+			Op:   "unlinkat",
+			Path: display,
+			Err:  unlinkErr,
+		}
 	}
 
 	var childErr error
@@ -404,10 +493,18 @@ func removeAllAt(parent int, name, display string) error {
 			return nil
 		}
 		if errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ELOOP) {
-			return &fs.PathError{Op: "unlinkat", Path: display, Err: unlinkErr}
+			return &fs.PathError{
+				Op:   "unlinkat",
+				Path: display,
+				Err:  unlinkErr,
+			}
 		}
 		if err != nil {
-			childErr = &fs.PathError{Op: "openat", Path: display, Err: err}
+			childErr = &fs.PathError{
+				Op:   "openat",
+				Path: display,
+				Err:  err,
+			}
 			break
 		}
 
@@ -420,7 +517,11 @@ func removeAllAt(parent int, name, display string) error {
 				if errors.Is(readErr, fs.ErrNotExist) {
 					return nil
 				}
-				return &fs.PathError{Op: "readdirnames", Path: display, Err: readErr}
+				return &fs.PathError{
+					Op:   "readdirnames",
+					Path: display,
+					Err:  readErr,
+				}
 			}
 			read = len(names)
 			failed := 0
@@ -448,7 +549,11 @@ func removeAllAt(parent int, name, display string) error {
 	if childErr != nil {
 		return childErr
 	}
-	return &fs.PathError{Op: "unlinkat", Path: display, Err: err}
+	return &fs.PathError{
+		Op:   "unlinkat",
+		Path: display,
+		Err:  err,
+	}
 }
 
 // renameTo renames oldname in d to newname in target like os.Rename.
@@ -469,7 +574,12 @@ func (d *dir) renameTo(oldname string, target *dir, newname string) error {
 		err = unix.Renameat(d.fd, oldname, target.fd, newname)
 	}
 	if err != nil {
-		return &os.LinkError{Op: "renameat", Old: d.errorPath(oldname), New: target.errorPath(newname), Err: err}
+		return &os.LinkError{
+			Op:  "renameat",
+			Old: d.errorPath(oldname),
+			New: target.errorPath(newname),
+			Err: err,
+		}
 	}
 	return nil
 }
@@ -499,7 +609,12 @@ func (d *dir) renameNoReplace(oldname string, target *dir, newname string) error
 		}
 	}
 	if err != nil {
-		return &os.LinkError{Op: "renameat", Old: d.errorPath(oldname), New: target.errorPath(newname), Err: err}
+		return &os.LinkError{
+			Op:  "renameat",
+			Old: d.errorPath(oldname),
+			New: target.errorPath(newname),
+			Err: err,
+		}
 	}
 	return nil
 }
@@ -536,10 +651,10 @@ func (d *dir) Lchown(name string, uid, gid int) error {
 // Chtimes uses utimensat with AT_EMPTY_PATH (Linux 5.8+), falling back to the
 // /proc/self/fd magic link on EINVAL. A zero time is left unchanged.
 func (d *dir) Chtimes(name string, atime, mtime time.Time) error {
-	times := make([]unix.Timespec, 0, 2)
-	for _, t := range []time.Time{atime, mtime} {
-		times = append(times, kit.Ternary(t.IsZero(), unix.Timespec{Sec: unix.UTIME_OMIT, Nsec: unix.UTIME_OMIT}, unix.NsecToTimespec(t.UnixNano())))
+	ts := func(t time.Time) unix.Timespec {
+		return kit.Ternary(t.IsZero(), unix.Timespec{Sec: unix.UTIME_OMIT, Nsec: unix.UTIME_OMIT}, unix.NsecToTimespec(t.UnixNano()))
 	}
+	times := []unix.Timespec{ts(atime), ts(mtime)}
 	return d.changeTarget("chtimesat", name, false, func(fd int) error {
 		err := unix.UtimesNanoAt(fd, "", times, unix.AT_EMPTY_PATH)
 		if errors.Is(err, unix.EINVAL) {
@@ -554,7 +669,11 @@ func (d *dir) changeTarget(op, name string, allowSymlink bool, change func(fd in
 		return unix.Openat(d.fd, name, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	})
 	if err != nil {
-		return &fs.PathError{Op: op, Path: d.errorPath(name), Err: err}
+		return &fs.PathError{
+			Op:   op,
+			Path: d.errorPath(name),
+			Err:  err,
+		}
 	}
 	defer func() {
 		_ = unix.Close(fd)
@@ -563,14 +682,22 @@ func (d *dir) changeTarget(op, name string, allowSymlink bool, change func(fd in
 	var stat unix.Stat_t
 	err = unix.Fstat(fd, &stat)
 	if err != nil {
-		return &fs.PathError{Op: op, Path: d.errorPath(name), Err: err}
+		return &fs.PathError{
+			Op:   op,
+			Path: d.errorPath(name),
+			Err:  err,
+		}
 	}
 	if stat.Mode&unix.S_IFMT == unix.S_IFLNK && !allowSymlink {
 		return fmt.Errorf("%w: %s", ErrSymlink, d.display(name))
 	}
 	err = change(fd)
 	if err != nil {
-		return &fs.PathError{Op: op, Path: d.errorPath(name), Err: err}
+		return &fs.PathError{
+			Op:   op,
+			Path: d.errorPath(name),
+			Err:  err,
+		}
 	}
 	return nil
 }

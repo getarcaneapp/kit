@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"kit.getarcane.app"
 	kitfs "kit.getarcane.app/fs"
 )
 
@@ -97,7 +98,11 @@ func (r Root) WriteFrom(ctx context.Context, logicalPath string, source io.Reade
 	}()
 
 	parent, base, err := mutation.openResolvedParent(relativePath, func(target string) error {
-		return fmt.Errorf("create temporary file: %w", &fs.PathError{Op: "openat", Path: path.Join(path.Dir(target), temporaryWriteName()), Err: syscall.ENOTDIR})
+		return fmt.Errorf("create temporary file: %w", &fs.PathError{
+			Op:   "openat",
+			Path: path.Join(path.Dir(target), temporaryWriteName()),
+			Err:  syscall.ENOTDIR,
+		})
 	})
 	if err != nil {
 		return 0, err
@@ -137,9 +142,17 @@ func (r Root) Write(ctx context.Context, logicalPath string, data []byte, option
 	}()
 	parent, base, err := mutation.openResolvedParent(relativePath, func(target string) error {
 		if options.InPlace {
-			return fmt.Errorf("inspect %q: %w", kitfs.LogicalPath(target), &fs.PathError{Op: "statat", Path: target, Err: syscall.ENOTDIR})
+			return fmt.Errorf("inspect %q: %w", kitfs.LogicalPath(target), &fs.PathError{
+				Op:   "statat",
+				Path: target,
+				Err:  syscall.ENOTDIR,
+			})
 		}
-		return fmt.Errorf("create temporary file: %w", &fs.PathError{Op: "openat", Path: path.Join(path.Dir(target), temporaryWriteName()), Err: syscall.ENOTDIR})
+		return fmt.Errorf("create temporary file: %w", &fs.PathError{
+			Op:   "openat",
+			Path: path.Join(path.Dir(target), temporaryWriteName()),
+			Err:  syscall.ENOTDIR,
+		})
 	})
 	if err != nil {
 		return err
@@ -165,11 +178,8 @@ func (r Root) Write(ctx context.Context, logicalPath string, data []byte, option
 // writeInPlace rewrites targetPath in files, keeping its inode.
 func writeInPlace(ctx context.Context, files *dir, targetPath string, data []byte, mode os.FileMode) (retErr error) {
 	info, err := files.Lstat(targetPath)
-	flags := os.O_WRONLY
-	identical := false
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		flags |= os.O_CREATE | os.O_EXCL
 	case err != nil:
 		return fmt.Errorf("inspect %q: %w", files.display(targetPath), err)
 	case info.Mode()&os.ModeSymlink != 0:
@@ -178,22 +188,28 @@ func writeInPlace(ctx context.Context, files *dir, targetPath string, data []byt
 		return ErrIsDirectory
 	case !info.Mode().IsRegular():
 		return ErrNotFile
-	case info.Size() == int64(len(data)):
+	}
+	identical, err := func() (bool, error) {
+		if info == nil || info.Size() != int64(len(data)) {
+			return false, nil
+		}
 		existing, openErr := files.OpenFile(targetPath, os.O_RDONLY, 0)
 		if openErr != nil {
-			return fmt.Errorf("read %q: %w", files.display(targetPath), openErr)
+			return false, openErr
 		}
-		identical, err = equalContent(existing, bytes.NewReader(data), make([]byte, 2*compareChunkSize))
-		_ = existing.Close()
-		if err != nil {
-			return fmt.Errorf("read %q: %w", files.display(targetPath), err)
-		}
-		if identical && info.Mode()&chmodModeMask == mode {
-			return ctx.Err()
-		}
+		defer func() {
+			_ = existing.Close()
+		}()
+		return equalContent(existing, bytes.NewReader(data), make([]byte, 2*compareChunkSize))
+	}()
+	if err != nil {
+		return fmt.Errorf("read %q: %w", files.display(targetPath), err)
+	}
+	if identical && info.Mode()&chmodModeMask == mode {
+		return ctx.Err()
 	}
 
-	file, err := files.OpenFile(targetPath, flags, mode)
+	file, err := files.OpenFile(targetPath, os.O_WRONLY|kit.Ternary(info == nil, os.O_CREATE|os.O_EXCL, 0), mode)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", files.display(targetPath), err)
 	}

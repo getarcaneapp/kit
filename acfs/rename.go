@@ -52,7 +52,12 @@ func (r Root) Rename(ctx context.Context, sourceLogical, targetLogical string) e
 	openEndpointParent := func(relativePath string) (*dir, error) {
 		parent, openErr := mutation.top.openDir(relativePath, dirOptions{})
 		if errors.Is(openErr, syscall.ENOTDIR) {
-			openErr = &os.LinkError{Op: "renameat", Old: sourcePath, New: targetPath, Err: syscall.ENOTDIR}
+			openErr = &os.LinkError{
+				Op:  "renameat",
+				Old: sourcePath,
+				New: targetPath,
+				Err: syscall.ENOTDIR,
+			}
 			return nil, renameError(openErr, sourceLogical, targetLogical)
 		}
 		return parent, openErr

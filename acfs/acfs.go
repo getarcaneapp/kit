@@ -371,7 +371,11 @@ func (r Root) MkdirAll(ctx context.Context, logicalPath string, mode os.FileMode
 		created, createErr := mutation.top.openDir(target, dirOptions{Create: true, Mode: mode})
 		var pathErr *fs.PathError
 		if errors.As(createErr, &pathErr) && pathErr.Path == target && errors.Is(pathErr.Err, syscall.ENOTDIR) {
-			createErr = &fs.PathError{Op: "mkdirat", Path: target, Err: syscall.EEXIST}
+			createErr = &fs.PathError{
+				Op:   "mkdirat",
+				Path: target,
+				Err:  syscall.EEXIST,
+			}
 		}
 		if createErr != nil {
 			return fmt.Errorf("create directory %q: %w", logicalPath, createErr)
@@ -413,7 +417,11 @@ func (r Root) Mkdir(ctx context.Context, logicalPath string, mode os.FileMode) e
 	}()
 
 	parent, base, err := mutation.openResolvedParent(relativePath, func(target string) error {
-		return fmt.Errorf("create directory %q: %w", logicalPath, &fs.PathError{Op: "mkdirat", Path: target, Err: syscall.ENOTDIR})
+		return fmt.Errorf("create directory %q: %w", logicalPath, &fs.PathError{
+			Op:   "mkdirat",
+			Path: target,
+			Err:  syscall.ENOTDIR,
+		})
 	})
 	if err != nil {
 		return err
@@ -459,7 +467,11 @@ func (r Root) Remove(ctx context.Context, logicalPath string) error {
 	}()
 
 	parent, base, err := mutation.openResolvedParent(relativePath, func(target string) error {
-		return removeError(&fs.PathError{Op: "removeat", Path: target, Err: syscall.ENOTDIR}, logicalPath)
+		return removeError(&fs.PathError{
+			Op:   "removeat",
+			Path: target,
+			Err:  syscall.ENOTDIR,
+		}, logicalPath)
 	})
 	if err != nil {
 		return err
@@ -510,7 +522,11 @@ func (r Root) RemoveAll(ctx context.Context, logicalPath string) error {
 	}()
 
 	parent, base, err := mutation.openResolvedParent(relativePath, func(target string) error {
-		return fmt.Errorf("remove %q: %w", logicalPath, &fs.PathError{Op: "RemoveAll", Path: target, Err: syscall.ENOTDIR})
+		return fmt.Errorf("remove %q: %w", logicalPath, &fs.PathError{
+			Op:   "RemoveAll",
+			Path: target,
+			Err:  syscall.ENOTDIR,
+		})
 	})
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

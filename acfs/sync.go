@@ -38,7 +38,11 @@ func (r Root) Sync(ctx context.Context, logicalPath string) error {
 		return syncIn(mutation.top, ".", logicalPath)
 	}
 	parent, base, err := mutation.openResolvedParent(relativePath, func(target string) error {
-		return fmt.Errorf("sync %q: %w", logicalPath, &fs.PathError{Op: "openat", Path: path.Dir(target), Err: syscall.ENOTDIR})
+		return fmt.Errorf("sync %q: %w", logicalPath, &fs.PathError{
+			Op:   "openat",
+			Path: path.Dir(target),
+			Err:  syscall.ENOTDIR,
+		})
 	})
 	if err != nil {
 		return err
