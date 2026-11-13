@@ -137,6 +137,9 @@ func (p defaultImagePuller) PullImage(ctx context.Context, imageRef string, prog
 		if err != nil {
 			return err
 		}
+		if msg.Error != nil {
+			return fmt.Errorf("pull %s: %w", imageRef, msg.Error)
+		}
 		if progress == nil {
 			continue
 		}

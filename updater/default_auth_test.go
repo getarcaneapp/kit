@@ -46,6 +46,26 @@ func TestDefaultImagePullerIgnoresRepositoryEnvAuth(t *testing.T) {
 	}
 }
 
+func TestDefaultImagePullerReturnsDaemonReportedError(t *testing.T) {
+	t.Setenv("DOCKER_CONFIG", t.TempDir())
+	dockerClient := newDockerClientForHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		if dockerAPIPath(r.URL.Path) != "/images/create" {
+			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		writeDockerJSON(t, w, jsonstream.Message{Status: "Pulling from team/app"})
+		writeDockerJSON(t, w, jsonstream.Message{
+			Error: &jsonstream.Error{Code: http.StatusTooManyRequests, Message: "toomanyrequests: rate limit exceeded"},
+		})
+	})
+
+	puller := defaultImagePuller{dockerClientProvider: &fakeDockerClientProvider{client: dockerClient}}
+	err := puller.PullImage(t.Context(), "registry.example.com/team/app:1.2.3", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "toomanyrequests") {
+		t.Fatalf("PullImage() error = %v, want daemon-reported toomanyrequests error", err)
+	}
+}
+
 func TestDefaultImagePullerUsesDockerConfigRegistryAuth(t *testing.T) {
 	t.Setenv("REPO_USER", "")
 	t.Setenv("REPO_PASS", "")
