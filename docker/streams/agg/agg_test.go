@@ -60,6 +60,28 @@ func TestRunAllowsNoHeartbeat(t *testing.T) {
 	}
 }
 
+func TestRunEncodesInvalidUTF8(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	var out bytes.Buffer
+	err := Run(ctx, Config[string]{
+		Writer: &out,
+		Flush:  cancel,
+		Producers: []Producer[string]{
+			func(ctx context.Context, events chan<- string) {
+				Send(ctx, events, "bad \xff")
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if got := out.String(); got != "\"bad \ufffd\"\n" {
+		t.Fatalf("encoded output = %q, want replacement character", got)
+	}
+}
+
 func TestReconcilePollersWaitsForReplacementToExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

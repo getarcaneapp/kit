@@ -3,6 +3,7 @@ package agg
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"fmt"
 	"io"
@@ -114,7 +115,7 @@ func Run[T any](ctx context.Context, cfg Config[T]) error {
 		case <-streamCtx.Done():
 			return nil
 		case event := <-events:
-			if err := json.MarshalWrite(cfg.Writer, event); err != nil {
+			if err := json.MarshalWrite(cfg.Writer, event, jsontext.AllowInvalidUTF8(true)); err != nil {
 				return fmt.Errorf("encode stream event: %w", err)
 			}
 			if _, err := io.WriteString(cfg.Writer, "\n"); err != nil {
@@ -122,7 +123,7 @@ func Run[T any](ctx context.Context, cfg Config[T]) error {
 			}
 			cfg.Flush()
 		case <-heartbeat:
-			if err := json.MarshalWrite(cfg.Writer, cfg.MakeHeartbeat()); err != nil {
+			if err := json.MarshalWrite(cfg.Writer, cfg.MakeHeartbeat(), jsontext.AllowInvalidUTF8(true)); err != nil {
 				return fmt.Errorf("encode stream heartbeat: %w", err)
 			}
 			if _, err := io.WriteString(cfg.Writer, "\n"); err != nil {

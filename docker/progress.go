@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"io"
 	"strings"
@@ -70,7 +71,7 @@ func (w *logLineWriter) Close() error {
 
 func (w *logLineWriter) emitLine(line string) {
 	line = strings.TrimSuffix(line, "\r")
-	frame, err := json.Marshal(map[string]string{"log": line})
+	frame, err := json.Marshal(map[string]string{"log": line}, jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return
 	}

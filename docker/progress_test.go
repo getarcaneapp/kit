@@ -91,3 +91,12 @@ func TestLogLineWriter(t *testing.T) {
 	require.Equal(t, want, out.String(),
 		"expected framed lines %q, got %q", want, out.String())
 }
+
+func TestLogLineWriterInvalidUTF8(t *testing.T) {
+	var out strings.Builder
+	w := NewLogLineWriter(&out)
+
+	_, _ = w.Write([]byte("bad \xff byte\n"))
+
+	require.Equal(t, "{\"log\":\"bad \ufffd byte\"}\n", out.String())
+}
