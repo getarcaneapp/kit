@@ -19,9 +19,9 @@ func TestPrepareBuildContext_SkipsFIFO(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "app.txt"), []byte("hello\n"), 0o644))
 
 	type staged struct {
-		dir     string
-		cleanup func()
 		err     error
+		cleanup func()
+		dir     string
 	}
 	done := make(chan staged, 1)
 	go func() {
@@ -39,9 +39,9 @@ func TestPrepareBuildContext_SkipsFIFO(t *testing.T) {
 		require.NoError(t, got.err)
 		defer got.cleanup()
 		_, err := os.Lstat(filepath.Join(got.dir, "pipe"))
-		assert.ErrorIs(t, err, os.ErrNotExist)
+		require.ErrorIs(t, err, os.ErrNotExist)
 		_, err = os.Stat(filepath.Join(got.dir, "app.txt"))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("staging blocked on a FIFO in the build context")
 	}

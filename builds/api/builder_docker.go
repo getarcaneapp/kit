@@ -323,7 +323,8 @@ func stageDockerfile(input buildFilesystemInput, dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to stat Dockerfile: %w", err)
 	}
-	if err := copyFileWithMode(input.fullDockerfilePath, filepath.Join(dir, stagedDockerfile), dockerfileInfo.Mode()); err != nil {
+	err = copyFileWithMode(input.fullDockerfilePath, filepath.Join(dir, stagedDockerfile), dockerfileInfo.Mode())
+	if err != nil {
 		return "", fmt.Errorf("failed to stage Dockerfile: %w", err)
 	}
 	return stagedDockerfile, nil

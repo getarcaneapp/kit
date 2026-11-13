@@ -29,6 +29,13 @@ import (
 	"kit.getarcane.app/builds/types"
 )
 
+type (
+	countingRegistryAuthProvider struct {
+		authConfigs map[string]dockerregistry.AuthConfig
+		calls       atomic.Int32
+	}
+)
+
 func TestPrepareDockerBuildInput_RejectsMultiPlatform(t *testing.T) {
 	contextDir := createBuildContextWithDockerfile(t)
 	req := types.BuildRequest{
@@ -474,11 +481,6 @@ func TestBuildDockerImageOptions_NormalizesPlatformArchitecture(t *testing.T) {
 	require.Len(t, buildOpts.Platforms, 1)
 	assert.Equal(t, "linux", buildOpts.Platforms[0].OS)
 	assert.Equal(t, "amd64", buildOpts.Platforms[0].Architecture)
-}
-
-type countingRegistryAuthProvider struct {
-	authConfigs map[string]dockerregistry.AuthConfig
-	calls       atomic.Int32
 }
 
 func (c *countingRegistryAuthProvider) GetAllRegistryAuthConfigs(_ context.Context) (map[string]dockerregistry.AuthConfig, error) {

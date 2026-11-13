@@ -11,9 +11,9 @@ import (
 
 func TestParseGitBuildContextSourceRef(t *testing.T) {
 	tests := []struct {
+		want       *GitBuildContextSource
 		name       string
 		raw        string
-		want       *GitBuildContextSource
 		wantOptErr bool
 	}{
 		{
