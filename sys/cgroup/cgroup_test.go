@@ -62,3 +62,71 @@ c_min 4  1073741824
 `
 	require.Equal(t, uint64(0), parseARCStats(strings.NewReader(atFloor)))
 }
+
+func TestParseProcCgroup(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    procCgroup
+		wantErr bool
+	}{
+		{
+			name: "systemd ordering puts cpuset before cpu",
+			input: `12:pids:/user.slice/user-1000.slice
+11:cpuset:/
+7:cpu,cpuacct:/user.slice
+5:memory:/user.slice/user-1000.slice/session-1.scope
+1:name=systemd:/user.slice/user-1000.slice/session-1.scope
+`,
+			want: procCgroup{
+				Memory: "/user.slice/user-1000.slice/session-1.scope",
+				CPU:    "/user.slice",
+			},
+		},
+		{
+			name: "separate cpu and cpuacct hierarchies",
+			input: `4:cpuacct:/acct
+3:cpu:/quota
+2:memory:/docker/abc
+`,
+			want: procCgroup{
+				Memory: "/docker/abc",
+				CPU:    "/quota",
+			},
+		},
+		{
+			name:  "cpuacct only",
+			input: "3:cpuacct:/acct\n",
+			want:  procCgroup{CPU: "/acct"},
+		},
+		{
+			name:  "controller root",
+			input: "5:memory:/\n4:cpu,cpuacct:/\n",
+			want: procCgroup{
+				Memory: "/",
+				CPU:    "/",
+			},
+		},
+		{
+			name:    "cgroup v2 only",
+			input:   "0::/system.slice/docker-abc.scope\n",
+			wantErr: true,
+		},
+		{
+			name:    "no cpu or memory controller",
+			input:   "11:cpuset:/\n10:memoryx:/x\n",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseProcCgroup(strings.NewReader(tt.input))
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
