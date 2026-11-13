@@ -174,6 +174,50 @@ func TestRootOpenFileRaceLeavesSibling(t *testing.T) {
 	}
 }
 
+func TestCopyToRaceDoesNotListOutsideRoot(t *testing.T) {
+	source, destination, host := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(source, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(host, "host-dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(filepath.Join(host, "host.sock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	swapped := false
+	afterOpenDir = func(opened string) {
+		if swapped || opened != "data" {
+			return
+		}
+		swapped = true
+		current := filepath.Join(source, "data")
+		if err := os.Rename(current, current+".orig"); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := os.Symlink(host, current); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() {
+		afterOpenDir = nil
+	})
+
+	result, _ := Root{Path: source}.CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{TolerateUnreadable: true})
+	if !swapped {
+		t.Fatal("directory was never swapped")
+	}
+	if _, err := os.Lstat(filepath.Join(destination, "data", "host-dir")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("host directory recreated in destination: %v", err)
+	}
+	for _, skipped := range result.Skipped {
+		if strings.Contains(skipped, "host") {
+			t.Fatalf("host entry listed in Skipped = %v", result.Skipped)
+		}
+	}
+}
+
 func TestRootAttributeRaceLeavesSibling(t *testing.T) {
 	stamp := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
 	tests := []struct {

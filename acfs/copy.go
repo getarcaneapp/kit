@@ -17,6 +17,15 @@ import (
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
+type directoryCopy struct {
+	ctx         context.Context
+	destination *mutationRoot
+	record      func(relativePath string)
+	tolerate    bool
+	mirror      bool
+	copied      int
+}
+
 const (
 	copyDirectoryMode = 0o755
 )
@@ -145,77 +154,114 @@ func copyDirectoryContents(ctx context.Context, sourceDir, destinationDir string
 		_ = destination.Close()
 	}()
 
-	copied := 0
-	err := filepath.WalkDir(sourceDir, func(currentPath string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			if !tolerate || (!errors.Is(walkErr, os.ErrPermission) && !errors.Is(walkErr, os.ErrNotExist)) {
-				return walkErr
-			}
-			if relativePath, relErr := filepath.Rel(sourceDir, currentPath); relErr == nil {
-				record(relativePath)
-			}
-			return keepUnprunableEntry(entry)
-		}
-		if currentPath == sourceDir {
+	c := &directoryCopy{
+		ctx:         ctx,
+		destination: destination,
+		record:      record,
+		tolerate:    tolerate,
+		mirror:      mirror,
+	}
+	err := c.copyDirectory(sourceRoot, ".")
+	return c.copied, err
+}
+
+// copyDirectory copies the children of source, found at relativePath. Names and
+// metadata come from source's descriptor, so a directory swapped for a link
+// mid-copy is never listed from outside the root.
+func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) error {
+	tolerable := func(err error) bool {
+		return c.tolerate && (errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrNotExist))
+	}
+	directory, err := source.Open(".")
+	if err != nil {
+		if tolerable(err) {
+			c.record(relativePath)
 			return nil
 		}
-		if err := ctx.Err(); err != nil {
+		return err
+	}
+	names, err := directory.Readdirnames(-1)
+	_ = directory.Close()
+	if tolerable(err) {
+		c.record(relativePath)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	slices.Sort(names)
+
+	for _, name := range names {
+		if err := c.ctx.Err(); err != nil {
 			return err
 		}
-		if strings.HasPrefix(entry.Name(), temporaryWritePrefix) {
-			return keepUnprunableEntry(entry)
+		if strings.HasPrefix(name, temporaryWritePrefix) {
+			continue
 		}
-
-		relativePath, err := filepath.Rel(sourceDir, currentPath)
+		childPath := filepath.Join(relativePath, name)
+		info, err := source.Lstat(name)
+		if tolerable(err) {
+			c.record(childPath)
+			continue
+		}
 		if err != nil {
 			return err
 		}
 
 		switch {
-		case entry.IsDir():
-			target := filepath.ToSlash(relativePath)
-			created, createErr := destination.top.openDir(target, dirOptions{Create: true, Mode: copyDirectoryMode})
+		case info.IsDir():
+			target := filepath.ToSlash(childPath)
+			created, createErr := c.destination.top.openDir(target, dirOptions{Create: true, Mode: copyDirectoryMode})
 			if pathErr, ok := errors.AsType[*fs.PathError](createErr); ok && pathErr.Path == target && errors.Is(pathErr.Err, syscall.ENOTDIR) {
-				return &fs.PathError{Op: "mkdirat", Path: target, Err: syscall.EEXIST}
+				return &fs.PathError{
+					Op:   "mkdirat",
+					Path: target,
+					Err:  syscall.EEXIST,
+				}
 			}
 			if createErr != nil {
 				return createErr
 			}
-			return created.Close()
-		case entry.Type()&os.ModeSymlink != 0:
-			return nil
-		case !entry.Type().IsRegular():
+			if err := created.Close(); err != nil {
+				return err
+			}
+			child, err := source.OpenRoot(name)
+			if tolerable(err) {
+				c.record(childPath)
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			err = errors.Join(c.copyDirectory(child, childPath), child.Close())
+			if err != nil {
+				return err
+			}
+		case info.Mode()&os.ModeSymlink != 0:
+		case !info.Mode().IsRegular():
 			// Reading a socket, FIFO, or device fails with ENXIO (#3003).
-			record(relativePath)
-			return nil
+			c.record(childPath)
+		default:
+			content, err := source.ReadFile(name)
+			if tolerable(err) {
+				c.record(childPath)
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			err = writeCopiedFile(c.destination, filepath.ToSlash(childPath), content, info.Mode().Perm()|info.Mode()&os.ModeSticky, c.mirror)
+			if c.mirror && errors.Is(err, os.ErrPermission) {
+				c.record(childPath)
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			c.copied++
 		}
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-
-		content, err := sourceRoot.ReadFile(relativePath)
-		if tolerate && (errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrNotExist)) {
-			record(relativePath)
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		err = writeCopiedFile(destination, filepath.ToSlash(relativePath), content, info.Mode().Perm()|info.Mode()&os.ModeSticky, mirror)
-		if mirror && errors.Is(err, os.ErrPermission) {
-			record(relativePath)
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		copied++
-		return nil
-	})
-	return copied, err
+	}
+	return nil
 }
 
 // writeCopiedFile writes a copied file in place without following symbolic
