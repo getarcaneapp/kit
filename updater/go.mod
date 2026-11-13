@@ -19,10 +19,11 @@ require (
 	github.com/moby/moby/client v0.6.3
 	github.com/opencontainers/go-digest v1.0.0
 	kit.getarcane.app v0.7.2
-	kit.getarcane.app/docker v0.3.2
+	kit.getarcane.app/docker v0.3.3
 )
 
 require (
+	github.com/Azure/go-ansiterm v0.0.0-20261006220739-8c912ac31dd4 // indirect
 	github.com/Microsoft/go-winio v0.6.4 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
@@ -34,7 +35,9 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/klauspost/compress v1.20.2 // indirect
+	github.com/moby/term v0.5.2 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
+	github.com/samber/mo v1.17.0 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0 // indirect

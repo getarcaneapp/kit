@@ -1,3 +1,13 @@
+## updater/v0.12.4
+
+### Bug fixes
+
+* bump docker/moby deps([74c7bbe](https://github.com/getarcaneapp/kit/commit/74c7bbeea90555426f17a59976d6e0ae174ccaed) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.12.3...updater/v0.12.4
+
 ## updater/v0.12.3
 
 ### Bug fixes
