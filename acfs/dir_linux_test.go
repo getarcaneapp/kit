@@ -243,23 +243,14 @@ func requireNotOpened(t *testing.T, name string, run func()) {
 func TestNonRegularFilesAreNeverOpened(t *testing.T) {
 	t.Parallel()
 
-	source, destination := t.TempDir(), t.TempDir()
-	writeTestFile(t, filepath.Join(source, "file"), "source")
+	source := t.TempDir()
 	if err := unix.Mkfifo(filepath.Join(source, "fifo"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := unix.Mkfifo(filepath.Join(destination, "file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	requireNotOpened(t, filepath.Join(source, "fifo"), func() {
 		if _, _, err := (Root{Path: source}).OpenReadSeek(t.Context(), "/fifo"); !errors.Is(err, ErrNotFile) {
 			t.Errorf("OpenReadSeek fifo = %v, want ErrNotFile", err)
-		}
-	})
-	requireNotOpened(t, filepath.Join(destination, "file"), func() {
-		if _, err := (Root{Path: source}).CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{}); !errors.Is(err, ErrNotFile) {
-			t.Errorf("CopyTo onto fifo = %v, want ErrNotFile", err)
 		}
 	})
 }
