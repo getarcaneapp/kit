@@ -28,7 +28,7 @@ type (
 		DockerfileInline string            `json:"dockerfileInline,omitempty" doc:"Inline Dockerfile content"`
 		Provider         string            `json:"provider,omitempty" doc:"Build provider override"`
 		Target           string            `json:"target,omitempty" doc:"Target stage"`
-		ContextDir       string            `json:"contextDir" minLength:"1" doc:"Build context directory or Git URL"`
+		ContextDir       string            `json:"contextDir" minLength:"1" doc:"Build context directory"`
 		Isolation        string            `json:"isolation,omitempty" doc:"Build isolation mode"`
 		Entitlements     []string          `json:"entitlements,omitempty" doc:"Build entitlements"`
 		CacheTo          []string          `json:"cacheTo,omitempty" doc:"Build cache targets"`
