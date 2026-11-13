@@ -210,11 +210,11 @@ func DetectLimits() (*Limits, error) {
 		if dir := resolveCgroupDir(mounts, "cpu", paths.CPU); dir != "" {
 			return []string{dir}
 		}
-		return []string{
-			filepath.Join("/sys/fs/cgroup/cpu,cpuacct", paths.CPU),
-			filepath.Join("/sys/fs/cgroup/cpu", paths.CPU),
-			filepath.Join("/sys/fs/cgroup/cpuacct", paths.CPU),
+		dirs := make([]string, 0, 3)
+		for _, base := range []string{"/sys/fs/cgroup/cpu,cpuacct", "/sys/fs/cgroup/cpu", "/sys/fs/cgroup/cpuacct"} {
+			dirs = append(dirs, filepath.Join(base, paths.CPU))
 		}
+		return dirs
 	}()
 	quota := readCgroupV1CPUControllerInt64(cpuDirs, "cpu.cfs_quota_us")
 	period := readCgroupV1CPUControllerInt64(cpuDirs, "cpu.cfs_period_us")

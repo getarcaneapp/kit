@@ -181,10 +181,10 @@ func TestResolveCgroupDir(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		mounts     []cgroupMount
 		controller string
 		path       string
 		want       string
+		mounts     []cgroupMount
 	}{
 		{
 			name:       "v1 docker mount is already the container subtree",
