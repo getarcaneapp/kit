@@ -26,7 +26,7 @@ type (
 		dockerClientProvider types.DockerClientProvider
 		registryAuthProvider types.RegistryAuthProvider
 		logger               *slog.Logger
-		providers            map[string]any
+		providers            map[string]buildProvider
 	}
 )
 
@@ -48,7 +48,7 @@ func NewService(cfg Config) (*Service, error) {
 		dockerClientProvider: cfg.DockerClientProvider,
 		registryAuthProvider: cfg.RegistryAuthProvider,
 		logger:               cmp.Or(cfg.Logger, slog.Default()),
-		providers: map[string]any{
+		providers: map[string]buildProvider{
 			"depot": &depotBuildKitProvider{settings: cfg.SettingsProvider},
 		},
 	}, nil
@@ -61,13 +61,9 @@ func (b *Service) BuildImage(ctx context.Context, req types.BuildRequest, progre
 
 	settings := b.settings.BuildSettings()
 	providerName := cmp.Or(strings.ToLower(strings.TrimSpace(req.Provider)), strings.ToLower(strings.TrimSpace(settings.BuildProvider)), "local")
-	providerRaw, known := b.providers[providerName]
+	provider, known := b.providers[providerName]
 	if providerName != "local" && !known {
 		return nil, fmt.Errorf("unknown build provider: %s", providerName)
-	}
-	provider, ok := providerRaw.(buildProvider)
-	if providerName != "local" && !ok {
-		return nil, fmt.Errorf("invalid build provider: %s", providerName)
 	}
 
 	buildCtx, cancel := context.WithTimeout(ctx, kit.Ternary(settings.BuildTimeoutSecs > 0, time.Duration(settings.BuildTimeoutSecs)*time.Second, defaultBuildTimeout))
