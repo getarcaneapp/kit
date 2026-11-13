@@ -118,7 +118,7 @@ func TestStreamMultiplexedLogsContextCancelDoesNotDeadlock(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- StreamMultiplexedLogs(ctx, bytes.NewReader(stream.Bytes()), logsChan)
+		done <- StreamMultiplexedLogs(ctx, io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -157,6 +157,28 @@ func TestReadAllLogsStreamsBeforeEOF(t *testing.T) {
 
 	require.NoError(t, pw.Close())
 	require.NoError(t, <-done)
+}
+
+func TestStreamMultiplexedLogsContextCancelClosesReader(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	reader := &blockingReadCloser{
+		readStarted: make(chan struct{}),
+		closeCalled: make(chan struct{}),
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- StreamMultiplexedLogs(ctx, reader, make(chan string, 1))
+	}()
+
+	<-reader.readStarted
+	cancel()
+
+	require.ErrorIs(t, <-done, context.Canceled)
+	select {
+	case <-reader.closeCalled:
+	case <-time.After(time.Second):
+		require.FailNow(t, "StreamMultiplexedLogs did not close the reader on cancellation")
+	}
 }
 
 func TestReadAllLogsContextCancelClosesReader(t *testing.T) {

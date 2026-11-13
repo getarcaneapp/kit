@@ -36,8 +36,9 @@ func StreamContainerLogs(ctx context.Context, logs io.ReadCloser, logsChan chan<
 }
 
 // StreamMultiplexedLogs demultiplexes a Docker stdout/stderr log stream and
-// sends non-empty lines to logsChan.
-func StreamMultiplexedLogs(ctx context.Context, logs io.Reader, logsChan chan<- string) error {
+// sends non-empty lines to logsChan. logs is closed when ctx is done so a
+// blocked read unblocks.
+func StreamMultiplexedLogs(ctx context.Context, logs io.ReadCloser, logsChan chan<- string) error {
 	stdoutReader, stdoutWriter := io.Pipe()
 	stderrReader, stderrWriter := io.Pipe()
 
@@ -47,9 +48,7 @@ func StreamMultiplexedLogs(ctx context.Context, logs io.Reader, logsChan chan<- 
 			err := cmp.Or(ctx.Err(), io.ErrClosedPipe)
 			_ = stdoutReader.CloseWithError(err)
 			_ = stderrReader.CloseWithError(err)
-			if closer, ok := logs.(io.Closer); ok {
-				_ = closer.Close()
-			}
+			_ = logs.Close()
 		})
 	}
 
