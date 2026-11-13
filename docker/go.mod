@@ -5,8 +5,8 @@ go 1.27
 replace kit.getarcane.app => ../kit
 
 require (
-	github.com/moby/moby/api v1.56.1
-	github.com/moby/moby/client v0.6.2
+	github.com/moby/moby/api v1.57.0
+	github.com/moby/moby/client v0.6.3
 	github.com/samber/mo v1.17.0
 	github.com/stretchr/testify v1.12.1
 	kit.getarcane.app v0.7.2
