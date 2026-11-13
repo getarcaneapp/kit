@@ -129,7 +129,7 @@ func readDirectory(ctx context.Context, root *os.Root, resolvedPath, displayPath
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, false, ctxErr
 		}
-		batch, readErr := directory.Readdirnames(directoryReadBatchSize)
+		batch, readErr := directory.Readdirnames(kit.Ternary(maxEntries > 0, min(directoryReadBatchSize, 2*maxEntries-len(names)), directoryReadBatchSize))
 		for _, name := range batch {
 			if !strings.HasPrefix(name, temporaryWritePrefix) {
 				names = append(names, name)
