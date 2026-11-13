@@ -1,3 +1,32 @@
+## kit/v0.7.2
+
+### Bug fixes
+
+* default zero supervisor backoff fields individually([5efedab](https://github.com/getarcaneapp/kit/commit/5efedab298a69f6cc7dae57bc72f22bc6746eba5) by @kmendell)
+* recover panics in background cache revalidation([a83a742](https://github.com/getarcaneapp/kit/commit/a83a74268d5ecc1fdbc4af162230b0b503f816dd) by @kmendell)
+* keep cache deletes made during an in-flight load([4234cd3](https://github.com/getarcaneapp/kit/commit/4234cd32cd156b37c9420af4b6182bddd9d78ded) by @kmendell)
+* keep per-entry cache ttl across revalidation([27f0e1d](https://github.com/getarcaneapp/kit/commit/27f0e1dd5b8cc0b1a9b130be7447a2fd32e43019) by @kmendell)
+* sort NormalizeJSON object keys and validate input once([8d8547d](https://github.com/getarcaneapp/kit/commit/8d8547d58b58b13936c18ee0edfc891abc95bcb8) by @kmendell)
+* round capacity strings up into the next unit([2dea6d6](https://github.com/getarcaneapp/kit/commit/2dea6d6aaa338ea4f091be221fc3a9d085b9a963) by @kmendell)
+* apply normalization tags to fields hidden from JSON([8952103](https://github.com/getarcaneapp/kit/commit/8952103d9317a40b117fc3e70c612d13e6e5957f) by @kmendell)
+* mark capture truncated when the limit is non-positive([438e1d5](https://github.com/getarcaneapp/kit/commit/438e1d5aec3ad25798e43d596275584a3b0fb1c1) by @kmendell)
+* order Fingerprint map keys by type and stop at cycles([7539000](https://github.com/getarcaneapp/kit/commit/7539000abdf6faace5f4a77510953033c251804f) by @kmendell)
+* resolve lint issues in bytes and cache tests([83340aa](https://github.com/getarcaneapp/kit/commit/83340aadc5014e05376d1ce8714ef4ff349700a8) by @kmendell)
+* require an encryption key outside development([97391c6](https://github.com/getarcaneapp/kit/commit/97391c6c01ff61bfc3ec30d14867ce2b1c15b15e) by @kmendell)
+
+### Performance improvements
+
+* read cached normalization plans without locking([c93cc32](https://github.com/getarcaneapp/kit/commit/c93cc32805be7b59185d6cfda14b256e36abdd89) by @kmendell)
+* hash SyncGate bodies once and drop them after Begin([a3fc68a](https://github.com/getarcaneapp/kit/commit/a3fc68a744688f0d9a13ff29560a44beb17c2d07) by @kmendell)
+
+### Other
+
+* build cache, capacity and length-tag values as literals([571c000](https://github.com/getarcaneapp/kit/commit/571c000c9f16591d0cdd6ee298733764255860f6) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/kit/v0.7.1...kit/v0.7.2
+
 ## kit/v0.7.1
 
 ### Bug fixes
