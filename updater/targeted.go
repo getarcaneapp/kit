@@ -36,6 +36,21 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 	if err != nil {
 		return err
 	}
+	excluded, err := s.excludedContainerSet(ctx, enforceSettingsExclusions)
+	if err != nil {
+		return err
+	}
+	// Records and implicit candidates share one inspect per container.
+	inspections := map[string]client.ContainerInspectResult{}
+	inspectErrs := map[string]error{}
+	inspect := func(id string) (container.InspectResponse, error) {
+		if result, ok := inspections[id]; ok {
+			return result.Container, inspectErrs[id]
+		}
+		result, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, id, client.ContainerInspectOptions{})
+		inspections[id], inspectErrs[id] = result, inspectErr
+		return result.Container, inspectErr
+	}
 	proxy := dockerProxyContainerName(dockerClient.DaemonHost())
 	plansByName, markedForRestart := map[string]*restartPlan{}, map[string]bool{}
 	var containers []deps.ContainerWithDeps
@@ -44,7 +59,7 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		if !record.NeedsUpdate() {
 			continue
 		}
-		state, planned, collectErr := s.collectTargetRecord(ctx, dockerClient, listed.Items, proxy, record, exclusionPolicy(!opts.IgnoreSettingsExclusions), plansByName, markedForRestart, out)
+		state, planned, collectErr := s.collectTargetRecord(ctx, inspect, listed.Items, proxy, record, excluded, exclusionPolicy(!opts.IgnoreSettingsExclusions), plansByName, markedForRestart, out)
 		if collectErr != nil {
 			return collectErr
 		}
@@ -52,7 +67,7 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		containers = append(containers, planned...)
 	}
 	if !opts.DryRun && len(markedForRestart) > 0 {
-		containers = append(containers, s.collectImplicitCandidates(ctx, dockerClient, listed.Items, proxy, plansByName)...)
+		containers = append(containers, s.collectImplicitCandidates(ctx, inspect, listed.Items, proxy, excluded, plansByName)...)
 	}
 	scan := &restartScan{
 		plansByName:      plansByName,
@@ -128,9 +143,10 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 // collectImplicitCandidates plans every other running, eligible container so dependents of targets can be restarted.
 func (s *Service) collectImplicitCandidates(
 	ctx context.Context,
-	dockerClient *client.Client,
+	inspect func(id string) (container.InspectResponse, error),
 	listed []container.Summary,
 	proxy string,
+	excluded map[string]bool,
 	plansByName map[string]*restartPlan,
 ) []deps.ContainerWithDeps {
 	var implicit []deps.ContainerWithDeps
@@ -139,16 +155,13 @@ func (s *Service) collectImplicitCandidates(
 		if _, planned := plansByName[name]; planned || cnt.State != container.StateRunning || name == proxy {
 			continue
 		}
-		inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
-		if inspectErr != nil {
+		inspected, inspectErr := inspect(cnt.ID)
+		if inspectErr != nil || s.containerEligibility(inspected, excluded, enforceSettingsExclusions) != "" {
 			continue
 		}
-		if reason, eligibilityErr := s.containerEligibility(ctx, inspected.Container, enforceSettingsExclusions); eligibilityErr != nil || reason != "" {
-			continue
-		}
-		pinNetworkContainer(&inspected.Container, listed)
-		plansByName[name] = &restartPlan{cnt: cnt, inspect: &inspected.Container}
-		implicit = append(implicit, deps.ExtractContainerDeps(ctx, name, cnt, inspected.Container))
+		pinNetworkContainer(&inspected, listed)
+		plansByName[name] = &restartPlan{cnt: cnt, inspect: &inspected}
+		implicit = append(implicit, deps.ExtractContainerDeps(ctx, name, cnt, inspected))
 	}
 	return implicit
 }
@@ -156,10 +169,11 @@ func (s *Service) collectImplicitCandidates(
 // collectTargetRecord plans every running container record targets and reports the ones it must reject.
 func (s *Service) collectTargetRecord(
 	ctx context.Context,
-	dockerClient *client.Client,
+	inspectContainer func(id string) (container.InspectResponse, error),
 	containers []container.Summary,
 	proxy string,
 	record ImageUpdateRecord,
+	excluded map[string]bool,
 	exclusions exclusionPolicy,
 	plansByName map[string]*restartPlan,
 	markedForRestart map[string]bool,
@@ -168,20 +182,23 @@ func (s *Service) collectTargetRecord(
 	var targets []string
 	var planned []deps.ContainerWithDeps
 	failed := false
+	recordRef := refs.NormalizeImageUpdateRef(record.ImageRef())
 	for _, cnt := range containers {
-		if cnt.State != container.StateRunning || (record.ContainerID != "" && record.ContainerID != cnt.ID) {
+		// The summary's image ref, unless Docker reports an image ID for a moved tag, already rules most containers out.
+		summaryRef := refs.NormalizeImageUpdateRef(cnt.Image)
+		if cnt.State != container.StateRunning || (record.ContainerID != "" && record.ContainerID != cnt.ID) ||
+			(record.ContainerID == "" && summaryRef != "" && !refs.IsImageIDLikeReference(cnt.Image) && summaryRef != recordRef) {
 			continue
 		}
 		name := containerSummaryName(cnt)
-		inspected, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, cnt.ID, client.ContainerInspectOptions{})
+		inspect, inspectErr := inspectContainer(cnt.ID)
 		if inspectErr != nil {
 			// An unscoped record cannot safely be cleared after an incomplete scan.
 			failed = true
 			s.appendRecordedResult(ctx, out, failedContainerResult(cnt.ID, name, inspectErr.Error()))
 			continue
 		}
-		inspect := inspected.Container
-		if record.ContainerID == "" && (inspect.Config == nil || refs.NormalizeImageUpdateRef(inspect.Config.Image) != refs.NormalizeImageUpdateRef(record.ImageRef())) {
+		if record.ContainerID == "" && (inspect.Config == nil || refs.NormalizeImageUpdateRef(inspect.Config.Image) != recordRef) {
 			continue
 		}
 		if proxy != "" && name == proxy {
@@ -190,7 +207,7 @@ func (s *Service) collectTargetRecord(
 			continue
 		}
 		targets = append(targets, cnt.ID)
-		plan, reason, planErr := s.targetRecordPlan(ctx, cnt, inspect, record, exclusions)
+		plan, reason, planErr := s.targetRecordPlan(ctx, cnt, inspect, record, excluded, exclusions)
 		if planErr != nil || reason != "" {
 			failed = true
 			if reason != "" {
@@ -222,10 +239,9 @@ func (s *Service) collectTargetRecord(
 }
 
 // targetRecordPlan validates that record still applies to the container under its current policy.
-func (s *Service) targetRecordPlan(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, record ImageUpdateRecord, exclusions exclusionPolicy) (*restartPlan, string, error) {
-	reason, err := s.containerEligibility(ctx, inspect, exclusions)
-	if err != nil || reason != "" {
-		return nil, reason, err
+func (s *Service) targetRecordPlan(ctx context.Context, cnt container.Summary, inspect container.InspectResponse, record ImageUpdateRecord, excluded map[string]bool, exclusions exclusionPolicy) (*restartPlan, string, error) {
+	if reason := s.containerEligibility(inspect, excluded, exclusions); reason != "" {
+		return nil, reason, nil
 	}
 	current := inspect.Config.Image
 	if refs.IsDigestPinnedReference(current) || refs.IsImageIDLikeReference(current) {
@@ -259,7 +275,7 @@ func (s *Service) targetRecordPlan(ctx context.Context, cnt container.Summary, i
 			return nil, "", errors.New("pending tag is not a newer allowed version")
 		}
 	}
-	if _, err = s.preflightComposeImage(ctx, cnt.ID, inspect, newRef); err != nil {
+	if _, err := s.preflightComposeImage(ctx, cnt.ID, inspect, newRef); err != nil {
 		return nil, "", err
 	}
 	return &restartPlan{

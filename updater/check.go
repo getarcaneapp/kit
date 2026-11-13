@@ -140,9 +140,12 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 		return types.CheckResult{}, err
 	}
 	inspect := inspected.Container
-	reason, err := s.containerEligibility(ctx, inspect, enforceSettingsExclusions)
-	if err != nil || reason != "" {
-		return types.CheckResult{ContainerID: cmp.Or(inspect.ID, containerID), Reason: reason}, err
+	excluded, err := s.excludedContainerSet(ctx, enforceSettingsExclusions)
+	if err != nil {
+		return types.CheckResult{ContainerID: cmp.Or(inspect.ID, containerID)}, err
+	}
+	if reason := s.containerEligibility(inspect, excluded, enforceSettingsExclusions); reason != "" {
+		return types.CheckResult{ContainerID: cmp.Or(inspect.ID, containerID), Reason: reason}, nil
 	}
 	result, err := s.selectImageTag(ctx, inspect.ID, inspect.Config.Image, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
 	if err != nil || result.Reason != "" || result.UpdateAvailable {
@@ -184,30 +187,27 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 }
 
 // containerEligibility reports why a container cannot be updated, or "" when it can; policy decides
-// whether the updater opt-out label and settings exclusions apply on top of the Swarm and config checks.
-func (s *Service) containerEligibility(ctx context.Context, inspect container.InspectResponse, policy exclusionPolicy) (string, error) {
+// whether the updater opt-out label and the excluded set, from excludedContainerSet, apply on top of the
+// Swarm and config checks.
+func (s *Service) containerEligibility(inspect container.InspectResponse, excluded map[string]bool, policy exclusionPolicy) string {
 	if inspect.Config == nil {
-		return "container config unavailable", nil
+		return "container config unavailable"
 	}
 	labels := inspect.Config.Labels
 	if s.config.LabelPolicy.IsSwarmTask(labels) && !s.isSelfUpdateCandidate(inspect.ID, labels) {
-		return "swarm service; update at the service level", nil
+		return "swarm service; update at the service level"
 	}
 	if reason := s.config.LabelPolicy.UnmanagedReason(labels); reason != "" {
-		return reason, nil
+		return reason
 	}
 	if policy == ignoreSettingsExclusions {
-		return "", nil
+		return ""
 	}
 	if s.config.LabelPolicy.IsUpdateDisabled(labels) {
-		return "updates disabled by label", nil
-	}
-	excluded, err := s.excludedContainerSet(ctx)
-	if err != nil {
-		return "", err
+		return "updates disabled by label"
 	}
 	if isExcluded(excluded, inspect.ID, inspect.Name) {
-		return "container excluded by settings", nil
+		return "container excluded by settings"
 	}
-	return "", nil
+	return ""
 }

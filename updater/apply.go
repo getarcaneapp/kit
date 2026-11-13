@@ -180,7 +180,7 @@ func (s *Service) usedImages(ctx context.Context, exclusions exclusionPolicy) (m
 	if err != nil {
 		return nil, err
 	}
-	excluded, err := s.excludedContainerSet(ctx)
+	excluded, err := s.excludedContainerSet(ctx, exclusions)
 	if err != nil {
 		return nil, err
 	}
@@ -219,9 +219,10 @@ func (s *Service) usedImages(ctx context.Context, exclusions exclusionPolicy) (m
 	return out, nil
 }
 
-func (s *Service) excludedContainerSet(ctx context.Context) (map[string]bool, error) {
+// excludedContainerSet loads the settings exclusions once per run, or none when policy ignores them.
+func (s *Service) excludedContainerSet(ctx context.Context, policy exclusionPolicy) (map[string]bool, error) {
 	excluded := map[string]bool{}
-	if s.config.Settings == nil {
+	if s.config.Settings == nil || policy == ignoreSettingsExclusions {
 		return excluded, nil
 	}
 	names, err := s.config.Settings.ExcludedContainers(ctx)

@@ -51,7 +51,7 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, targets R
 	if err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
-	excluded, err := s.excludedContainerSet(ctx)
+	excluded, err := s.excludedContainerSet(ctx, enforceSettingsExclusions)
 	if err != nil {
 		return nil, err
 	}

@@ -59,10 +59,11 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	defer s.BeginContainerUpdate(target.ID)()
 	defer s.BeginProjectUpdate(compose.ProjectLabel(labels))()
 
-	reason, err := s.containerEligibility(ctx, inspect, exclusionPolicy(!opts.IgnoreSettingsExclusions))
+	excluded, err := s.excludedContainerSet(ctx, exclusionPolicy(!opts.IgnoreSettingsExclusions))
 	if err != nil {
 		return out, err
 	}
+	reason := s.containerEligibility(inspect, excluded, exclusionPolicy(!opts.IgnoreSettingsExclusions))
 	if reason == "" && (refs.IsDigestPinnedReference(inspect.Config.Image) || refs.IsImageIDLikeReference(inspect.Config.Image)) {
 		reason = "immutable image reference"
 	}

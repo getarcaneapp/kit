@@ -26,9 +26,14 @@ import (
 type (
 	targetedDocker struct {
 		created    map[string]string
+		inspects   map[string]int
 		containers []container.InspectResponse
 		mutations  int
 		mu         sync.Mutex
+	}
+
+	countingSettings struct {
+		calls int
 	}
 
 	targetedComposeAdapter struct {
@@ -81,6 +86,9 @@ func (f *targetedDocker) handler(t *testing.T) http.HandlerFunc {
 			writeDockerJSON(t, w, summaries)
 		case r.Method == http.MethodGet && strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/json"):
 			id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/json")
+			if f.inspects != nil {
+				f.inspects[id]++
+			}
 			for _, cnt := range f.containers {
 				if cnt.ID == id {
 					writeDockerJSON(t, w, cnt)
@@ -154,6 +162,45 @@ func TestApplyPendingTargetedSharedImage(t *testing.T) {
 				t.Fatalf("pending=%d created=%#v result=%#v", len(pending), fixture.created, result)
 			}
 		})
+	}
+}
+
+func (s *countingSettings) ExcludedContainers(context.Context) ([]string, error) {
+	s.calls++
+	return nil, nil
+}
+
+func TestApplyPendingTargetedInspectsEachContainerOnce(t *testing.T) {
+	other := newTargetedContainer("other", "1.x")
+	other.Config.Image, other.Image = "other:1", "sha256:other"
+	fixture := &targetedDocker{
+		containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", "1.x"), other},
+		created:    map[string]string{},
+		inspects:   map[string]int{},
+	}
+	settings := &countingSettings{}
+	service := newServiceForTest(t, Config{
+		DockerClientProvider: &fakeDockerClientProvider{client: newDockerClientForHandler(t, fixture.handler(t))},
+		PendingStore:         NewMemoryPendingStore(targetedPending("one", "1.2.0"), targetedPending("", "1.2.0")),
+		ImagePuller:          &fakePuller{},
+		Settings:             settings,
+	})
+
+	if result, err := service.ApplyPending(t.Context(), Options{}); err != nil || result.Failed != 0 {
+		t.Fatalf("ApplyPending = %#v, %v", result, err)
+	}
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	if fixture.inspects["other"] != 1 {
+		t.Fatalf("unrelated container inspected %d times, want once as an implicit candidate", fixture.inspects["other"])
+	}
+	for id, calls := range fixture.inspects {
+		if calls > 1 {
+			t.Fatalf("container %s inspected %d times, want at most once; all=%v", id, calls, fixture.inspects)
+		}
+	}
+	if settings.calls != 1 {
+		t.Fatalf("ExcludedContainers calls = %d, want 1", settings.calls)
 	}
 }
 
