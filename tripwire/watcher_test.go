@@ -355,6 +355,38 @@ func TestCatchesFilesInsideMovedInDirectory(t *testing.T) {
 		hasKey(filepath.Join(root, "fresh", "deep", "compose.yaml")))
 }
 
+func TestRenamedDirectoryReportsChildrenUnderNewPath(t *testing.T) {
+	root := t.TempDir()
+	mkdir(t, root, "a", "sub")
+
+	rec := &recorder[string]{batches: make(chan Batch[string], 64)}
+	start(t, Config[string]{
+		Roots:    []string{root},
+		Key:      composeKey,
+		OnBatch:  rec.onBatch,
+		Debounce: fastDebounce,
+	})
+
+	if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "b")); err != nil {
+		t.Fatal(err)
+	}
+	// Writes racing the rename event may still carry the old name; once it
+	// is handled, only the new path may be reported.
+	stale := filepath.Join(root, "a", "sub", "compose.yaml")
+	want := filepath.Join(root, "b", "sub", "compose.yaml")
+	for deadline := time.Now().Add(waitFor); time.Now().Before(deadline); {
+		write(t, root, "b", "sub", "compose.yaml")
+		select {
+		case b := <-rec.batches:
+			if slices.Contains(b.Keys, want) && !slices.Contains(b.Keys, stale) {
+				return
+			}
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	t.Fatal("timed out: write below a renamed directory should be reported only under its new path")
+}
+
 func TestSkipsExistingSymlinkDirectoriesWhenDisabled(t *testing.T) {
 	root := t.TempDir()
 	target := mkdir(t, t.TempDir(), "real-project")

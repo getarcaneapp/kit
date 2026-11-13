@@ -26,7 +26,10 @@ type (
 		// nearest alias.
 		aliases map[string][]string
 		// lost holds roots whose subscription is gone and is being retried.
-		lost     map[string]struct{}
+		lost map[string]struct{}
+		// watched holds every subscribed directory, sorted, so a moved or
+		// removed subtree can be released without listing all watches.
+		watched  []string
 		skip     func(name string) bool
 		log      *slog.Logger
 		roots    []rootDir
@@ -152,13 +155,16 @@ func (t *tree) subscribe(fsw *fsnotify.Watcher, i int) error {
 	if err := fsw.Add(root.path); err != nil {
 		return err
 	}
+	t.track(root.path)
 	resolved, err := filepath.EvalSymlinks(root.path)
 	if err != nil {
-		return errors.Join(err, fsw.Remove(root.path))
+		t.unwatch(fsw, root.path)
+		return err
 	}
 	full, err := filepath.Abs(resolved)
 	if err != nil {
-		return errors.Join(err, fsw.Remove(root.path))
+		t.unwatch(fsw, root.path)
+		return err
 	}
 	t.roots[i] = rootDir{
 		path:   root.path,
@@ -173,7 +179,7 @@ func (t *tree) subscribe(fsw *fsnotify.Watcher, i int) error {
 func (t *tree) walkRoot(ctx context.Context, fsw *fsnotify.Watcher, i int) error {
 	root := t.roots[i].path
 	if err := t.walk(ctx, fsw, frame{dir: root, logical: root}, nil); err != nil {
-		_ = fsw.Remove(root) // already gone is fine
+		t.unwatch(fsw, root)
 		return err
 	}
 	return nil
@@ -183,11 +189,7 @@ func (t *tree) walkRoot(ctx context.Context, fsw *fsnotify.Watcher, i int) error
 // root's subtree stops reporting under its old path.
 func (t *tree) detach(fsw *fsnotify.Watcher, root rootDir) {
 	t.forget(fsw, root.path)
-	for _, watched := range fsw.WatchList() {
-		if watched == root.path || strings.HasPrefix(watched, root.prefix) {
-			_ = fsw.Remove(watched) // already gone is fine
-		}
-	}
+	t.unwatch(fsw, root.path)
 }
 
 // attach subscribes a newly created directory (and everything below it) if it
@@ -358,15 +360,44 @@ func (t *tree) seen(visited map[fileID]struct{}, path string) bool {
 }
 
 func (t *tree) watch(ctx context.Context, fsw *fsnotify.Watcher, path string) {
-	if err := fsw.Add(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		t.log.WarnContext(ctx, "tripwire: failed to watch directory", "path", path, "error", err)
+	if err := fsw.Add(path); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			t.log.WarnContext(ctx, "tripwire: failed to watch directory", "path", path, "error", err)
+		}
+		return
+	}
+	t.track(path)
+}
+
+// track records a subscribed directory in the sorted watched set.
+func (t *tree) track(path string) {
+	if i, found := slices.BinarySearch(t.watched, path); !found {
+		t.watched = slices.Insert(t.watched, i, path)
+	}
+}
+
+// unwatch drops the subscriptions on path and every directory below it. The
+// OS releases a watch only on the directory that was removed or moved, so a
+// renamed directory's children would otherwise keep reporting under the old
+// path.
+func (t *tree) unwatch(fsw *fsnotify.Watcher, path string) {
+	prefix := withSep(path)
+	from, _ := slices.BinarySearch(t.watched, prefix)
+	to := from
+	for to < len(t.watched) && strings.HasPrefix(t.watched[to], prefix) {
+		_ = fsw.Remove(t.watched[to]) // already gone is fine
+		to++
+	}
+	t.watched = slices.Delete(t.watched, from, to)
+	if i, found := slices.BinarySearch(t.watched, path); found {
+		_ = fsw.Remove(path) // already gone is fine
+		t.watched = slices.Delete(t.watched, i, i+1)
 	}
 }
 
 // forget drops followed symlinks at or below a removed logical path. A
 // target's subscriptions are removed only once no link points at it any
-// more. Plain directories need nothing: the OS drops a watch when its
-// directory goes away.
+// more. Subscriptions under the removed path itself are released by unwatch.
 func (t *tree) forget(fsw *fsnotify.Watcher, logical string) {
 	if len(t.aliases) == 0 {
 		return
@@ -385,15 +416,7 @@ func (t *tree) forget(fsw *fsnotify.Watcher, logical string) {
 		delete(t.aliases, target)
 		targets = append(targets, target)
 	}
-	if len(targets) == 0 {
-		return
-	}
-	for _, watched := range fsw.WatchList() {
-		for _, target := range targets {
-			if watched == target || strings.HasPrefix(watched, target+sep) {
-				_ = fsw.Remove(watched) // already gone is fine
-				break
-			}
-		}
+	for _, target := range targets {
+		t.unwatch(fsw, target)
 	}
 }

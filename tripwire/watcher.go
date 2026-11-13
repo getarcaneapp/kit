@@ -155,6 +155,7 @@ func (w *Watcher[K]) Stop() error {
 func (w *Watcher[K]) addRoots(ctx context.Context, fsw *fsnotify.Watcher, t *tree) error {
 	clear(t.aliases)
 	clear(t.lost)
+	t.watched = nil
 	var errs []error
 	for i, root := range t.roots {
 		if err := t.subscribe(fsw, i); err != nil {
@@ -289,6 +290,7 @@ func (w *Watcher[K]) handle(ctx context.Context, fsw *fsnotify.Watcher, t *tree,
 	logical := t.logical(ev.Name)
 	if ev.Has(fsnotify.Remove | fsnotify.Rename) {
 		t.forget(fsw, logical)
+		t.unwatch(fsw, ev.Name)
 	}
 
 	added := false
