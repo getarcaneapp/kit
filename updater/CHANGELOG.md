@@ -1,3 +1,29 @@
+## updater/v0.12.3
+
+### Bug fixes
+
+* fail pulls on daemon-reported stream errors([54a7db4](https://github.com/getarcaneapp/kit/commit/54a7db4c46ec672e8b3b7db48a7d057ad3a97eba) by @kmendell)
+* finish recreate and rollback after caller cancel([ea04fd3](https://github.com/getarcaneapp/kit/commit/ea04fd33b08b7ec7efdcf773587596d15572d645) by @kmendell)
+* report implicit compose restarts as restarted([0014367](https://github.com/getarcaneapp/kit/commit/001436716f574d7307f4d025f70f10f77342e56a) by @kmendell)
+* skip containers another update already holds([00abe70](https://github.com/getarcaneapp/kit/commit/00abe705658ed117a8138f7f63b0b5c507fdada9) by @kmendell)
+* verify compose services after a digest update([b2bf6f2](https://github.com/getarcaneapp/kit/commit/b2bf6f2cdd65db079a8249b23245d63c45a5d03c) by @kmendell)
+* end compose flags before label-sourced service names([bce92ce](https://github.com/getarcaneapp/kit/commit/bce92ce24f0deafd65b7731d00540d1685e44beb) by @kmendell)
+* resolve lint issues from the review fixes([39802c8](https://github.com/getarcaneapp/kit/commit/39802c8212bb20384db274e08788a4e3b26e1faf) by @kmendell)
+* keep the configured image ref when rolling back from an image id([eb143ee](https://github.com/getarcaneapp/kit/commit/eb143ee3da9eaa723d5c8dfba2308c9562ea5f23) by @kmendell)
+* bump deps([a7c1bfe](https://github.com/getarcaneapp/kit/commit/a7c1bfea542b3fb145814e95a2ec01de83791002) by @kmendell)
+
+### Performance improvements
+
+* inspect and load exclusions once per targeted run([ef6390a](https://github.com/getarcaneapp/kit/commit/ef6390af1fd5df091505da3e89d578ab3149537b) by @kmendell)
+
+### Other
+
+* drop redundant nil check before PreserveConfiguredRef([47310dc](https://github.com/getarcaneapp/kit/commit/47310dcbbdb6823130b5b9f3908de0a58ca85f5f) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.12.2...updater/v0.12.3
+
 ## updater/v0.12.2
 
 ### Bug fixes
