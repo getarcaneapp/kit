@@ -243,6 +243,9 @@ func prepareBuildContext(input buildFilesystemInput) (string, string, func(), er
 			}
 			return os.Symlink(linkTarget, targetPath) //nolint:gosec // build context staging intentionally preserves symlinks from the user-selected source tree.
 		}
+		if !d.Type().IsRegular() {
+			return nil // a FIFO would block the copy and a device read without limit
+		}
 
 		mkdirErr := os.MkdirAll(filepath.Dir(targetPath), 0o755)
 		if mkdirErr != nil {
