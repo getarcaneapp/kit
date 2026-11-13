@@ -135,3 +135,38 @@ func TestFingerprint(t *testing.T) {
 		t.Error("fingerprint must be deterministic")
 	}
 }
+
+func TestFingerprintMapKeysThatPrintAlike(t *testing.T) {
+	t.Parallel()
+
+	want := Fingerprint(map[any]string{1: "int", "1": "string", int8(1): "int8"})
+	for range 50 {
+		if got := Fingerprint(map[any]string{"1": "string", int8(1): "int8", 1: "int"}); got != want {
+			t.Fatal("keys that print alike must hash in a stable order")
+		}
+	}
+}
+
+func TestFingerprintCycles(t *testing.T) {
+	t.Parallel()
+
+	type node struct {
+		Next *node
+		Name string
+	}
+	loop := &node{Name: "a"}
+	loop.Next = loop
+	other := &node{Name: "b"}
+	other.Next = other
+	if Fingerprint(loop) == Fingerprint(other) {
+		t.Error("cyclic values with different fields must differ")
+	}
+	shared := &node{Name: "s"}
+	if Fingerprint([]*node{shared, shared}) != Fingerprint([]*node{{Name: "s"}, {Name: "s"}}) {
+		t.Error("a pointer seen twice outside a cycle must hash by value")
+	}
+
+	self := map[string]any{"k": "v"}
+	self["self"] = self
+	_ = Fingerprint(self)
+}
