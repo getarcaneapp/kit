@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,11 +38,21 @@ type (
 		CPUCount    int
 	}
 
-	// procCgroup holds the process's cgroup v1 paths from /proc/self/cgroup,
-	// one per controller.
+	// procCgroup holds the process's cgroup paths from /proc/self/cgroup: one
+	// per v1 controller and the v2 "0::" entry.
 	procCgroup struct {
-		Memory string
-		CPU    string
+		Memory  string
+		CPU     string
+		Unified string
+	}
+
+	// cgroupMount is one cgroup or cgroup2 filesystem from
+	// /proc/self/mountinfo. Root is the cgroup path mounted at Point.
+	cgroupMount struct {
+		Root        string
+		Point       string
+		Controllers []string
+		V2          bool
 	}
 )
 
@@ -170,22 +181,17 @@ func DetectLimits() (*Limits, error) {
 	info, err := host.Info()
 	guest := err == nil && info.VirtualizationSystem != "" && strings.EqualFold(info.VirtualizationRole, "guest")
 
+	paths, err := readProcFile("/proc/self/cgroup", parseProcCgroup)
+	mounts, _ := readProcFile("/proc/self/mountinfo", parseCgroupMounts) // unresolved paths fall back to the hierarchy roots
+
 	if _, statErr := os.Stat("/sys/fs/cgroup/cgroup.controllers"); statErr == nil {
-		limits := detectCgroupV2Limits()
+		limits := detectCgroupV2Limits(cmp.Or(resolveCgroupDir(mounts, "", paths.Unified), "/sys/fs/cgroup"))
 		if !guest && !isFiniteLimit(limits.MemoryLimit) && limits.CPUCount < 0 {
 			return nil, errors.New("not running in a cgroup")
 		}
 		return limits, nil
 	}
 
-	paths, err := func() (procCgroup, error) {
-		file, openErr := os.Open("/proc/self/cgroup")
-		if openErr != nil {
-			return procCgroup{}, openErr
-		}
-		defer func() { _ = file.Close() }()
-		return parseProcCgroup(file)
-	}()
 	if err != nil {
 		if !guest {
 			return nil, errors.New("not running in a cgroup")
@@ -199,25 +205,36 @@ func DetectLimits() (*Limits, error) {
 		}, err
 	}
 
-	quota := readCgroupV1CPUControllerInt64(paths.CPU, "cpu.cfs_quota_us")
-	period := readCgroupV1CPUControllerInt64(paths.CPU, "cpu.cfs_period_us")
+	memoryDir := cmp.Or(resolveCgroupDir(mounts, "memory", paths.Memory), filepath.Join(cgroupV1MemoryRoot, paths.Memory))
+	cpuDirs := func() []string {
+		if dir := resolveCgroupDir(mounts, "cpu", paths.CPU); dir != "" {
+			return []string{dir}
+		}
+		return []string{
+			filepath.Join("/sys/fs/cgroup/cpu,cpuacct", paths.CPU),
+			filepath.Join("/sys/fs/cgroup/cpu", paths.CPU),
+			filepath.Join("/sys/fs/cgroup/cpuacct", paths.CPU),
+		}
+	}()
+	quota := readCgroupV1CPUControllerInt64(cpuDirs, "cpu.cfs_quota_us")
+	period := readCgroupV1CPUControllerInt64(cpuDirs, "cpu.cfs_period_us")
 
 	limits := &Limits{
 		MemoryLimit: func() int64 {
-			memLimit, limitErr := readCgroupV1Int64(filepath.Join(cgroupV1MemoryRoot, paths.Memory, "memory.limit_in_bytes"))
+			memLimit, limitErr := readCgroupV1Int64(filepath.Join(memoryDir, "memory.limit_in_bytes"))
 			if limitErr != nil || memLimit >= unrestricted {
 				return -1
 			}
 			return memLimit
 		}(),
 		MemoryUsage: func() int64 {
-			memUsage, usageErr := readCgroupV1Int64(filepath.Join(cgroupV1MemoryRoot, paths.Memory, "memory.usage_in_bytes"))
+			memUsage, usageErr := readCgroupV1Int64(filepath.Join(memoryDir, "memory.usage_in_bytes"))
 			if usageErr != nil {
 				return -1
 			}
 			// memory.usage_in_bytes includes reclaimable page cache; subtract
 			// total_inactive_file (from memory.stat) to match `docker stats`.
-			inactiveFile, statErr := readMemoryStatValue(filepath.Join(cgroupV1MemoryRoot, paths.Memory, "memory.stat"), "total_inactive_file")
+			inactiveFile, statErr := readMemoryStatValue(filepath.Join(memoryDir, "memory.stat"), "total_inactive_file")
 			if statErr != nil {
 				return memUsage
 			}
@@ -239,14 +256,19 @@ func DetectLimits() (*Limits, error) {
 }
 
 // parseProcCgroup reads /proc/self/cgroup content and returns the path of the
-// memory and cpu v1 controllers. Controllers are matched exactly, so cpuset
-// does not count as cpu; cpuacct is used for cpu when no cpu entry exists.
+// memory and cpu v1 controllers and of the v2 hierarchy. Controllers are
+// matched exactly, so cpuset does not count as cpu; cpuacct is used for cpu
+// when no cpu entry exists.
 func parseProcCgroup(r io.Reader) (procCgroup, error) {
-	var memory, cpu, cpuacct string
+	var memory, cpu, cpuacct, unified string
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		parts := strings.SplitN(scanner.Text(), ":", 3)
 		if len(parts) != 3 {
+			continue
+		}
+		if parts[0] == "0" && parts[1] == "" {
+			unified = cmp.Or(unified, parts[2])
 			continue
 		}
 		for controller := range strings.SplitSeq(parts[1], ",") {
@@ -263,13 +285,77 @@ func parseProcCgroup(r io.Reader) (procCgroup, error) {
 	if err := scanner.Err(); err != nil {
 		return procCgroup{}, fmt.Errorf("error scanning cgroup file: %w", err)
 	}
-	if memory == "" && cpu == "" && cpuacct == "" {
+	if memory == "" && cpu == "" && cpuacct == "" && unified == "" {
 		return procCgroup{}, errors.New("cgroup path not found")
 	}
 	return procCgroup{
-		Memory: memory,
-		CPU:    cmp.Or(cpu, cpuacct),
+		Memory:  memory,
+		CPU:     cmp.Or(cpu, cpuacct),
+		Unified: unified,
 	}, nil
+}
+
+// parseCgroupMounts reads /proc/self/mountinfo content and returns its cgroup
+// and cgroup2 mounts.
+func parseCgroupMounts(r io.Reader) ([]cgroupMount, error) {
+	var mounts []cgroupMount
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		// id parent major:minor root point options [optional...] - fstype source superoptions
+		fields := strings.Fields(scanner.Text())
+		dash := slices.Index(fields, "-")
+		if dash < 6 || dash+3 >= len(fields) {
+			continue
+		}
+		switch fields[dash+1] {
+		case "cgroup2":
+			mounts = append(mounts, cgroupMount{
+				Root:  fields[3],
+				Point: fields[4],
+				V2:    true,
+			})
+		case "cgroup":
+			mounts = append(mounts, cgroupMount{
+				Root:        fields[3],
+				Point:       fields[4],
+				Controllers: strings.Split(fields[dash+3], ","),
+			})
+		}
+	}
+	return mounts, scanner.Err()
+}
+
+// resolveCgroupDir maps a cgroup path from /proc/self/cgroup onto the mounted
+// directory holding it by stripping the mount's root from the path, as runc
+// does. controller selects a v1 hierarchy; an empty controller selects
+// cgroup2. It returns "" when no mount contains path, including paths the
+// kernel shows above the cgroup namespace root ("/../x").
+func resolveCgroupDir(mounts []cgroupMount, controller, path string) string {
+	if path == "" || slices.Contains(strings.Split(path, "/"), "..") {
+		return ""
+	}
+	for _, m := range mounts {
+		if (controller == "" && !m.V2) || (controller != "" && !slices.Contains(m.Controllers, controller)) {
+			continue
+		}
+		rel, err := filepath.Rel(m.Root, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return filepath.Join(m.Point, rel)
+	}
+	return ""
+}
+
+// readProcFile opens path and parses it with parse.
+func readProcFile[T any](path string, parse func(io.Reader) (T, error)) (T, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	defer func() { _ = file.Close() }()
+	return parse(file)
 }
 
 // ZFSARCReclaimable returns the number of bytes of ZFS ARC (Adaptive
@@ -294,8 +380,8 @@ func ZFSARCReclaimable() uint64 {
 	return parseARCStats(f)
 }
 
-func detectCgroupV2Limits() *Limits {
-	cpuMax, err := os.ReadFile("/sys/fs/cgroup/cpu.max")
+func detectCgroupV2Limits(dir string) *Limits {
+	cpuMax, err := os.ReadFile(filepath.Join(dir, "cpu.max"))
 	parts := strings.Fields(string(cpuMax))
 	quota := func() int64 {
 		if err != nil || len(parts) < 2 || parts[0] == "max" {
@@ -320,20 +406,20 @@ func detectCgroupV2Limits() *Limits {
 
 	return &Limits{
 		MemoryLimit: func() int64 {
-			memLimit, limitErr := readCgroupV2Int64("/sys/fs/cgroup/memory.max")
+			memLimit, limitErr := readCgroupV2Int64(filepath.Join(dir, "memory.max"))
 			if limitErr != nil || memLimit == unrestricted {
 				return -1
 			}
 			return memLimit
 		}(),
 		MemoryUsage: func() int64 {
-			memUsage, usageErr := readCgroupV2Int64("/sys/fs/cgroup/memory.current")
+			memUsage, usageErr := readCgroupV2Int64(filepath.Join(dir, "memory.current"))
 			if usageErr != nil {
 				return -1
 			}
 			// memory.current includes reclaimable page cache; subtract inactive_file
 			// to match what `docker stats` reports as usage.
-			inactiveFile, statErr := readMemoryStatValue("/sys/fs/cgroup/memory.stat", "inactive_file")
+			inactiveFile, statErr := readMemoryStatValue(filepath.Join(dir, "memory.stat"), "inactive_file")
 			if statErr != nil {
 				return memUsage
 			}
@@ -415,13 +501,9 @@ func isFiniteLimit(value int64) bool {
 	return value > 0 && value < unrestricted
 }
 
-func readCgroupV1CPUControllerInt64(cgroupPath, filename string) int64 {
-	for _, base := range []string{
-		"/sys/fs/cgroup/cpu,cpuacct",
-		"/sys/fs/cgroup/cpu",
-		"/sys/fs/cgroup/cpuacct",
-	} {
-		if value, err := readCgroupV1Int64(filepath.Join(base, cgroupPath, filename)); err == nil {
+func readCgroupV1CPUControllerInt64(dirs []string, filename string) int64 {
+	for _, dir := range dirs {
+		if value, err := readCgroupV1Int64(filepath.Join(dir, filename)); err == nil {
 			return value
 		}
 	}
