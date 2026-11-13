@@ -329,6 +329,35 @@ func TestPrepareBuildContext_StagesDockerfileExcludedByDockerignore(t *testing.T
 	assert.Equal(t, "hello\n", string(appContents))
 }
 
+func TestPrepareBuildContext_AppliesDockerignoreWhenStaging(t *testing.T) {
+	contextDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(contextDir, "secret"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "secret", "key"), []byte("x"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(contextDir, "logs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "logs", "a.log"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "logs", "keep.log"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "app.txt"), []byte("hello\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, ".dockerignore"), []byte("secret\nlogs\n!logs/keep.log\n"), 0o644))
+
+	buildContextDir, _, cleanup, err := prepareBuildContext(buildFilesystemInput{
+		contextDir:           contextDir,
+		relDockerfile:        ".arcane.inline.Dockerfile",
+		dockerfileInline:     "FROM alpine:3.20\n",
+		dockerfileOutsideCtx: true,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	for _, gone := range []string{"secret", "logs/a.log"} {
+		_, statErr := os.Lstat(filepath.Join(buildContextDir, filepath.FromSlash(gone)))
+		require.ErrorIs(t, statErr, os.ErrNotExist, gone)
+	}
+	for _, kept := range []string{"app.txt", "logs/keep.log", ".dockerignore", ".arcane.inline.Dockerfile"} {
+		_, statErr := os.Lstat(filepath.Join(buildContextDir, filepath.FromSlash(kept)))
+		require.NoError(t, statErr, kept)
+	}
+}
+
 func TestDockerfileExcludedByDockerignore_ReturnsScannerError(t *testing.T) {
 	contextDir := t.TempDir()
 	tooLongPattern := strings.Repeat("a", bufio.MaxScanTokenSize+1)

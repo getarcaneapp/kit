@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -100,15 +101,29 @@ func (b *Service) buildSolveOpt(ctx context.Context, req types.BuildRequest, pro
 		return buildkit.SolveOpt{}, nil, nil, err
 	}
 
-	contextDir, dockerfilePath, cleanup, err := prepareBuildContext(fsInput)
+	// The context is mounted as is, so BuildKit applies its .dockerignore; only
+	// an inline or outside-context Dockerfile needs a directory of its own.
+	dockerfileDir, dockerfileName, cleanup, err := func() (string, string, func(), error) {
+		if fsInput.dockerfileInline == "" && !fsInput.dockerfileOutsideCtx {
+			return filepath.Join(fsInput.contextDir, filepath.Dir(filepath.FromSlash(fsInput.relDockerfile))), path.Base(fsInput.relDockerfile), func() {}, nil
+		}
+		dir, mkErr := os.MkdirTemp("", "arcane-dockerfile-*")
+		if mkErr != nil {
+			return "", "", nil, fmt.Errorf("failed to create temporary Dockerfile directory: %w", mkErr)
+		}
+		name, stageErr := stageDockerfile(fsInput, dir)
+		if stageErr != nil {
+			_ = os.RemoveAll(dir)
+			return "", "", nil, stageErr
+		}
+		return dir, name, func() { _ = os.RemoveAll(dir) }, nil
+	}()
 	if err != nil {
 		return buildkit.SolveOpt{}, nil, nil, err
 	}
 
-	dockerfileRelDir := filepath.Dir(filepath.FromSlash(dockerfilePath))
-
 	frontendAttrs := map[string]string{
-		"filename": kit.Ternary(dockerfileRelDir == ".", dockerfilePath, filepath.Base(dockerfilePath)),
+		"filename": dockerfileName,
 	}
 	if strings.TrimSpace(req.Target) != "" {
 		frontendAttrs["target"] = strings.TrimSpace(req.Target)
@@ -133,12 +148,12 @@ func (b *Service) buildSolveOpt(ctx context.Context, req types.BuildRequest, pro
 		frontendAttrs["label:"+k] = val
 	}
 
-	contextMount, err := fsutil.NewFS(contextDir)
+	contextMount, err := fsutil.NewFS(fsInput.contextDir)
 	if err != nil {
 		cleanup()
 		return buildkit.SolveOpt{}, nil, nil, fmt.Errorf("failed to prepare build context mount: %w", err)
 	}
-	dockerfileMount, err := fsutil.NewFS(kit.Ternary(dockerfileRelDir == ".", contextDir, filepath.Join(contextDir, dockerfileRelDir)))
+	dockerfileMount, err := fsutil.NewFS(dockerfileDir)
 	if err != nil {
 		cleanup()
 		return buildkit.SolveOpt{}, nil, nil, fmt.Errorf("failed to prepare Dockerfile mount: %w", err)

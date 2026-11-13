@@ -199,9 +199,21 @@ func copyFileWithMode(src, dst string, mode os.FileMode) (copyErr error) {
 	return nil
 }
 
+// prepareBuildContext returns the directory to send as the classic build
+// context. An inline or outside-context Dockerfile needs a staged copy of the
+// context, filtered by its .dockerignore, with the Dockerfile added.
 func prepareBuildContext(input buildFilesystemInput) (string, string, func(), error) {
 	if input.dockerfileInline == "" && !input.dockerfileOutsideCtx {
 		return input.contextDir, input.relDockerfile, func() {}, nil
+	}
+
+	excludes, err := readDockerignore(input.contextDir)
+	if err != nil {
+		return "", "", nil, err
+	}
+	matcher, err := patternmatcher.New(excludes)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("invalid .dockerignore: %w", err)
 	}
 
 	stagingDir, err := os.MkdirTemp("", "arcane-docker-build-*")
@@ -224,6 +236,15 @@ func prepareBuildContext(input buildFilesystemInput) (string, string, func(), er
 		}
 		if relPath == "." {
 			return nil
+		}
+
+		excluded, matchErr := matcher.MatchesOrParentMatches(filepath.ToSlash(relPath))
+		if matchErr != nil {
+			return matchErr
+		}
+		if excluded {
+			// An exception pattern may still re-include something below an excluded dir.
+			return kit.Ternary(d.IsDir() && !matcher.Exclusions(), fs.SkipDir, nil)
 		}
 
 		targetPath := filepath.Join(stagingDir, relPath)
@@ -259,37 +280,33 @@ func prepareBuildContext(input buildFilesystemInput) (string, string, func(), er
 		return "", "", nil, fmt.Errorf("failed to stage build context: %w", err)
 	}
 
-	if input.dockerfileInline != "" {
-		stagedDockerfilePath := filepath.Join(stagingDir, filepath.FromSlash(input.relDockerfile))
-		err = os.MkdirAll(filepath.Dir(stagedDockerfilePath), 0o755)
-		if err != nil {
-			cleanup()
-			return "", "", nil, fmt.Errorf("failed to create inline Dockerfile path: %w", err)
-		}
-		err = os.WriteFile(stagedDockerfilePath, []byte(input.dockerfileInline), 0o600)
-		if err != nil {
-			cleanup()
-			return "", "", nil, fmt.Errorf("failed to stage inline Dockerfile: %w", err)
-		}
+	dockerfile, err := stageDockerfile(input, stagingDir)
+	if err != nil {
+		cleanup()
+		return "", "", nil, err
+	}
+	return stagingDir, dockerfile, cleanup, nil
+}
 
-		return stagingDir, filepath.ToSlash(input.relDockerfile), cleanup, nil
+// stageDockerfile writes the inline Dockerfile, or a copy of the one outside
+// the context, into dir and returns its name there.
+func stageDockerfile(input buildFilesystemInput, dir string) (string, error) {
+	if input.dockerfileInline != "" {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(input.relDockerfile)), []byte(input.dockerfileInline), 0o600); err != nil {
+			return "", fmt.Errorf("failed to stage inline Dockerfile: %w", err)
+		}
+		return filepath.ToSlash(input.relDockerfile), nil
 	}
 
 	const stagedDockerfile = ".arcane.external.Dockerfile"
-	stagedDockerfilePath := filepath.Join(stagingDir, stagedDockerfile)
 	dockerfileInfo, err := os.Stat(input.fullDockerfilePath)
 	if err != nil {
-		cleanup()
-		return "", "", nil, fmt.Errorf("failed to stat Dockerfile: %w", err)
+		return "", fmt.Errorf("failed to stat Dockerfile: %w", err)
 	}
-
-	err = copyFileWithMode(input.fullDockerfilePath, stagedDockerfilePath, dockerfileInfo.Mode())
-	if err != nil {
-		cleanup()
-		return "", "", nil, fmt.Errorf("failed to stage Dockerfile: %w", err)
+	if err := copyFileWithMode(input.fullDockerfilePath, filepath.Join(dir, stagedDockerfile), dockerfileInfo.Mode()); err != nil {
+		return "", fmt.Errorf("failed to stage Dockerfile: %w", err)
 	}
-
-	return stagingDir, stagedDockerfile, cleanup, nil
+	return stagedDockerfile, nil
 }
 
 func (b *Service) performDockerBuild(

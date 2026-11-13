@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -60,6 +61,32 @@ func TestBuildSolveOpt_StagesInlineDockerfile(t *testing.T) {
 	require.NoError(t, appFile.Close())
 	require.NoError(t, err)
 	assert.Equal(t, "hello\n", string(appContents))
+}
+
+func TestBuildSolveOpt_MountsContextDirectlyWithStagedDockerfile(t *testing.T) {
+	contextDir := t.TempDir()
+	b := &Service{}
+
+	solveOpt, _, cleanup, err := b.buildSolveOpt(t.Context(), types.BuildRequest{
+		ContextDir:       contextDir,
+		DockerfileInline: "FROM alpine:3.20\n",
+	}, "local")
+	require.NoError(t, err)
+	defer cleanup()
+
+	// A file written after the mount is created is only visible through a
+	// mount of the context itself, not of a copy.
+	require.NoError(t, os.WriteFile(filepath.Join(contextDir, "late.txt"), []byte("late\n"), 0o644))
+	lateFile, err := solveOpt.LocalMounts["context"].Open("late.txt")
+	require.NoError(t, err)
+	require.NoError(t, lateFile.Close())
+
+	var dockerfileEntries []string
+	require.NoError(t, solveOpt.LocalMounts["dockerfile"].Walk(t.Context(), "", func(path string, _ fs.DirEntry, walkErr error) error {
+		dockerfileEntries = append(dockerfileEntries, path)
+		return walkErr
+	}))
+	assert.Equal(t, []string{".arcane.inline.Dockerfile"}, dockerfileEntries)
 }
 
 func TestBuildSolveOpt_LocalLoadUsesMobyExporter(t *testing.T) {
