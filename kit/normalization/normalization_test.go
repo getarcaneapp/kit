@@ -333,3 +333,17 @@ func TestNormalizeLengthConstraints(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeJSONSortsObjectKeys(t *testing.T) {
+	data := []byte(`{"trim":" b ","secret":"s","name":" a ","next":{"trim":" c ","name":"n","map":{"z":"1","a":"2"}}}`)
+	want := `{"name":"a","next":{"map":{"z":"1","a":"2"},"name":"n","trim":"c"},"secret":"s","trim":"b"}`
+	for range 20 {
+		got, err := NormalizeJSON(data, reflect.TypeFor[sample]())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("got %s, want %s", got, want)
+		}
+	}
+}

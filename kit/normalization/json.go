@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"reflect"
 )
 
@@ -18,10 +19,8 @@ func NormalizeJSON(data []byte, typ reflect.Type) ([]byte, error) {
 	if !p.hasRules {
 		return data, nil
 	}
-	var raw jsontext.Value
-	err = json.Unmarshal(data, &raw)
-	if err != nil {
-		return nil, err
+	if !jsontext.Value(data).IsValid() {
+		return nil, errors.New("normalization: invalid JSON")
 	}
 	return normalizeJSON(data, p)
 }
@@ -48,7 +47,7 @@ func normalizeJSON(data []byte, p *plan) ([]byte, error) {
 		if err := normalizeObject(fields, p); err != nil {
 			return nil, err
 		}
-		return json.Marshal(fields)
+		return json.Marshal(fields, json.Deterministic(true))
 	}
 	if p.kind == reflect.Slice || p.kind == reflect.Array {
 		if data[0] != '[' {
