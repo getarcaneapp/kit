@@ -29,6 +29,8 @@ type (
 
 	GitBuildContextRefRequiredError struct{}
 
+	GitBuildContextRefOptionError struct{}
+
 	GitBuildContextSubdirRequiredError struct{}
 
 	GitBuildContextSubdirRelativeError struct{}
@@ -86,6 +88,10 @@ func (e *GitBuildContextFragmentRequiredError) Error() string {
 
 func (e *GitBuildContextRefRequiredError) Error() string {
 	return "git build context ref cannot be empty"
+}
+
+func (e *GitBuildContextRefOptionError) Error() string {
+	return `git build context ref must not start with "-"`
 }
 
 func (e *GitBuildContextSubdirRequiredError) Error() string {

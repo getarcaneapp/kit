@@ -53,6 +53,9 @@ func ParseGitBuildContextSource(raw string) (*GitBuildContextSource, bool, error
 	if ref == "" {
 		return nil, true, &types.GitBuildContextRefRequiredError{}
 	}
+	if strings.HasPrefix(ref, "-") {
+		return nil, true, &types.GitBuildContextRefOptionError{}
+	}
 
 	if !hasSubdir {
 		return newSource(ref, ""), true, nil
