@@ -46,3 +46,40 @@ func TestPrepareBuildContext_SkipsFIFO(t *testing.T) {
 		t.Fatal("staging blocked on a FIFO in the build context")
 	}
 }
+
+func TestPrepareBuildContext_StagesReadOnlyDirectories(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	contextDir := t.TempDir()
+	readOnly := filepath.Join(contextDir, "ro")
+	require.NoError(t, os.MkdirAll(filepath.Join(readOnly, "nested"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(readOnly, "nested", "app.txt"), []byte("hello\n"), 0o644))
+	require.NoError(t, os.Chmod(filepath.Join(readOnly, "nested"), 0o555))
+	require.NoError(t, os.Chmod(readOnly, 0o555))
+	t.Cleanup(func() {
+		_ = os.Chmod(readOnly, 0o755)
+		_ = os.Chmod(filepath.Join(readOnly, "nested"), 0o755)
+	})
+
+	dir, _, cleanup, err := prepareBuildContext(buildFilesystemInput{
+		contextDir:           contextDir,
+		relDockerfile:        ".arcane.inline.Dockerfile",
+		dockerfileInline:     "FROM alpine:3.20\n",
+		dockerfileOutsideCtx: true,
+	})
+	require.NoError(t, err)
+
+	contents, err := os.ReadFile(filepath.Join(dir, "ro", "nested", "app.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "hello\n", string(contents))
+	for _, sub := range []string{"ro", filepath.Join("ro", "nested")} {
+		info, statErr := os.Stat(filepath.Join(dir, sub))
+		require.NoError(t, statErr)
+		assert.Equal(t, os.FileMode(0o555), info.Mode().Perm(), sub)
+	}
+
+	cleanup()
+	_, err = os.Lstat(dir)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}

@@ -221,7 +221,17 @@ func prepareBuildContext(input buildFilesystemInput) (string, string, func(), er
 		return "", "", nil, fmt.Errorf("failed to create temporary build directory: %w", err)
 	}
 
+	// Staged dirs are created writable so their children can be copied in,
+	// then given the source modes once the walk is done.
+	type stagedDir struct {
+		path string
+		mode os.FileMode
+	}
+	var stagedDirs []stagedDir
 	cleanup := func() {
+		for _, dir := range stagedDirs {
+			_ = os.Chmod(dir.path, 0o700)
+		}
 		_ = os.RemoveAll(stagingDir)
 	}
 
@@ -254,7 +264,11 @@ func prepareBuildContext(input buildFilesystemInput) (string, string, func(), er
 		}
 
 		if d.IsDir() {
-			return os.MkdirAll(targetPath, info.Mode())
+			stagedDirs = append(stagedDirs, stagedDir{
+				path: targetPath,
+				mode: info.Mode(),
+			})
+			return os.MkdirAll(targetPath, 0o700)
 		}
 
 		if d.Type()&os.ModeSymlink != 0 {
@@ -284,6 +298,12 @@ func prepareBuildContext(input buildFilesystemInput) (string, string, func(), er
 	if err != nil {
 		cleanup()
 		return "", "", nil, err
+	}
+	for _, dir := range slices.Backward(stagedDirs) {
+		if chmodErr := os.Chmod(dir.path, dir.mode); chmodErr != nil {
+			cleanup()
+			return "", "", nil, fmt.Errorf("failed to stage build context: %w", chmodErr)
+		}
 	}
 	return stagingDir, dockerfile, cleanup, nil
 }
