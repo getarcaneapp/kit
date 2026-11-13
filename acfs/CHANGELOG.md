@@ -1,3 +1,34 @@
+## acfs/v0.10.2
+
+### New features
+
+* bound ListEach memory by an entry limit ([#29](https://github.com/getarcaneapp/kit/pull/29) by @neurekadev)
+
+### Bug fixes
+
+* strip setuid and setgid from copied files([8f0dd88](https://github.com/getarcaneapp/kit/commit/8f0dd881b7759465cb520d1ba319b8af45d134bb) by @kmendell)
+* walk copy sources by descriptor to stay inside the root([c54f48c](https://github.com/getarcaneapp/kit/commit/c54f48c98fb624efb96611e362d462692116910a) by @kmendell)
+* check file type before opening read and copy targets([085bd83](https://github.com/getarcaneapp/kit/commit/085bd838646a5bcbd0bd5aec29b44e419afecbad) by @kmendell)
+* report renames onto directories as already existing([6b0fec5](https://github.com/getarcaneapp/kit/commit/6b0fec5a17be0a5b02b9745aef4868ea0b7ab93a) by @kmendell)
+* resolve lint issues in copy and walk([6d655af](https://github.com/getarcaneapp/kit/commit/6d655af47d9eaf41c417c0b6fde424541888c645) by @kmendell)
+
+### Performance improvements
+
+* stream copied files and compare mirrors in chunks([6154107](https://github.com/getarcaneapp/kit/commit/615410741a7745d63d27132f899288c3e85dea7a) by @kmendell)
+* probe walk depth boundary with a small directory read([9ce8364](https://github.com/getarcaneapp/kit/commit/9ce83646eb7be5c6f50655722cc94df89d1f8677) by @kmendell)
+* size list reads so a limited list holds at most 2x names([a09cd91](https://github.com/getarcaneapp/kit/commit/a09cd91c431750d5679fc8a4f0ad968938982b86) by @kmendell)
+* compare in-place writes by size, then in chunks([d385e46](https://github.com/getarcaneapp/kit/commit/d385e46126c802b474317c5628da4fb2f4f3e021) by @kmendell)
+* stream list output to stdout instead of a temp file([dce87b1](https://github.com/getarcaneapp/kit/commit/dce87b1424d25fe098a3ab35224e1ec9adf14ff8) by @kmendell)
+
+### Other
+
+* build literals one field per line and once([d30afb1](https://github.com/getarcaneapp/kit/commit/d30afb1fd11cb23989a93ad60060340c88b3e03a) by @kmendell)
+* drop a fifo copy check that never failed before the fix([f5edb1f](https://github.com/getarcaneapp/kit/commit/f5edb1faf1a5f2bf5db9c4db4672f38835593ffb) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/acfs/v0.10.1...acfs/v0.10.2
+
 ## acfs/v0.10.1
 
 ### Bug fixes
