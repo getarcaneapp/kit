@@ -1,3 +1,26 @@
+## docker/convert/v0.4.3
+
+### Bug fixes
+
+* honour explicit values on long boolean flags([8cdddb9](https://github.com/getarcaneapp/kit/commit/8cdddb9736b8b197cf2a669d330849c80eeb370e) by @kmendell)
+* stop unknown flags from consuming the image token([8736885](https://github.com/getarcaneapp/kit/commit/87368850d5f7ac0482de4b4f53185ba0c706987c) by @kmendell)
+* map hostname, ip and network aliases([3466ec2](https://github.com/getarcaneapp/kit/commit/3466ec2d87c34746eaa46f15e2618c4ec6213e12) by @kmendell)
+* give stop-timeout a seconds unit([cff1f53](https://github.com/getarcaneapp/kit/commit/cff1f5317c0c34913c948ee025bcc5aae1383d7f) by @kmendell)
+* keep existing compose structure when merging([9c18a3b](https://github.com/getarcaneapp/kit/commit/9c18a3bac5ff6f2d0bac6dd4234548030f425324) by @kmendell)
+* convert --mount to long-syntax volumes([07a7cf9](https://github.com/getarcaneapp/kit/commit/07a7cf91dc67a92bb366cdeb0e27761cbbb299cf) by @kmendell)
+* convert --gpus options to device requests([51d5d94](https://github.com/getarcaneapp/kit/commit/51d5d949a335001c24beb8702e70a73e46ef29bf) by @kmendell)
+* stop a bare dash token from panicking the parser([484973c](https://github.com/getarcaneapp/kit/commit/484973c91d25d036d01243ae86a7954de3c29925) by @kmendell)
+* resolve lint issues in gpu parsing and tests([a57d714](https://github.com/getarcaneapp/kit/commit/a57d71428b53758b6a339b1ce23f567bc9b934ed) by @kmendell)
+* bump deps([a7c1bfe](https://github.com/getarcaneapp/kit/commit/a7c1bfea542b3fb145814e95a2ec01de83791002) by @kmendell)
+
+### Other
+
+* assert the result of parsing a bare dash([3e65565](https://github.com/getarcaneapp/kit/commit/3e65565134d52a9dc40313ec3a8fb75786a70de8) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.4.2...docker/convert/v0.4.3
+
 ## docker/convert/v0.4.2
 
 ### Bug fixes
