@@ -35,10 +35,11 @@ type (
 	}
 )
 
-var plans = struct {
-	values map[reflect.Type]cachedPlan
+// plans caches compiled plans by type. Reads are lock-free; the mutex only serialises compiling.
+var plans struct {
+	values sync.Map
 	sync.Mutex
-}{values: make(map[reflect.Type]cachedPlan)}
+}
 
 // HasRules validates normalization tags and reports whether the type contains any.
 // Compiled type metadata is cached and safe for concurrent use.
@@ -54,10 +55,13 @@ func planFor(typ reflect.Type) (*plan, error) {
 	if typ == nil {
 		return nil, errors.New("normalization type is nil")
 	}
+	if cached, ok := plans.values.Load(typ); ok {
+		return cached.(cachedPlan).plan, cached.(cachedPlan).err
+	}
 	plans.Lock()
 	defer plans.Unlock()
-	if cached, ok := plans.values[typ]; ok {
-		return cached.plan, cached.err
+	if cached, ok := plans.values.Load(typ); ok {
+		return cached.(cachedPlan).plan, cached.(cachedPlan).err
 	}
 	seen := make(map[reflect.Type]*plan)
 	p, err := compile(typ, seen)
@@ -75,7 +79,7 @@ func planFor(typ reflect.Type) (*plan, error) {
 			}
 		}
 	}
-	plans.values[typ] = cachedPlan{plan: p, err: err}
+	plans.values.Store(typ, cachedPlan{plan: p, err: err})
 	return p, err
 }
 
