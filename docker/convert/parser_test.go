@@ -48,6 +48,9 @@ func TestParseSplitsStatements(t *testing.T) {
 		{name: "leading operator", input: "; docker run alpine", want: [][]string{{"alpine"}}},
 		{name: "doubled operator", input: "docker run alpine;; docker run busybox", want: [][]string{{"alpine"}, {"busybox"}}},
 		{name: "long bool flags honour explicit values", input: "docker run --privileged=false --read-only=true --init=0 --rm=FALSE alpine", want: [][]string{{"read_only=true", "alpine"}}},
+		{name: "short hostname", input: "docker run -h web alpine", want: [][]string{{"hostname=web", "alpine"}}},
+		{name: "unknown long flag keeps the image", input: "docker run --publish-all --made-up nginx", want: [][]string{{"ignored=--publish-all", "ignored=--made-up", "nginx"}}},
+		{name: "unsupported value flags skip their value", input: "docker run --memory-swap 1g -c 512 nginx", want: [][]string{{"ignored=--memory-swap=1g", "ignored=-c 512", "nginx"}}},
 		{name: "non-ascii before operator", input: "docker run --label note=héllo✓ alpine;docker run busybox", want: [][]string{{"labels=note=héllo✓", "alpine"}, {"busybox"}}},
 	}
 

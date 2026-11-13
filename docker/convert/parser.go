@@ -2,6 +2,7 @@ package convert
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ var (
 	valueFlags = map[string]string{
 		"--name":           "name",
 		"--hostname":       "hostname",
+		"-h":               "hostname",
 		"--publish":        "ports",
 		"--port":           "ports",
 		"-p":               "ports",
@@ -71,6 +73,22 @@ var (
 		"--init":             "init",
 		"--read-only":        "read_only",
 		"--oom-kill-disable": "oom_kill_disable",
+	}
+
+	// unsupportedValueFlags are docker run flags with no compose mapping that
+	// still take a value, so the value is skipped along with the flag.
+	unsupportedValueFlags = []string{
+		"--annotation", "--attach", "-a", "--blkio-weight", "--blkio-weight-device",
+		"--cgroup-parent", "--cgroupns", "--cidfile", "--cpu-period", "--cpu-quota",
+		"--cpu-rt-period", "--cpu-rt-runtime", "--cpu-shares", "-c", "--cpuset-cpus",
+		"--cpuset-mems", "--detach-keys", "--device-cgroup-rule", "--device-read-bps",
+		"--device-read-iops", "--device-write-bps", "--device-write-iops", "--dns-option",
+		"--dns-search", "--domainname", "--health-interval", "--health-retries",
+		"--health-start-interval", "--health-start-period", "--health-timeout", "--ip6",
+		"--ipc", "--isolation", "--kernel-memory", "--label-file", "--link", "--link-local-ip",
+		"--mac-address", "--memory-reservation", "--memory-swap", "--memory-swappiness",
+		"--oom-score-adj", "--pid", "--pids-limit", "--runtime", "--shm-size", "--storage-opt",
+		"--sysctl", "--tmpfs", "--umask", "--userns", "--uts", "--volume-driver", "--volumes-from",
 	}
 )
 
@@ -247,7 +265,10 @@ func parseFlag(token string, tokens []string, index int) (string, string, int, e
 			}
 			return mapped, tokens[index+1], 1, nil
 		}
-		if !hasValue && index+1 < len(tokens) && !strings.HasPrefix(tokens[index+1], "-") {
+		if !hasValue && slices.Contains(unsupportedValueFlags, name) {
+			if index+1 >= len(tokens) {
+				return "", "", 0, types.NewParseError("missing value for %s flag", name)
+			}
 			return "ignored", token + "=" + tokens[index+1], 1, nil
 		}
 		return "ignored", token, 0, nil
@@ -264,6 +285,12 @@ func parseFlag(token string, tokens []string, index int) (string, string, int, e
 	}
 	if mapped, ok := boolFlags[token]; ok {
 		return mapped, "true", 0, nil
+	}
+	if slices.Contains(unsupportedValueFlags, token) {
+		if index+1 >= len(tokens) {
+			return "", "", 0, types.NewParseError("missing value for %s flag", token)
+		}
+		return "ignored", token + " " + tokens[index+1], 1, nil
 	}
 	return "ignored", token, 0, nil
 }
