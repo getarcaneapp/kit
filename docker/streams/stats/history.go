@@ -115,8 +115,9 @@ func (s *Store) Record(req RecordRequest) []StatsHistorySample {
 	defer s.mu.Unlock()
 	s.initLocked()
 
-	if s.lastPrune.IsZero() || kit.Ternary(req.RecordedAt.IsZero(), time.Now(), req.RecordedAt).Sub(s.lastPrune) >= s.pruneInterval {
-		s.pruneLocked(req.RecordedAt)
+	recordedAt := kit.Ternary(req.RecordedAt.IsZero(), time.Now(), req.RecordedAt)
+	if s.lastPrune.IsZero() || recordedAt.Sub(s.lastPrune) >= s.pruneInterval {
+		s.pruneLocked(recordedAt)
 	}
 
 	buffer := s.histories[req.ContainerID]
@@ -125,7 +126,7 @@ func (s *Store) Record(req RecordRequest) []StatsHistorySample {
 		s.histories[req.ContainerID] = buffer
 	}
 
-	buffer.append(req.Sample, req.RecordedAt)
+	buffer.append(req.Sample, recordedAt)
 
 	if !req.IncludeHistory {
 		return nil

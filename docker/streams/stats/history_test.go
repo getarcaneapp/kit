@@ -130,3 +130,15 @@ func TestRemoveEvictsHistory(t *testing.T) {
 		t.Fatalf("history after remove = %#v, want nil", history)
 	}
 }
+
+func TestStoreRecordZeroTimeMeansNow(t *testing.T) {
+	store := NewStore(StoreConfig{})
+	store.Record(RecordRequest{
+		ContainerID: "container-1",
+		Sample:      StatsHistorySample{CPUTenths: 1},
+	})
+	store.Prune(time.Now())
+	if history := store.History("container-1"); len(history) != 1 {
+		t.Fatalf("history after prune = %#v, want one sample", history)
+	}
+}
