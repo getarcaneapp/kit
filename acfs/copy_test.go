@@ -208,6 +208,50 @@ func TestMirrorDirSkipsRewritingIdenticalDestinationFiles(t *testing.T) {
 	}
 }
 
+func TestMirrorDirRewritesFileDifferingAfterFirstChunk(t *testing.T) {
+	t.Parallel()
+
+	source, destination := t.TempDir(), t.TempDir()
+	content := strings.Repeat("a", 3*compareChunkSize)
+	writeFixtureFile(t, filepath.Join(source, "data"), content+"new", 0o640)
+	writeFixtureFile(t, filepath.Join(destination, "data"), content+"old", 0o640)
+
+	if err := (Root{Path: source}).MirrorTo(t.Context(), Root{Path: destination}, acfstypes.MirrorOptions{}); err != nil {
+		t.Fatalf("MirrorTo: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(destination, "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content+"new" {
+		t.Fatalf("mirrored %d bytes ending %q, want source content", len(got), got[max(len(got)-3, 0):])
+	}
+}
+
+func TestEqualContent(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("x", 5)
+	tests := []struct {
+		name string
+		a    string
+		b    string
+		want bool
+	}{
+		{name: "empty", want: true},
+		{name: "equal across chunks", a: long, b: long, want: true},
+		{name: "differs in last chunk", a: long, b: long[:4] + "y"},
+		{name: "prefix", a: long, b: long[:4]},
+		{name: "chunk aligned prefix", a: long[:4], b: long[:2]},
+	}
+	for _, test := range tests {
+		got, err := equalContent(strings.NewReader(test.a), strings.NewReader(test.b), make([]byte, 4))
+		if err != nil || got != test.want {
+			t.Errorf("%s: equalContent = %v, %v, want %v", test.name, got, err, test.want)
+		}
+	}
+}
+
 func TestMirrorDirToleratesUnwritableDestinationFiles(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root; file permissions are not enforced")

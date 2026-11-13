@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -21,13 +22,16 @@ type directoryCopy struct {
 	ctx         context.Context
 	destination *mutationRoot
 	record      func(relativePath string)
-	tolerate    bool
-	mirror      bool
-	copied      int
+	// buffer holds the two chunks mirror mode compares.
+	buffer   []byte
+	tolerate bool
+	mirror   bool
+	copied   int
 }
 
 const (
 	copyDirectoryMode = 0o755
+	compareChunkSize  = 64 << 10
 )
 
 // CopyTo copies r into destination, which may not nest with r. Links are skipped
@@ -158,6 +162,7 @@ func copyDirectoryContents(ctx context.Context, sourceDir, destinationDir string
 		ctx:         ctx,
 		destination: destination,
 		record:      record,
+		buffer:      make([]byte, 2*compareChunkSize),
 		tolerate:    tolerate,
 		mirror:      mirror,
 	}
@@ -242,7 +247,7 @@ func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) erro
 			// Reading a socket, FIFO, or device fails with ENXIO (#3003).
 			c.record(childPath)
 		default:
-			content, err := source.ReadFile(name)
+			file, err := source.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 			if tolerable(err) {
 				c.record(childPath)
 				continue
@@ -250,8 +255,8 @@ func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) erro
 			if err != nil {
 				return err
 			}
-			err = writeCopiedFile(c.destination, filepath.ToSlash(childPath), content, info.Mode().Perm()|info.Mode()&os.ModeSticky, c.mirror)
-			if c.mirror && errors.Is(err, os.ErrPermission) {
+			regular, err := c.copyFile(file, filepath.ToSlash(childPath), info.Mode().Perm()|info.Mode()&os.ModeSticky)
+			if !regular || (c.mirror && errors.Is(err, os.ErrPermission)) {
 				c.record(childPath)
 				continue
 			}
@@ -264,45 +269,93 @@ func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) erro
 	return nil
 }
 
-// writeCopiedFile writes a copied file in place without following symbolic
-// links. In mirror mode an identical destination file is left untouched.
-func writeCopiedFile(destination *mutationRoot, relativePath string, content []byte, mode os.FileMode, mirror bool) (retErr error) {
-	parent, err := destination.top.openDir(path.Dir(relativePath), dirOptions{Create: true, Mode: copyDirectoryMode})
+// copyFile copies source, closing it, to relativePath in place without
+// following symbolic links, and reports false if source is no longer a regular
+// file. In mirror mode an identical destination file is left untouched.
+func (c *directoryCopy) copyFile(source *os.File, relativePath string, mode os.FileMode) (regular bool, retErr error) {
+	defer func() {
+		retErr = errors.Join(retErr, source.Close())
+	}()
+	sourceInfo, err := source.Stat()
 	if err != nil {
-		return err
+		return true, err
+	}
+	if !sourceInfo.Mode().IsRegular() {
+		return false, nil
+	}
+
+	parent, err := c.destination.top.openDir(path.Dir(relativePath), dirOptions{Create: true, Mode: copyDirectoryMode})
+	if err != nil {
+		return true, err
 	}
 	defer func() {
 		retErr = errors.Join(retErr, parent.Close())
 	}()
 	base := path.Base(relativePath)
 
-	if mirror {
-		if existing, readErr := parent.ReadFile(base); readErr == nil && bytes.Equal(existing, content) {
-			return nil
+	if c.mirror {
+		existing, openErr := parent.OpenFile(base, os.O_RDONLY, 0)
+		if openErr == nil {
+			existingInfo, statErr := existing.Stat()
+			same := statErr == nil && existingInfo.Mode().IsRegular() && existingInfo.Size() == sourceInfo.Size()
+			if same {
+				same, err = equalContent(existing, source, c.buffer)
+			}
+			_ = existing.Close()
+			if err != nil || same {
+				return true, err
+			}
+			if _, err = source.Seek(0, io.SeekStart); err != nil {
+				return true, err
+			}
 		}
 	}
 	file, err := parent.OpenFile(base, os.O_WRONLY|os.O_CREATE, mode)
 	if err != nil {
-		return err
+		return true, err
 	}
 	defer func() {
 		retErr = errors.Join(retErr, file.Close())
 	}()
 	info, err := file.Stat()
 	if err != nil {
-		return err
+		return true, err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w: %s", ErrNotFile, parent.display(base))
+		return true, fmt.Errorf("%w: %s", ErrNotFile, parent.display(base))
 	}
 	if info.Size() > 0 {
 		err = file.Truncate(0)
 		if err != nil {
-			return err
+			return true, err
 		}
 	}
-	_, err = file.Write(content)
-	return err
+	_, err = io.Copy(file, source)
+	return true, err
+}
+
+// equalContent reports whether a and b hold the same bytes, comparing them in
+// chunks of half of buffer.
+func equalContent(a, b io.Reader, buffer []byte) (bool, error) {
+	chunkA, chunkB := buffer[:len(buffer)/2], buffer[len(buffer)/2:]
+	for {
+		readA, errA := io.ReadFull(a, chunkA)
+		readB, errB := io.ReadFull(b, chunkB)
+		endA := errors.Is(errA, io.EOF) || errors.Is(errA, io.ErrUnexpectedEOF)
+		endB := errors.Is(errB, io.EOF) || errors.Is(errB, io.ErrUnexpectedEOF)
+		if errA != nil && !endA {
+			return false, errA
+		}
+		if errB != nil && !endB {
+			return false, errB
+		}
+		if !bytes.Equal(chunkA[:readA], chunkB[:readB]) {
+			return false, nil
+		}
+		if endA || endB {
+			return endA == endB, nil
+		}
+	}
 }
 
 // keepUnprunableEntry skips an entry that must stay during a walk.
