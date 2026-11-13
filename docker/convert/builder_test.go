@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"kit.getarcane.app/docker/convert"
 	converttypes "kit.getarcane.app/docker/convert/types"
@@ -124,5 +125,15 @@ func TestBuildWarnsOnEndpointWithoutNetwork(t *testing.T) {
 	}
 	if len(doc.Warnings) != 1 {
 		t.Fatalf("warnings = %+v, want one", doc.Warnings)
+	}
+}
+
+func TestConvertStopTimeoutBecomesDuration(t *testing.T) {
+	result, err := convert.Convert("docker run --stop-timeout 10 nginx", converttypes.Options{})
+	if err != nil {
+		t.Fatalf("Convert returned error: %v", err)
+	}
+	if got := result.Project.Services["nginx"].StopGracePeriod; got == nil || time.Duration(*got) != 10*time.Second {
+		t.Fatalf("stop_grace_period = %v, want 10s", got)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/format"
@@ -101,8 +102,12 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 		case "aliases":
 			aliases, _ := endpoint["aliases"].([]string)
 			endpoint["aliases"] = append(aliases, flag.Value)
-		case "hostname", "restart", "working_dir", "user", "platform", "pull_policy", "stop_signal", "stop_grace_period":
+		case "hostname", "restart", "working_dir", "user", "platform", "pull_policy", "stop_signal":
 			service[flag.Name] = flag.Value
+		case "stop_grace_period":
+			// docker run --stop-timeout is whole seconds; compose needs a duration.
+			_, err := strconv.ParseUint(flag.Value, 10, 64)
+			service["stop_grace_period"] = kit.Ternary(err == nil, flag.Value+"s", flag.Value)
 		case "entrypoint":
 			// docker run --entrypoint takes a single executable, not a command line.
 			if flag.Value != "" {
