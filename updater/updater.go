@@ -6,10 +6,14 @@ import (
 	"errors"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"kit.getarcane.app"
 )
+
+// detachedTimeout bounds detached recreate and rollback work when Config.OperationTimeout is zero.
+const detachedTimeout = 10 * time.Minute
 
 type (
 	// Service coordinates Docker image updates, container recreation, and the host adapters configured
@@ -88,4 +92,13 @@ func (s *Service) opCtx(ctx context.Context) (context.Context, context.CancelFun
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, s.config.OperationTimeout)
+}
+
+// detachedCtx outlives a caller cancel for work that must finish once started, such as restoring a
+// stopped container. Each operation stays bounded by opCtx, or by detachedTimeout without OperationTimeout.
+func (s *Service) detachedCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if s.config.OperationTimeout > 0 {
+		return context.WithoutCancel(ctx), func() {}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), detachedTimeout)
 }

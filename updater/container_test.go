@@ -2,6 +2,7 @@ package updater
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -234,6 +235,52 @@ func TestUpdateStandaloneContainerRollsBackAndRemovesDanglingCreateOnStartFailur
 	if !sawCleanup || !sawRollback {
 		t.Fatalf("events = %#v, want cleanup and rollback events", recorder.events)
 	}
+}
+
+func TestUpdateStandaloneContainerRestoresBackupAfterCallerCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var operations []string
+	dockerClient := newDockerClientForHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		path := dockerAPIPath(r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(path, "/images/"):
+			writeDockerJSON(t, w, map[string]any{"Id": "sha256:old-image"})
+		case r.Method == http.MethodPost && path == "/containers/old-id/stop":
+			operations = append(operations, "stop:old-id")
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && path == "/containers/old-id/rename":
+			operations = append(operations, "rename:old-id:"+r.URL.Query().Get("name"))
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && path == "/containers/create":
+			operations = append(operations, "create:new")
+			cancel()
+			http.Error(w, "create failed", http.StatusInternalServerError)
+		case r.Method == http.MethodPost && path == "/containers/old-id/start":
+			operations = append(operations, "start:old-id")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	})
+	service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}})
+
+	err := service.updateComposeOrStandalone(ctx,
+		container.Summary{ID: "old-id", Names: []string{"/app"}},
+		container.InspectResponse{
+			State:  &container.State{Running: true},
+			ID:     "old-id",
+			Name:   "/app",
+			Image:  "sha256:old-image",
+			Config: &container.Config{Image: "app:1"},
+		},
+		"app:2",
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "rollback succeeded") {
+		t.Fatalf("updateComposeOrStandalone() error = %v, want rollback succeeded after caller cancel", err)
+	}
+	assertOperationsInOrder(t, operations, []string{"stop:old-id", "create:new", "rename:old-id:app", "start:old-id"})
 }
 
 func TestUpdateStandaloneContainerRemovesCreatedContainerWhenExtraNetworkConnectTimesOut(t *testing.T) {

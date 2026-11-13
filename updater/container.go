@@ -232,7 +232,10 @@ func (s *Service) updateComposeOrStandalone(ctx context.Context, target containe
 // createStartOrRollback recreates the container as newRef, spelled like its configured image, and
 // restores backupID, or recreates it from its old image ID without one, when that fails.
 func (s *Service) createStartOrRollback(ctx context.Context, dockerClient *client.Client, cnt container.Summary, inspect container.InspectResponse, newRef, backupID string) error {
-	newRef = kit.Ternary(inspect.Config == nil, newRef, refs.PreserveConfiguredRef(kit.FromPtr(inspect.Config).Image, newRef))
+	// The old container is already stopped and renamed; a caller cancel must not strand it there.
+	ctx, cancel := s.detachedCtx(ctx)
+	defer cancel()
+	newRef =kit.Ternary(inspect.Config == nil, newRef, refs.PreserveConfiguredRef(kit.FromPtr(inspect.Config).Image, newRef))
 	name := containerSummaryName(cnt)
 	createdID, err := s.createAndStartStandaloneContainer(ctx, dockerClient, cnt, inspect, newRef)
 	if err == nil {

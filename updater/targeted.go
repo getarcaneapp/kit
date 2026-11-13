@@ -10,7 +10,6 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"kit.getarcane.app"
 	"kit.getarcane.app/docker/compat"
 
 	"kit.getarcane.app/updater/internal/deps"
@@ -78,8 +77,6 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		return rank
 	}
 	slices.SortStableFunc(units, func(a, b []deps.ContainerWithDeps) int { return cmp.Compare(unitRank(a), unitRank(b)) })
-	// With per-operation bounds, a pulled unit finishes its recreate even after the run is cancelled.
-	recreateCtx := kit.Ternary(s.config.OperationTimeout > 0, context.WithoutCancel(ctx), ctx)
 	var results []ResourceResult
 	for _, unit := range units {
 		unitScan := &restartScan{
@@ -100,7 +97,10 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 			continue
 		}
 		propagateImplicitRestarts(unitScan)
+		// A pulled unit finishes its recreate even after the run is cancelled.
+		recreateCtx, cancelRecreate := s.detachedCtx(ctx)
 		restarted, restartErr := s.executeRestartPlans(recreateCtx, dockerClient, s.sortRestartCandidates(ctx, unitScan), scan.plansByName)
+		cancelRecreate()
 		if restartErr != nil {
 			return restartErr
 		}
