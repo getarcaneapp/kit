@@ -61,10 +61,11 @@ type (
 	}
 
 	call[V any] struct {
-		value V
-		err   error
-		done  chan struct{}
-		found bool
+		value   V
+		err     error
+		done    chan struct{}
+		found   bool
+		discard bool
 	}
 )
 
@@ -153,7 +154,8 @@ func (c *Cache[K, V]) Peek(key K) (V, bool) {
 	return c.read(e.value, e.found), e.found
 }
 
-// Delete removes keys from the cache.
+// Delete removes keys from the cache. A load in flight for a key still answers
+// its callers but is not stored.
 func (c *Cache[K, V]) Delete(keys ...K) {
 	c.init()
 	c.mu.Lock()
@@ -162,16 +164,22 @@ func (c *Cache[K, V]) Delete(keys ...K) {
 		if el, ok := c.items[key]; ok {
 			c.removeLocked(el)
 		}
+		if cl, ok := c.inflight[key]; ok {
+			cl.discard = true
+		}
 	}
 }
 
-// Purge removes every entry.
+// Purge removes every entry. Loads in flight still answer their callers but are not stored.
 func (c *Cache[K, V]) Purge() {
 	c.init()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	clear(c.items)
 	c.order.Init()
+	for _, cl := range c.inflight {
+		cl.discard = true
+	}
 }
 
 // Keys returns the keys of unexpired values, most recently used first.
@@ -253,6 +261,7 @@ func (c *Cache[K, V]) run(key K, load func(K) (V, bool, error), cl *call[V], sta
 		c.mu.Lock()
 		el, ok := c.items[key]
 		switch {
+		case cl.discard:
 		case cl.err != nil:
 			if ok && el.Value.(*entry[K, V]) == stale {
 				c.setLocked(key, stale.value, stale.found, c.TTL)

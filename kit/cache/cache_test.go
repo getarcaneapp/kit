@@ -345,3 +345,39 @@ func TestCacheForegroundLoadPanicReachesCaller(t *testing.T) {
 	}()
 	_, _, _ = c.Get("k")
 }
+
+func TestCacheDeleteDuringLoadDiscardsResult(t *testing.T) {
+	tests := []struct {
+		name   string
+		remove func(*Cache[string, int])
+	}{
+		{name: "delete", remove: func(c *Cache[string, int]) { c.Delete("k") }},
+		{name: "purge", remove: func(c *Cache[string, int]) { c.Purge() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			started, release := make(chan struct{}), make(chan struct{})
+			c := &Cache[string, int]{
+				Load: func(string) (int, bool, error) {
+					close(started)
+					<-release
+					return 1, true, nil
+				},
+			}
+			done := make(chan int)
+			go func() {
+				got, _, _ := c.Get("k")
+				done <- got
+			}()
+			<-started
+			tt.remove(c)
+			close(release)
+			if got := <-done; got != 1 {
+				t.Fatalf("waiting Get = %d, want 1", got)
+			}
+			if _, found := c.Peek("k"); found {
+				t.Fatalf("%s during load was undone by the load", tt.name)
+			}
+		})
+	}
+}
