@@ -213,8 +213,19 @@ func (s *Service) updateComposeOrStandalone(ctx context.Context, target containe
 		if err == nil {
 			// Never fall back once Compose owns the update, or a standalone recreate could clobber a partial up.
 			opCtx, cancel := s.opCtx(ctx)
-			defer cancel()
-			return s.config.ProjectUpdater.UpdateServices(opCtx, project.ID, []string{serviceName})
+			err = s.config.ProjectUpdater.UpdateServices(opCtx, project.ID, []string{serviceName})
+			cancel()
+			if err != nil {
+				return err
+			}
+			dockerClient, err := s.dockerClient(ctx)
+			if err != nil {
+				return err
+			}
+			// A forced update of an unchanged image can only be checked to be running.
+			pulled, pulledErr := dockerClient.ImageInspect(ctx, newRef)
+			oldImageID := kit.Ternary(pulledErr == nil && pulled.ID == inspect.Image, "", inspect.Image)
+			return verifyComposeService(ctx, dockerClient, projectName, serviceName, oldImageID, "")
 		}
 		s.logger.WarnContext(ctx, "compose project not resolved; falling back to standalone container update",
 			"container", containerSummaryName(target),

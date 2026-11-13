@@ -524,6 +524,51 @@ func TestServiceFallsBackToStandaloneWhenComposeProjectUnresolved(t *testing.T) 
 	}
 }
 
+func TestUpdateComposeServiceVerifiesOldImageReplaced(t *testing.T) {
+	for _, tt := range []struct {
+		name, runningID, pulledID string
+		wantErr                   bool
+	}{
+		{name: "replaced", runningID: "sha256:new", pulledID: "sha256:new"},
+		{name: "still old", runningID: "sha256:old", pulledID: "sha256:new", wantErr: true},
+		{name: "forced unchanged", runningID: "sha256:old", pulledID: "sha256:old"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dockerClient := newDockerClientForHandler(t, func(w http.ResponseWriter, r *http.Request) {
+				switch dockerAPIPath(r.URL.Path) {
+				case "/images/app:1/json":
+					writeDockerJSON(t, w, map[string]any{"Id": tt.pulledID})
+				case "/containers/json":
+					writeDockerJSON(t, w, []container.Summary{{ID: "web-new", ImageID: tt.runningID, State: container.StateRunning}})
+				default:
+					http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+				}
+			})
+			projectUpdater := &fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app", Name: "app"}}}
+			service := newServiceForTest(t, Config{
+				DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
+				ProjectUpdater:       projectUpdater,
+			})
+
+			err := service.updateComposeOrStandalone(t.Context(), container.Summary{ID: "web-old"}, container.InspectResponse{
+				ID:    "web-old",
+				Image: "sha256:old",
+				Config: &container.Config{
+					Image:  "app:1",
+					Labels: map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web"},
+				},
+			}, "app:1")
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("updateComposeOrStandalone() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if len(projectUpdater.updateCalls) != 1 {
+				t.Fatalf("UpdateServices calls = %v, want 1", projectUpdater.updateCalls)
+			}
+		})
+	}
+}
+
 func TestUpdateContainerTagSelection(t *testing.T) {
 	const containerID, containerName = tagSelectionContainerID, tagSelectionContainerName
 	for _, scenario := range []tagSelectionScenario{
