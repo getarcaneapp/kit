@@ -137,3 +137,29 @@ func TestConvertStopTimeoutBecomesDuration(t *testing.T) {
 		t.Fatalf("stop_grace_period = %v, want 10s", got)
 	}
 }
+
+func TestConvertMountsUseLongSyntax(t *testing.T) {
+	result, err := convert.Convert("docker run --mount type=bind,source=/a,target=/b,readonly "+
+		"--mount source=data,target=/data,volume-nocopy --mount type=tmpfs,target=/tmp,tmpfs-size=64m,tmpfs-mode=1770 "+
+		"-v cache:/cache nginx", converttypes.Options{})
+	if err != nil {
+		t.Fatalf("Convert returned error: %v", err)
+	}
+
+	got := result.Project.Services["nginx"].Volumes
+	if len(got) != 4 {
+		t.Fatalf("volumes = %+v, want 4", got)
+	}
+	if bind := got[0]; bind.Type != "bind" || bind.Source != "/a" || bind.Target != "/b" || !bind.ReadOnly {
+		t.Fatalf("bind mount = %+v", bind)
+	}
+	if named := got[1]; named.Type != "volume" || named.Source != "data" || named.Volume == nil || !named.Volume.NoCopy {
+		t.Fatalf("volume mount = %+v", named)
+	}
+	if tmpfs := got[2]; tmpfs.Type != "tmpfs" || tmpfs.Tmpfs == nil || tmpfs.Tmpfs.Size != 64<<20 || tmpfs.Tmpfs.Mode != 0o1770 {
+		t.Fatalf("tmpfs mount = %+v", tmpfs)
+	}
+	if got := slices.Sorted(maps.Keys(result.Project.Volumes)); !slices.Equal(got, []string{"cache", "data"}) {
+		t.Fatalf("project volumes = %q, want cache and data", got)
+	}
+}

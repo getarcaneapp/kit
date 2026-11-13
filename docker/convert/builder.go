@@ -98,9 +98,21 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 		case "ports", "environment", "env_file", "labels", "extra_hosts", "dns", "cap_add", "cap_drop", "devices", "group_add", "security_opt", "expose":
 			appendString(service, flag.Name, flag.Value)
 		case "volumes":
-			appendString(service, "volumes", flag.Value)
+			items, _ := service["volumes"].([]any)
+			service["volumes"] = append(items, flag.Value)
 			if err := registerVolume(volumes, flag.Value); err != nil {
 				return nil, nil, err
+			}
+		case "mount":
+			volume, mountWarnings, err := mountVolume(flag.Value)
+			if err != nil {
+				return nil, nil, err
+			}
+			items, _ := service["volumes"].([]any)
+			service["volumes"] = append(items, volume)
+			warnings = append(warnings, mountWarnings...)
+			if source, _ := volume["source"].(string); volume["type"] == "volume" && source != "" && !strings.Contains(source, "$") {
+				volumes[source] = map[string]any{"external": true}
 			}
 		case "network":
 			if flag.Value == "host" || flag.Value == "none" || strings.HasPrefix(flag.Value, "container:") {
@@ -200,23 +212,68 @@ func ensureNestedMap(parent map[string]any, key string) map[string]any {
 	return next
 }
 
-func registerVolume(volumes map[string]map[string]any, value string) error {
-	if strings.HasPrefix(value, "type=") {
-		source := value
-		for part := range strings.SplitSeq(value, ",") {
-			key, val, ok := strings.Cut(part, "=")
-			if ok && (key == "source" || key == "src") {
-				source = val
-				break
-			}
+// mountVolume converts a docker run --mount value into a compose long-syntax
+// volume mapping.
+func mountVolume(value string) (map[string]any, []types.Warning, error) {
+	volume := map[string]any{"type": "volume"}
+	var warnings []types.Warning
+	enabled := func(key, raw string, hasValue bool) (bool, error) {
+		if !hasValue {
+			return true, nil
 		}
-		if source == "" || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") || strings.Contains(source, "$") {
-			return nil
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			return false, types.NewConversionError("invalid boolean %q for mount option %s", raw, key)
 		}
-		volumes[source] = map[string]any{"external": true}
-		return nil
+		return parsed, nil
 	}
+	for part := range strings.SplitSeq(value, ",") {
+		key, val, hasValue := strings.Cut(strings.TrimSpace(part), "=")
+		switch key {
+		case "":
+		case "type":
+			volume["type"] = val
+		case "source", "src":
+			volume["source"] = val
+		case "target", "destination", "dst":
+			volume["target"] = val
+		case "readonly", "ro":
+			readOnly, err := enabled(key, val, hasValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			volume["read_only"] = readOnly
+		case "consistency":
+			volume["consistency"] = val
+		case "bind-propagation":
+			ensureNestedMap(volume, "bind")["propagation"] = val
+		case "volume-nocopy":
+			nocopy, err := enabled(key, val, hasValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			ensureNestedMap(volume, "volume")["nocopy"] = nocopy
+		case "volume-subpath":
+			ensureNestedMap(volume, "volume")["subpath"] = val
+		case "tmpfs-size":
+			ensureNestedMap(volume, "tmpfs")["size"] = val
+		case "tmpfs-mode":
+			mode, err := strconv.ParseUint(val, 8, 32)
+			if err != nil {
+				return nil, nil, types.NewConversionError("invalid tmpfs-mode %q: %v", val, err)
+			}
+			ensureNestedMap(volume, "tmpfs")["mode"] = int64(mode)
+		default:
+			warnings = append(warnings, types.Warning{Message: "ignored unsupported mount option " + key})
+		}
+	}
+	if target, _ := volume["target"].(string); target == "" {
+		return nil, nil, types.NewConversionError("mount %q has no target", value)
+	}
+	return volume, warnings, nil
+}
 
+func registerVolume(volumes map[string]map[string]any, value string) error {
 	volume, err := format.ParseVolume(value)
 	if err != nil {
 		return types.NewConversionError("invalid volume %q: %v", value, err)

@@ -22,7 +22,7 @@ var (
 		"-p":               "ports",
 		"--volume":         "volumes",
 		"-v":               "volumes",
-		"--mount":          "volumes",
+		"--mount":          "mount",
 		"--env":            "environment",
 		"-e":               "environment",
 		"--env-file":       "env_file",
