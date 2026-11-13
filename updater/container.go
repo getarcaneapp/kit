@@ -252,7 +252,7 @@ func (s *Service) createStartOrRollback(ctx context.Context, dockerClient *clien
 	// The old container is already stopped and renamed; a caller cancel must not strand it there.
 	ctx, cancel := s.detachedCtx(ctx)
 	defer cancel()
-	newRef =kit.Ternary(inspect.Config == nil, newRef, refs.PreserveConfiguredRef(kit.FromPtr(inspect.Config).Image, newRef))
+	newRef = refs.PreserveConfiguredRef(kit.FromPtr(inspect.Config).Image, newRef)
 	name := containerSummaryName(cnt)
 	createdID, err := s.createAndStartStandaloneContainer(ctx, dockerClient, cnt, inspect, newRef)
 	if err == nil {
