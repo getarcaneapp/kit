@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -34,4 +35,12 @@ func TestIsExpectedStreamEndError(t *testing.T) {
 			require.Equal(t, tt.want, IsExpectedStreamEndError(tt.err))
 		})
 	}
+}
+
+func TestStartStdCopyNilWritersDiscard(t *testing.T) {
+	var stream bytes.Buffer
+	writeDockerLogFrame(t, &stream, 1, "out\n")
+	writeDockerLogFrame(t, &stream, 2, "err\n")
+
+	require.NoError(t, WaitStdCopy(StartStdCopy(&stream, nil, nil)))
 }

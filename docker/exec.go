@@ -18,9 +18,9 @@ import (
 type (
 	// ExecRequest describes one exec run by ExecInContainer.
 	ExecRequest struct {
-		// Stdout receives the exec's demultiplexed standard output.
+		// Stdout receives the exec's demultiplexed standard output; nil discards it.
 		Stdout io.Writer
-		// Stderr receives the exec's demultiplexed standard error.
+		// Stderr receives the exec's demultiplexed standard error; nil discards it.
 		Stderr io.Writer
 		// ContainerID is the container the exec runs in.
 		ContainerID string
@@ -68,11 +68,12 @@ func IsExpectedStreamEndError(err error) bool {
 }
 
 // StartStdCopy demultiplexes a Docker stream into stdout/stderr on a goroutine
-// and reports the copy result on the returned channel. Pair with WaitStdCopy.
+// and reports the copy result on the returned channel. A nil stdout or stderr
+// discards that stream. Pair with WaitStdCopy.
 func StartStdCopy(stream io.Reader, stdout, stderr io.Writer) <-chan error {
 	done := make(chan error, 1)
 	go func() {
-		_, err := stdcopy.StdCopy(stdout, stderr, stream)
+		_, err := stdcopy.StdCopy(kit.Ternary(stdout == nil, io.Discard, stdout), kit.Ternary(stderr == nil, io.Discard, stderr), stream)
 		done <- err
 	}()
 	return done
