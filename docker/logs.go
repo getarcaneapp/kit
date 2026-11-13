@@ -6,10 +6,8 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -108,45 +106,9 @@ func StreamMultiplexedLogs(ctx context.Context, logs io.Reader, logsChan chan<- 
 }
 
 // ReadAllLogs reads a non-follow Docker multiplexed log stream and sends
-// non-empty stdout/stderr lines to logsChan.
+// non-empty stdout/stderr lines to logsChan as they are demultiplexed, until EOF.
 func ReadAllLogs(ctx context.Context, logs io.ReadCloser, logsChan chan<- string) error {
-	stdoutBuf := &strings.Builder{}
-	stderrBuf := &strings.Builder{}
-	stdCopyDone := make(chan struct{})
-	defer close(stdCopyDone)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = logs.Close()
-		case <-stdCopyDone:
-		}
-	}()
-
-	_, err := stdcopy.StdCopy(stdoutBuf, stderrBuf, logs)
-	if err != nil && !errors.Is(err, io.EOF) {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		return fmt.Errorf("failed to demultiplex logs: %w", err)
-	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return ctxErr
-	}
-
-	if stdoutBuf.Len() > 0 {
-		if readLogLinesErr := ReadLogLines(ctx, strings.NewReader(stdoutBuf.String()), logsChan, ""); readLogLinesErr != nil {
-			return readLogLinesErr
-		}
-	}
-
-	if stderrBuf.Len() > 0 {
-		if readLogLinesErr2 := ReadLogLines(ctx, strings.NewReader(stderrBuf.String()), logsChan, "[STDERR] "); readLogLinesErr2 != nil {
-			return readLogLinesErr2
-		}
-	}
-
-	return nil
+	return StreamMultiplexedLogs(ctx, logs, logsChan)
 }
 
 // maxLogLineBytes caps one log line so output without newlines cannot grow

@@ -51,7 +51,7 @@ func TestStreamContainerLogsNonTTYSnapshotDemultiplexesStdoutAndStderr(t *testin
 	err := StreamContainerLogs(t.Context(), io.NopCloser(bytes.NewReader(stream.Bytes())), logsChan, LogOptions{})
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"stdout snapshot", "[STDERR] stderr snapshot"}, drainLogLines(logsChan))
+	require.ElementsMatch(t, []string{"stdout snapshot", "[STDERR] stderr snapshot"}, drainLogLines(logsChan))
 }
 
 func TestStreamContainerLogsTTYSnapshotStreamsRawOutput(t *testing.T) {
@@ -133,6 +133,30 @@ func TestStreamMultiplexedLogsContextCancelDoesNotDeadlock(t *testing.T) {
 	case <-time.After(time.Second):
 		require.FailNow(t, "StreamMultiplexedLogs did not exit after cancellation")
 	}
+}
+
+func TestReadAllLogsStreamsBeforeEOF(t *testing.T) {
+	pr, pw := io.Pipe()
+	logsChan := make(chan string, 4)
+	done := make(chan error, 1)
+	go func() {
+		done <- ReadAllLogs(t.Context(), pr, logsChan)
+	}()
+
+	var frame bytes.Buffer
+	writeDockerLogFrame(t, &frame, 2, "early stderr\n")
+	_, err := pw.Write(frame.Bytes())
+	require.NoError(t, err)
+
+	select {
+	case line := <-logsChan:
+		require.Equal(t, "[STDERR] early stderr", line)
+	case <-time.After(time.Second):
+		require.FailNow(t, "ReadAllLogs buffered output until EOF")
+	}
+
+	require.NoError(t, pw.Close())
+	require.NoError(t, <-done)
 }
 
 func TestReadAllLogsContextCancelClosesReader(t *testing.T) {
