@@ -73,6 +73,20 @@ func TestStreamContainerLogsTTYHandlesLongLinesAndPartialEOF(t *testing.T) {
 	require.Equal(t, []string{longLine, "partial tail"}, drainLogLines(logsChan))
 }
 
+func TestReadLogLinesSplitsUnterminatedOutput(t *testing.T) {
+	logsChan := make(chan string, 4)
+
+	err := ReadLogLines(t.Context(), strings.NewReader(strings.Repeat("a", 2*maxLogLineBytes+10)+"\nnext"), logsChan, "")
+	require.NoError(t, err)
+
+	lines := drainLogLines(logsChan)
+	require.Len(t, lines, 4)
+	require.Len(t, lines[0], maxLogLineBytes)
+	require.Len(t, lines[1], maxLogLineBytes)
+	require.Equal(t, strings.Repeat("a", 10), lines[2])
+	require.Equal(t, "next", lines[3])
+}
+
 func TestStreamContainerLogsTTYPythonLikeFollowDoesNotReturnEmptyLogs(t *testing.T) {
 	logsChan := make(chan string, 4)
 

@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -12,7 +13,6 @@ import (
 	"sync"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
-	"kit.getarcane.app"
 )
 
 type (
@@ -149,30 +149,41 @@ func ReadAllLogs(ctx context.Context, logs io.ReadCloser, logsChan chan<- string
 	return nil
 }
 
-// ReadLogLines sends each non-empty line from reader to logsChan, prepending
-// prefix, until EOF or ctx is done.
-func ReadLogLines(ctx context.Context, reader io.Reader, logsChan chan<- string, prefix string) error {
-	bufferedReader := bufio.NewReader(reader)
+// maxLogLineBytes caps one log line so output without newlines cannot grow
+// unbounded; longer runs are split into maxLogLineBytes chunks.
+const maxLogLineBytes = 1 << 20
 
-	for {
+// ReadLogLines sends each non-empty line from reader to logsChan, prepending
+// prefix, until EOF or ctx is done. Lines longer than 1 MiB are split.
+func ReadLogLines(ctx context.Context, reader io.Reader, logsChan chan<- string, prefix string) error {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineBytes)
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			return i + 1, data[:i], nil
+		}
+		if len(data) >= maxLogLineBytes {
+			return maxLogLineBytes, data[:maxLogLineBytes], nil
+		}
+		if atEOF && len(data) > 0 {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	})
+
+	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-
-		line, err := bufferedReader.ReadString('\n')
-		if line != "" {
-			trimmed := strings.TrimRight(line, "\r\n")
-			if trimmed != "" {
-				select {
-				case logsChan <- prefix + trimmed:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
+		line := bytes.TrimRight(scanner.Bytes(), "\r")
+		if len(line) == 0 {
+			continue
 		}
-
-		if err != nil {
-			return kit.Ternary(errors.Is(err, io.EOF), nil, err)
+		select {
+		case logsChan <- prefix + string(line):
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
+	return scanner.Err()
 }
