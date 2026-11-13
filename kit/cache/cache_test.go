@@ -20,10 +20,10 @@ func eventually(t *testing.T, cond func() bool) {
 	}
 }
 
-func age(c *Cache[string, int], key string, by time.Duration) {
+func age(c *Cache[string, int], by time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e := c.items[key].Value.(*entry[string, int])
+	e := c.items["k"].Value.(*entry[string, int])
 	e.fresh = e.fresh.Add(-by)
 	e.dead = e.dead.Add(-by)
 }
@@ -188,7 +188,7 @@ func TestCacheRevalidation(t *testing.T) {
 			if got, _, _ := c.Get("k"); got != 1 {
 				t.Fatalf("first Get = %d, want 1", got)
 			}
-			age(c, "k", 90*time.Minute)
+			age(c, 90*time.Minute)
 			if got, found, err := c.Get("k"); got != 1 || !found || err != nil {
 				t.Fatalf("stale Get = %d, %t, %v; want 1, true, nil", got, found, err)
 			}
@@ -220,11 +220,11 @@ func TestCacheFailedRevalidationSurvivesExpiry(t *testing.T) {
 	}
 	defer c.Close()
 	c.Set(Entry[string, int]{Key: "k", Value: 1})
-	age(c, "k", 90*time.Minute)
+	age(c, 90*time.Minute)
 	if got, _, _ := c.Get("k"); got != 1 {
 		t.Fatalf("stale Get = %d, want 1", got)
 	}
-	age(c, "k", time.Hour)
+	age(c, time.Hour)
 	time.Sleep(20 * time.Millisecond)
 	if _, found := c.Peek("k"); !found {
 		t.Fatal("expiry dropped an entry with a reload in flight")
@@ -315,7 +315,7 @@ func TestCacheRevalidationPanicKeepsStaleValue(t *testing.T) {
 		RevalidateAfter: time.Hour,
 	}
 	c.Set(Entry[string, int]{Key: "k", Value: 1})
-	age(c, "k", 90*time.Minute)
+	age(c, 90*time.Minute)
 	if got, _, _ := c.Get("k"); got != 1 {
 		t.Fatalf("stale Get = %d, want 1", got)
 	}
@@ -348,8 +348,8 @@ func TestCacheForegroundLoadPanicReachesCaller(t *testing.T) {
 
 func TestCacheDeleteDuringLoadDiscardsResult(t *testing.T) {
 	tests := []struct {
-		name   string
 		remove func(*Cache[string, int])
+		name   string
 	}{
 		{name: "delete", remove: func(c *Cache[string, int]) { c.Delete("k") }},
 		{name: "purge", remove: func(c *Cache[string, int]) { c.Purge() }},
@@ -391,7 +391,7 @@ func TestCacheRevalidationKeepsEntryTTL(t *testing.T) {
 		RevalidateAfter: time.Hour,
 	}
 	c.Set(Entry[string, int]{Key: "k", Value: 1, TTL: time.Minute})
-	age(c, "k", 2*time.Minute)
+	age(c, 2*time.Minute)
 	if got, _, _ := c.Get("k"); got != 1 {
 		t.Fatalf("stale Get = %d, want 1", got)
 	}

@@ -160,13 +160,14 @@ func (c Capacity) String() string {
 
 	for _, unit := range units {
 		// From Size-Size/20000 up, the next unit down would round to "1000".
-		if u >= unit.Size-unit.Size/20000 {
-			w--
-			buf[w] = unit.Suffix
-			w, u = fmtFrac(buf[:w], u, unit.Size)
-			w = fmtInt(buf[:w], u)
-			break
+		if u < unit.Size-unit.Size/20000 {
+			continue
 		}
+		w--
+		buf[w] = unit.Suffix
+		w, u = fmtFrac(buf[:w], u, unit.Size)
+		w = fmtInt(buf[:w], u)
+		break
 	}
 
 	return string(buf[w:])
