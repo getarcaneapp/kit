@@ -305,3 +305,43 @@ func TestCacheCloneMayUseCache(t *testing.T) {
 		t.Fatalf("Get = %d, want 1", got)
 	}
 }
+
+func TestCacheRevalidationPanicKeepsStaleValue(t *testing.T) {
+	c := &Cache[string, int]{
+		Revalidate: func(string) (int, bool, error) {
+			panic("deliberate revalidate panic")
+		},
+		TTL:             time.Hour,
+		RevalidateAfter: time.Hour,
+	}
+	c.Set(Entry[string, int]{Key: "k", Value: 1})
+	age(c, "k", 90*time.Minute)
+	if got, _, _ := c.Get("k"); got != 1 {
+		t.Fatalf("stale Get = %d, want 1", got)
+	}
+	eventually(t, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return len(c.inflight) == 0
+	})
+	if got, found := c.Peek("k"); got != 1 || !found {
+		t.Fatalf("Peek after panicked reload = %d, %t; want 1, true", got, found)
+	}
+}
+
+func TestCacheForegroundLoadPanicReachesCaller(t *testing.T) {
+	c := &Cache[string, int]{
+		Load: func(string) (int, bool, error) {
+			panic("deliberate load panic")
+		},
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("foreground load panic was swallowed")
+		}
+		if _, found := c.Peek("k"); found {
+			t.Fatal("panicked load stored a value")
+		}
+	}()
+	_, _, _ = c.Get("k")
+}

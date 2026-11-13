@@ -90,7 +90,11 @@ func (c *Cache[K, V]) GetOrLoad(key K, load func(K) (V, bool, error)) (V, bool, 
 				reload = load
 			}
 			if _, busy := c.inflight[key]; reload != nil && !busy && e.stale(now) {
-				go c.run(key, reload, c.startLocked(key), e)
+				cl := c.startLocked(key)
+				go func() {
+					defer func() { _ = recover() }()
+					c.run(key, reload, cl, e)
+				}()
 			}
 			c.mu.Unlock()
 			return c.read(e.value, e.found), e.found, nil
