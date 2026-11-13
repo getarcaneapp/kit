@@ -48,6 +48,19 @@ func TestSlogHandlerNormalizesGroupedAttrs(t *testing.T) {
 	}
 }
 
+func TestSlogHandlerNoAttrsLeavesAttrsNil(t *testing.T) {
+	b := New(Config{Capacity: 10})
+	h := NewSlogHandler(slog.DiscardHandler, b)
+	record := slog.NewRecord(time.Unix(1, 0).UTC(), slog.LevelInfo, "plain", 0)
+
+	if allocs := testing.AllocsPerRun(100, func() { _ = h.Handle(t.Context(), record) }); allocs != 0 {
+		t.Fatalf("Handle allocated %v times per attr-less record, want 0", allocs)
+	}
+	if entries := b.Recent(); entries[len(entries)-1].Attrs != nil {
+		t.Fatalf("attrs = %#v, want nil", entries[len(entries)-1].Attrs)
+	}
+}
+
 func TestSlogHandlerNormalizesErrors(t *testing.T) {
 	b := New(Config{Capacity: 10})
 	h := NewSlogHandler(slog.DiscardHandler, b)

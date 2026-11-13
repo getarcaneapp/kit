@@ -186,25 +186,27 @@ func (h *slogHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *slogHandler) Handle(ctx context.Context, r slog.Record) error {
-	attrs := make(map[string]any)
-	for _, bound := range h.attrs {
-		addAttrsToMap(attrs, bound.groups, bound.attrs)
-	}
-	recordAttrs := make([]slog.Attr, 0, r.NumAttrs())
-	r.Attrs(func(a slog.Attr) bool {
-		recordAttrs = append(recordAttrs, a)
-		return true
-	})
-	addAttrsToMap(attrs, h.group, recordAttrs)
-	if len(attrs) == 0 {
-		attrs = nil
-	}
-
 	h.b.Append(Entry{
 		Time:    r.Time,
 		Level:   r.Level.String(),
 		Message: r.Message,
-		Attrs:   attrs,
+		Attrs: func() map[string]any {
+			if len(h.attrs) == 0 && r.NumAttrs() == 0 {
+				return nil
+			}
+			attrs := make(map[string]any)
+			for _, bound := range h.attrs {
+				addAttrsToMap(attrs, bound.groups, bound.attrs)
+			}
+			target := groupMap(attrs, h.group)
+			r.Attrs(func(a slog.Attr) bool {
+				if a.Key != "" {
+					target[a.Key] = normalizeAttrValue(a.Value)
+				}
+				return true
+			})
+			return kit.Ternary(len(attrs) == 0, nil, attrs)
+		}(),
 	})
 	return h.base.Handle(ctx, r)
 }
@@ -256,7 +258,8 @@ func (h *slogHandler) WithGroup(name string) slog.Handler {
 	}
 }
 
-func addAttrsToMap(dst map[string]any, groups []string, attrs []slog.Attr) {
+// groupMap returns the map nested under groups in dst, creating it as needed.
+func groupMap(dst map[string]any, groups []string) map[string]any {
 	target := dst
 	for _, group := range groups {
 		existing, _ := target[group].(map[string]any)
@@ -266,6 +269,11 @@ func addAttrsToMap(dst map[string]any, groups []string, attrs []slog.Attr) {
 		}
 		target = existing
 	}
+	return target
+}
+
+func addAttrsToMap(dst map[string]any, groups []string, attrs []slog.Attr) {
+	target := groupMap(dst, groups)
 	for _, attr := range attrs {
 		if attr.Key == "" {
 			continue
