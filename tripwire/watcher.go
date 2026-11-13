@@ -85,7 +85,6 @@ func New[K comparable](cfg Config[K]) (*Watcher[K], error) {
 	}
 	return &Watcher[K]{
 		cfg:   cfg.resolve(),
-		ready: make(map[K]struct{}),
 		wake:  make(chan struct{}, 1),
 		done:  make(chan struct{}),
 		roots: roots,
@@ -353,12 +352,15 @@ func (w *Watcher[K]) flush(p *pending[K]) {
 		return
 	}
 	w.readyMu.Lock()
-	maps.Copy(w.ready, p.keys)
+	if len(w.ready) == 0 {
+		w.ready = p.keys
+	} else {
+		maps.Copy(w.ready, p.keys)
+	}
 	w.resync = w.resync || p.resync
 	w.readyMu.Unlock()
 
-	clear(p.keys)
-	*p = pending[K]{keys: p.keys}
+	*p = pending[K]{keys: make(map[K]struct{})}
 
 	select {
 	case w.wake <- struct{}{}:
@@ -379,16 +381,15 @@ func (w *Watcher[K]) deliver(ctx context.Context) {
 			return
 		}
 		w.readyMu.Lock()
-		batch := Batch[K]{
-			Keys:   slices.Collect(maps.Keys(w.ready)),
-			Resync: w.resync,
-		}
-		clear(w.ready)
-		w.resync = false
+		ready, resync := w.ready, w.resync
+		w.ready, w.resync = nil, false
 		w.readyMu.Unlock()
 
-		if len(batch.Keys) > 0 || batch.Resync {
-			w.call(ctx, batch)
+		if len(ready) > 0 || resync {
+			w.call(ctx, Batch[K]{
+				Keys:   slices.Collect(maps.Keys(ready)),
+				Resync: resync,
+			})
 		}
 	}
 }
