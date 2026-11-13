@@ -3,10 +3,13 @@ package convert_test
 import (
 	"errors"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	compose "github.com/compose-spec/compose-go/v2/types"
 
 	"kit.getarcane.app/docker/convert"
 	converttypes "kit.getarcane.app/docker/convert/types"
@@ -161,5 +164,33 @@ func TestConvertMountsUseLongSyntax(t *testing.T) {
 	}
 	if got := slices.Sorted(maps.Keys(result.Project.Volumes)); !slices.Equal(got, []string{"cache", "data"}) {
 		t.Fatalf("project volumes = %q, want cache and data", got)
+	}
+}
+
+func TestConvertGpusBecomeDeviceRequests(t *testing.T) {
+	tests := []struct {
+		flag string
+		want compose.DeviceRequest
+	}{
+		{flag: "device=0", want: compose.DeviceRequest{Capabilities: []string{"gpu"}, IDs: []string{"0"}}},
+		{flag: "2", want: compose.DeviceRequest{Capabilities: []string{"gpu"}, Count: 2}},
+		{flag: `'"device=0,1",capabilities=compute'`, want: compose.DeviceRequest{Capabilities: []string{"compute"}, IDs: []string{"0", "1"}}},
+		{flag: "count=all,driver=nvidia", want: compose.DeviceRequest{Capabilities: []string{"gpu"}, Driver: "nvidia", Count: -1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.flag, func(t *testing.T) {
+			result, err := convert.Convert("docker run --gpus "+tt.flag+" nginx", converttypes.Options{})
+			if err != nil {
+				t.Fatalf("Convert returned error: %v", err)
+			}
+			if got := result.Project.Services["nginx"].Gpus; len(got) != 1 || !reflect.DeepEqual(got[0], tt.want) {
+				t.Fatalf("gpus = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+
+	if _, err := convert.Convert("docker run --gpus count=1,device=0 nginx", converttypes.Options{}); !errors.Is(err, converttypes.ErrConversion) {
+		t.Fatalf("count with device error = %v, want ErrConversion", err)
 	}
 }

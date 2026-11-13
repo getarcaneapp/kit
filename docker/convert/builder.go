@@ -2,6 +2,7 @@ package convert
 
 import (
 	"cmp"
+	"encoding/csv"
 	"fmt"
 	"maps"
 	"regexp"
@@ -162,9 +163,14 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 		case "gpus":
 			if flag.Value == "all" {
 				service["gpus"] = "all"
-			} else {
-				appendString(service, "gpus", flag.Value)
+				continue
 			}
+			request, err := gpuRequest(flag.Value)
+			if err != nil {
+				return nil, nil, err
+			}
+			items, _ := service["gpus"].([]any)
+			service["gpus"] = append(items, request)
 		case "detach", "name":
 		case "ignored":
 			warnings = append(warnings, types.Warning{Message: "ignored unsupported Docker flag " + flag.Value})
@@ -271,6 +277,44 @@ func mountVolume(value string) (map[string]any, []types.Warning, error) {
 		return nil, nil, types.NewConversionError("mount %q has no target", value)
 	}
 	return volume, warnings, nil
+}
+
+// gpuRequest converts a docker run --gpus value, a CSV of count, device,
+// driver and capabilities, into a compose device request mapping.
+func gpuRequest(value string) (map[string]any, error) {
+	fields, err := csv.NewReader(strings.NewReader(value)).Read()
+	if err != nil {
+		return nil, types.NewConversionError("invalid gpus %q: %v", value, err)
+	}
+	request := map[string]any{"capabilities": []string{"gpu"}}
+	for _, field := range fields {
+		key, val, hasKey := strings.Cut(field, "=")
+		switch {
+		case !hasKey || key == "count":
+			count := kit.Ternary(hasKey, val, field)
+			if count == "all" {
+				request["count"] = "all"
+				continue
+			}
+			parsed, err := strconv.ParseInt(count, 10, 64)
+			if err != nil {
+				return nil, types.NewConversionError("invalid gpu count %q", count)
+			}
+			request["count"] = parsed
+		case key == "device":
+			request["device_ids"] = strings.Split(val, ",")
+		case key == "driver":
+			request["driver"] = val
+		case key == "capabilities":
+			request["capabilities"] = strings.Split(val, ",")
+		default:
+			return nil, types.NewConversionError("unsupported gpus option %q", key)
+		}
+	}
+	if request["count"] != nil && request["device_ids"] != nil {
+		return nil, types.NewConversionError("gpus %q sets both count and device", value)
+	}
+	return request, nil
 }
 
 func registerVolume(volumes map[string]map[string]any, value string) error {
