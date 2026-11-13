@@ -27,18 +27,15 @@ func Build(commands []types.RunCommand, opts types.Options) (*types.Document, er
 	var order []string
 	var warnings []types.Warning
 
-	if len(opts.ExistingComposeYAML) > 0 {
-		var existing map[string]any
-		if err := yaml.Unmarshal(opts.ExistingComposeYAML, &existing); err != nil {
-			return nil, types.NewConversionError("parse existing compose YAML: %v", err)
-		}
-
-		if existingServices, ok := existing["services"].(map[string]any); ok {
-			for _, name := range slices.Sorted(maps.Keys(existingServices)) {
-				if svc, isMap := existingServices[name].(map[string]any); isMap {
-					services[name] = svc
-					order = append(order, name)
-				}
+	var existing map[string]any
+	if err := yaml.Unmarshal(opts.ExistingComposeYAML, &existing); err != nil {
+		return nil, types.NewConversionError("parse existing compose YAML: %v", err)
+	}
+	if existingServices, ok := existing["services"].(map[string]any); ok {
+		for _, name := range slices.Sorted(maps.Keys(existingServices)) {
+			if svc, isMap := existingServices[name].(map[string]any); isMap {
+				services[name] = svc
+				order = append(order, name)
 			}
 		}
 	}
@@ -64,11 +61,26 @@ func Build(commands []types.RunCommand, opts types.Options) (*types.Document, er
 		warnings = append(warnings, serviceWarnings...)
 	}
 
+	// Definitions from the existing file win over the external stubs added for
+	// converted commands.
+	existingNetworks, _ := existing["networks"].(map[string]any)
+	for name, definition := range existingNetworks {
+		networks[name], _ = definition.(map[string]any)
+	}
+	existingVolumes, _ := existing["volumes"].(map[string]any)
+	for name, definition := range existingVolumes {
+		volumes[name], _ = definition.(map[string]any)
+	}
+	maps.DeleteFunc(existing, func(key string, _ any) bool {
+		return key == "services" || key == "networks" || key == "volumes"
+	})
+
 	return &types.Document{
 		Services:     services,
 		ServiceOrder: order,
 		Networks:     networks,
 		Volumes:      volumes,
+		Sections:     existing,
 		Warnings:     warnings,
 	}, nil
 }

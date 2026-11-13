@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"kit.getarcane.app"
 	"kit.getarcane.app/docker/convert"
 	converttypes "kit.getarcane.app/docker/convert/types"
 )
@@ -117,6 +118,69 @@ func TestBuildMergesExistingCompose(t *testing.T) {
 		if !strings.Contains(yaml, want) {
 			t.Fatalf("merged YAML missing %q:\n%s", want, yaml)
 		}
+	}
+}
+
+func TestConvertMergeKeepsExistingStructure(t *testing.T) {
+	existing := `services:
+  api:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - target: 443
+        published: 8443
+    environment:
+      EMPTY:
+      RATIO: 1.5
+      WHOLE: 1.0
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: 0.5
+networks:
+  backend:
+    driver: bridge
+volumes:
+  data:
+secrets:
+  token:
+    file: ./token.txt
+x-common:
+  restart: always
+`
+	result, err := convert.Convert("docker run --name web --network backend -v data:/data nginx:alpine", converttypes.Options{ExistingComposeYAML: []byte(existing)})
+	if err != nil {
+		t.Fatalf("Convert returned error: %v", err)
+	}
+
+	api := result.Project.Services["api"]
+	if len(api.Ports) != 2 || api.Ports[1].Target != 443 || api.Ports[1].Published != "8443" {
+		t.Fatalf("api ports = %+v", api.Ports)
+	}
+	if empty, ok := api.Environment["EMPTY"]; !ok || empty != nil {
+		t.Fatalf("EMPTY = %v, want null", empty)
+	}
+	if ratio := api.Environment["RATIO"]; ratio == nil || *ratio != "1.5" {
+		t.Fatalf("RATIO = %v, want 1.5", ratio)
+	}
+	if !strings.Contains(string(result.YAML), "WHOLE: 1.0") {
+		t.Fatalf("WHOLE lost its float form:\n%s", result.YAML)
+	}
+	if api.Deploy == nil || kit.FromPtr(api.Deploy.Replicas) != 2 || api.Deploy.Resources.Limits.NanoCPUs != 0.5 {
+		t.Fatalf("api deploy = %+v", api.Deploy)
+	}
+	if network := result.Project.Networks["backend"]; network.Driver != "bridge" || bool(network.External) {
+		t.Fatalf("backend network = %+v, want existing bridge definition", network)
+	}
+	if _, ok := result.Project.Volumes["data"]; !ok {
+		t.Fatal("existing volume data was dropped")
+	}
+	if _, ok := result.Project.Secrets["token"]; !ok {
+		t.Fatal("existing secret token was dropped")
+	}
+	if _, ok := result.Project.Extensions["x-common"]; !ok {
+		t.Fatalf("existing x-common extension was dropped:\n%s", result.YAML)
 	}
 }
 

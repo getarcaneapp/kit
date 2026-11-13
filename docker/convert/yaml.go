@@ -6,8 +6,10 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	"go.yaml.in/yaml/v4"
+	"kit.getarcane.app"
 
 	"kit.getarcane.app/docker/convert/types"
 )
@@ -74,6 +76,9 @@ func Marshal(doc *types.Document, opts types.MarshalOptions) ([]byte, error) {
 	if len(doc.Volumes) > 0 {
 		content = append(content, scalarNode("volumes"), resourceNode(doc.Volumes))
 	}
+	for _, key := range slices.Sorted(maps.Keys(doc.Sections)) {
+		content = append(content, scalarNode(key), anyNode(doc.Sections[key]))
+	}
 
 	var b bytes.Buffer
 	enc := yaml.NewEncoder(&b)
@@ -119,6 +124,20 @@ func anyNode(value any) *yaml.Node {
 		return &yaml.Node{Kind: yaml.ScalarNode, Value: strconv.Itoa(v)}
 	case int64:
 		return &yaml.Node{Kind: yaml.ScalarNode, Value: strconv.FormatInt(v, 10)}
+	case uint64:
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: strconv.FormatUint(v, 10)}
+	case float64:
+		// Keep a decimal point so 1.0 does not read back as an int.
+		formatted := strconv.FormatFloat(v, 'g', -1, 64)
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: kit.Ternary(strings.ContainsAny(formatted, ".eIN"), formatted, formatted+".0")}
+	case nil:
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
+	case []any:
+		var content []*yaml.Node
+		for _, item := range v {
+			content = append(content, anyNode(item))
+		}
+		return &yaml.Node{Kind: yaml.SequenceNode, Content: content}
 	case []string:
 		var content []*yaml.Node
 		for _, item := range v {

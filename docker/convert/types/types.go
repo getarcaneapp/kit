@@ -57,7 +57,10 @@ type (
 		ServiceOrder []string
 		Networks     map[string]map[string]any
 		Volumes      map[string]map[string]any
-		Warnings     []Warning
+		// Sections holds the other top-level keys of Options.ExistingComposeYAML,
+		// such as secrets, configs and x-* extensions.
+		Sections map[string]any
+		Warnings []Warning
 	}
 
 	Service map[string]any
