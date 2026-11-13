@@ -85,3 +85,9 @@ func TestParseRejectsRedirectionsAndBadQuoting(t *testing.T) {
 		})
 	}
 }
+
+func TestParseBareDashDoesNotPanic(t *testing.T) {
+	if _, err := convert.Parse("docker run - nginx"); err != nil {
+		t.Logf("parse error: %v", err)
+	}
+}

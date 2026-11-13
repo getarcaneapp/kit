@@ -274,8 +274,10 @@ func parseFlag(token string, tokens []string, index int) (string, string, int, e
 		return "ignored", token, 0, nil
 	}
 
-	if mapped, ok := valueFlags[token[:2]]; ok && len(token) > 2 {
-		return mapped, token[2:], 0, nil
+	if len(token) > 2 {
+		if mapped, ok := valueFlags[token[:2]]; ok {
+			return mapped, token[2:], 0, nil
+		}
 	}
 	if mapped, ok := valueFlags[token]; ok {
 		if index+1 >= len(tokens) {
