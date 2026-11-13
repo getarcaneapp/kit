@@ -88,7 +88,8 @@ func TestCopyToStripsSetuidAndSetgid(t *testing.T) {
 		t.Skip("filesystem does not keep the setuid bit")
 	}
 
-	if _, err := (Root{Path: source}).CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{}); err != nil {
+	_, err = (Root{Path: source}).CopyTo(t.Context(), Root{Path: destination}, acfstypes.CopyOptions{})
+	if err != nil {
 		t.Fatalf("CopyTo: %v", err)
 	}
 	copied, err := os.Stat(filepath.Join(destination, "tool"))

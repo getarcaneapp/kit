@@ -247,8 +247,8 @@ func (r Root) Walk(ctx context.Context, logicalPath string, options acfstypes.Wa
 	visitEntry := w.entry
 	directories := []walkDirectory{{path: logicalPath}}
 	for len(directories) > 0 {
-		if err := ctx.Err(); err != nil {
-			return w.result, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return w.result, ctxErr
 		}
 
 		last := len(directories) - 1
@@ -258,7 +258,7 @@ func (r Root) Walk(ctx context.Context, logicalPath string, options acfstypes.Wa
 		}
 		directories = directories[:last]
 
-		_, err := r.ListEach(ctx, w.level.directory.path, acfstypes.ListOptions{}, visitEntry)
+		_, err = r.ListEach(ctx, w.level.directory.path, acfstypes.ListOptions{}, visitEntry)
 		if errors.Is(err, fs.SkipAll) {
 			return w.result, nil
 		}

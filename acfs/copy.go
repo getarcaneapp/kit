@@ -20,16 +20,18 @@ import (
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 
-type directoryCopy struct {
-	ctx         context.Context
-	destination *mutationRoot
-	record      func(relativePath string)
-	// buffer holds the two chunks mirror mode compares.
-	buffer   []byte
-	tolerate bool
-	mirror   bool
-	copied   int
-}
+type (
+	directoryCopy struct {
+		ctx         context.Context
+		destination *mutationRoot
+		record      func(relativePath string)
+		// buffer holds the two chunks mirror mode compares.
+		buffer   []byte
+		tolerate bool
+		mirror   bool
+		copied   int
+	}
+)
 
 const (
 	copyDirectoryMode = 0o755
@@ -180,11 +182,11 @@ func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) erro
 		return c.tolerate && (errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrNotExist))
 	}
 	directory, err := source.Open(".")
+	if tolerable(err) {
+		c.record(relativePath)
+		return nil
+	}
 	if err != nil {
-		if tolerable(err) {
-			c.record(relativePath)
-			return nil
-		}
 		return err
 	}
 	names, err := directory.Readdirnames(-1)
@@ -199,20 +201,20 @@ func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) erro
 	slices.Sort(names)
 
 	for _, name := range names {
-		if err := c.ctx.Err(); err != nil {
-			return err
+		if ctxErr := c.ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 		if strings.HasPrefix(name, temporaryWritePrefix) {
 			continue
 		}
 		childPath := filepath.Join(relativePath, name)
-		info, err := source.Lstat(name)
-		if tolerable(err) {
+		info, statErr := source.Lstat(name)
+		if tolerable(statErr) {
 			c.record(childPath)
 			continue
 		}
-		if err != nil {
-			return err
+		if statErr != nil {
+			return statErr
 		}
 
 		switch {
@@ -229,16 +231,16 @@ func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) erro
 			if createErr != nil {
 				return createErr
 			}
-			if err := created.Close(); err != nil {
-				return err
+			if closeErr := created.Close(); closeErr != nil {
+				return closeErr
 			}
-			child, err := source.OpenRoot(name)
-			if tolerable(err) {
+			child, openErr := source.OpenRoot(name)
+			if tolerable(openErr) {
 				c.record(childPath)
 				continue
 			}
-			if err != nil {
-				return err
+			if openErr != nil {
+				return openErr
 			}
 			err = errors.Join(c.copyDirectory(child, childPath), child.Close())
 			if err != nil {
@@ -249,21 +251,13 @@ func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) erro
 			// Reading a socket, FIFO, or device fails with ENXIO (#3003).
 			c.record(childPath)
 		default:
-			file, err := source.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-			if tolerable(err) {
+			copied, copyErr := c.copyFile(source, name, filepath.ToSlash(childPath), info.Mode().Perm()|info.Mode()&os.ModeSticky)
+			if !copied || (c.mirror && errors.Is(copyErr, os.ErrPermission)) {
 				c.record(childPath)
 				continue
 			}
-			if err != nil {
-				return err
-			}
-			regular, err := c.copyFile(file, filepath.ToSlash(childPath), info.Mode().Perm()|info.Mode()&os.ModeSticky)
-			if !regular || (c.mirror && errors.Is(err, os.ErrPermission)) {
-				c.record(childPath)
-				continue
-			}
-			if err != nil {
-				return err
+			if copyErr != nil {
+				return copyErr
 			}
 			c.copied++
 		}
@@ -271,10 +265,18 @@ func (c *directoryCopy) copyDirectory(source *os.Root, relativePath string) erro
 	return nil
 }
 
-// copyFile copies source, closing it, to relativePath in place without
-// following symbolic links, and reports false if source is no longer a regular
-// file. In mirror mode an identical destination file is left untouched.
-func (c *directoryCopy) copyFile(source *os.File, relativePath string, mode os.FileMode) (regular bool, retErr error) {
+// copyFile copies name in root to relativePath in place without following
+// symbolic links. It reports false when nothing was copied: a tolerated open
+// failure, or a source that is no longer a regular file. In mirror mode an
+// identical destination file is left untouched.
+func (c *directoryCopy) copyFile(root *os.Root, name, relativePath string, mode os.FileMode) (copied bool, retErr error) {
+	source, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if c.tolerate && (errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrNotExist)) {
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
 	defer func() {
 		retErr = errors.Join(retErr, source.Close())
 	}()
