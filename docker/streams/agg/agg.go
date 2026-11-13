@@ -212,6 +212,7 @@ func ReconcilePollersByKey[T any](ctx context.Context, cfg PollerConfig[T]) {
 		for id, activePoller := range set.active {
 			if _, ok := current[id]; !ok {
 				activePoller.cancel()
+				<-activePoller.done
 				delete(set.active, id)
 			}
 		}
