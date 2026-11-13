@@ -48,12 +48,9 @@ func isComposeTagChange(inspect *container.InspectResponse, newRef string) bool 
 		(compose.ProjectLabel(config.Labels) != "" || compose.ServiceLabel(config.Labels) != "")
 }
 
-// verifyComposeService checks that a service's running containers run targetRef or, without a target,
-// no longer run oldImageID.
+// verifyComposeService checks that a service has running containers that run targetRef or, without a
+// target, no longer run oldImageID when one is given.
 func verifyComposeService(ctx context.Context, dockerClient *client.Client, projectName, serviceName, oldImageID, targetRef string) error {
-	if targetRef == "" && oldImageID == "" {
-		return nil
-	}
 	targetID := ""
 	if targetRef != "" {
 		image, err := dockerClient.ImageInspect(ctx, targetRef)
@@ -84,7 +81,7 @@ func verifyComposeService(ctx context.Context, dockerClient *client.Client, proj
 			currentImageID = strings.TrimSpace(current.Image)
 		}
 		switch {
-		case targetID == "" && currentImageID == oldImageID:
+		case targetID == "" && oldImageID != "" && currentImageID == oldImageID:
 			return fmt.Errorf("compose service %s/%s still running old image %s after update", projectName, serviceName, oldImageID)
 		case targetID != "" && (current.Config == nil || refs.NormalizeImageUpdateRef(current.Config.Image) != refs.NormalizeImageUpdateRef(targetRef) ||
 			currentImageID != targetID || !kit.FromPtr(current.State).Running):

@@ -385,7 +385,8 @@ func (s *Service) applyComposeServiceUpdate(
 	}
 	verifyCtx, cancel := s.opCtx(ctx)
 	verifyErr := verifyComposeService(verifyCtx, dockerClient, projectName, serviceName,
-		kit.Ternary(group.tagChanges, "", match.CurrentContainerImageID(plan.cnt, plan.inspect)),
+		// An implicit restart keeps its image, so it is only checked to be running.
+		kit.Ternary(group.tagChanges || plan.implicit, "", match.CurrentContainerImageID(plan.cnt, plan.inspect)),
 		kit.Ternary(group.tagChanges, plan.newRef, ""),
 	)
 	cancel()
@@ -399,7 +400,9 @@ func (s *Service) applyComposeServiceUpdate(
 	if projectErr != nil {
 		s.logger.WarnContext(ctx, "service updated despite project-level compose error", "projectId", projectID, "projectName", projectName, "serviceName", serviceName, "error", projectErr)
 	}
-	_ = s.notify(ctx, plan.cnt.ID, name, plan.newRef, plan.match, refs.NormalizeImageUpdateRef(plan.newRef))
+	if !plan.implicit {
+		_ = s.notify(ctx, plan.cnt.ID, name, plan.newRef, plan.match, refs.NormalizeImageUpdateRef(plan.newRef))
+	}
 	return standaloneRestartResult(name, plan, kit.Ternary(plan.implicit, StatusRestarted, StatusUpdated), "")
 }
 

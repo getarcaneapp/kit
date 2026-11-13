@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -408,6 +409,80 @@ func TestRestartContainersUsingOldImagesVerifiesComposeServiceAfterProjectError(
 	}
 	if len(projectUpdater.updateCalls) != 1 {
 		t.Fatalf("project updater calls = %#v, want one call", projectUpdater.updateCalls)
+	}
+}
+
+type notifierFunc func(Notification)
+
+func (f notifierFunc) Notify(_ context.Context, notification Notification) error {
+	f(notification)
+	return nil
+}
+
+func TestRestartContainersUsingOldImagesImplicitComposeDependencyRestarted(t *testing.T) {
+	summaries := map[string]container.Summary{
+		"db": {
+			ID:      "db-id",
+			Names:   []string{"/db"},
+			Image:   "db:1",
+			ImageID: "sha256:old-db",
+			Labels:  map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "db"},
+			State:   "running",
+		},
+		"web": {
+			ID:      "web-id",
+			Names:   []string{"/web"},
+			Image:   "web:1",
+			ImageID: "sha256:web",
+			Labels:  map[string]string{"com.docker.compose.project": "app", "com.docker.compose.service": "web", labels.LabelDependsOn: "db"},
+			State:   "running",
+		},
+	}
+	dockerClient := newDockerClientForHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		path := dockerAPIPath(r.URL.Path)
+		filters := r.URL.Query().Get("filters")
+		switch {
+		case path == "/containers/json" && strings.Contains(filters, "com.docker.compose.service=db"):
+			writeDockerJSON(t, w, []container.Summary{{ID: "db-new", ImageID: "sha256:new-db", State: "running"}})
+		case path == "/containers/json" && strings.Contains(filters, "com.docker.compose.service=web"):
+			writeDockerJSON(t, w, []container.Summary{{ID: "web-new", ImageID: "sha256:web", State: "running"}})
+		case path == "/containers/json":
+			writeDockerJSON(t, w, []container.Summary{summaries["db"], summaries["web"]})
+		case path == "/containers/db-id/json" || path == "/containers/web-id/json":
+			summary := summaries[strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "-id/json")]
+			writeDockerJSON(t, w, container.InspectResponse{
+				State:  &container.State{Running: true},
+				ID:     summary.ID,
+				Name:   summary.Names[0],
+				Image:  summary.ImageID,
+				Config: &container.Config{Image: summary.Image, Labels: summary.Labels},
+			})
+		case path == "/images/db:1/json":
+			writeDockerJSON(t, w, image.InspectResponse{ID: "sha256:new-db"})
+		default:
+			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	})
+	var notified []string
+	service := newServiceForTest(t, Config{
+		DockerClientProvider: &fakeDockerClientProvider{client: dockerClient},
+		ProjectUpdater:       &fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app", Name: "app"}}},
+		Notifier:             notifierFunc(func(n Notification) { notified = append(notified, n.ContainerName) }),
+	})
+
+	results, err := service.RestartContainersUsingOldImages(t.Context(), RestartTargets{ByOldID: map[string]string{"sha256:old-db": "db:1"}})
+	if err != nil {
+		t.Fatalf("RestartContainersUsingOldImages() error = %v", err)
+	}
+	statusByName := map[string]ResourceStatus{}
+	for _, result := range results {
+		statusByName[result.ResourceName] = result.Status
+	}
+	if statusByName["db"] != StatusUpdated || statusByName["web"] != StatusRestarted {
+		t.Fatalf("results = %#v, want db updated and web restarted", results)
+	}
+	if len(notified) != 1 || notified[0] != "db" {
+		t.Fatalf("notified = %v, want only db", notified)
 	}
 }
 
