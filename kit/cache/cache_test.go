@@ -381,3 +381,29 @@ func TestCacheDeleteDuringLoadDiscardsResult(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheRevalidationKeepsEntryTTL(t *testing.T) {
+	c := &Cache[string, int]{
+		Revalidate: func(string) (int, bool, error) {
+			return 2, true, nil
+		},
+		TTL:             time.Hour,
+		RevalidateAfter: time.Hour,
+	}
+	c.Set(Entry[string, int]{Key: "k", Value: 1, TTL: time.Minute})
+	age(c, "k", 2*time.Minute)
+	if got, _, _ := c.Get("k"); got != 1 {
+		t.Fatalf("stale Get = %d, want 1", got)
+	}
+	eventually(t, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return len(c.inflight) == 0
+	})
+	c.mu.Lock()
+	e := c.items["k"].Value.(*entry[string, int])
+	c.mu.Unlock()
+	if left := time.Until(e.fresh); e.value != 2 || left > time.Minute {
+		t.Fatalf("revalidated entry = %d fresh for %v; want 2 fresh for at most %v", e.value, left, time.Minute)
+	}
+}

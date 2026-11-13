@@ -57,6 +57,7 @@ type (
 		dead  time.Time
 		key   K
 		value V
+		ttl   time.Duration
 		found bool
 	}
 
@@ -94,7 +95,7 @@ func (c *Cache[K, V]) GetOrLoad(key K, load func(K) (V, bool, error)) (V, bool, 
 				cl := c.startLocked(key)
 				go func() {
 					defer func() { _ = recover() }()
-					c.run(key, reload, cl, e)
+					c.run(key, reload, cl, e, e.ttl)
 				}()
 			}
 			c.mu.Unlock()
@@ -115,7 +116,7 @@ func (c *Cache[K, V]) GetOrLoad(key K, load func(K) (V, bool, error)) (V, bool, 
 	}
 	c.mu.Unlock()
 	if !busy {
-		c.run(key, load, cl, nil)
+		c.run(key, load, cl, nil, c.TTL)
 	}
 	<-cl.done
 	if cl.err != nil {
@@ -256,7 +257,7 @@ func (c *Cache[K, V]) startLocked(key K) *call[V] {
 // run loads key into cl and stores the result. When a reload of stale fails, the
 // stale entry gets a fresh TTL unless it was replaced or removed meanwhile. Expiry
 // skips keys with a load in flight, so only Set, Delete, Purge, or eviction drop it.
-func (c *Cache[K, V]) run(key K, load func(K) (V, bool, error), cl *call[V], stale *entry[K, V]) {
+func (c *Cache[K, V]) run(key K, load func(K) (V, bool, error), cl *call[V], stale *entry[K, V], ttl time.Duration) {
 	defer func() {
 		c.mu.Lock()
 		el, ok := c.items[key]
@@ -264,13 +265,13 @@ func (c *Cache[K, V]) run(key K, load func(K) (V, bool, error), cl *call[V], sta
 		case cl.discard:
 		case cl.err != nil:
 			if ok && el.Value.(*entry[K, V]) == stale {
-				c.setLocked(key, stale.value, stale.found, c.TTL)
+				c.setLocked(key, stale.value, stale.found, ttl)
 			}
 		case cl.found:
-			c.setLocked(key, cl.value, true, c.TTL)
+			c.setLocked(key, cl.value, true, ttl)
 		case c.CacheMisses:
 			var zero V
-			c.setLocked(key, zero, false, c.TTL)
+			c.setLocked(key, zero, false, ttl)
 		case ok:
 			c.removeLocked(el)
 		}
@@ -291,6 +292,7 @@ func (c *Cache[K, V]) setLocked(key K, value V, found bool, ttl time.Duration) {
 	e := &entry[K, V]{
 		key:   key,
 		value: value,
+		ttl:   ttl,
 		found: found,
 		fresh: fresh,
 		dead:  dead,
