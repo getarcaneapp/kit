@@ -270,9 +270,7 @@ func TestBoundedWalkAndApply(t *testing.T) {
 	}
 }
 
-func TestListFailureKeepsStdoutCleanAndRemovesSpool(t *testing.T) {
-	spoolDirectory := t.TempDir()
-	t.Setenv("TMPDIR", spoolDirectory)
+func TestListFailureKeepsStdoutClean(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspaceRoot, "file"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -287,13 +285,6 @@ func TestListFailureKeepsStdoutCleanAndRemovesSpool(t *testing.T) {
 	}, strings.NewReader(""), &stdout, &stderr)
 	if exitCode == exitSuccess || stdout.Len() != 0 || stderr.Len() == 0 {
 		t.Fatalf("Run = (exit %d, stdout %q, stderr %q), want stderr-only failure", exitCode, stdout.String(), stderr.String())
-	}
-	spoolEntries, err := os.ReadDir(spoolDirectory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(spoolEntries) != 0 {
-		t.Fatalf("temporary list output was not removed: %#v", spoolEntries)
 	}
 }
 

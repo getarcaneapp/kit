@@ -138,15 +138,8 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 	if *limit < 0 {
 		return errors.New("--limit must be non-negative")
 	}
-	temporaryOutput, err := os.CreateTemp("", "acfs-list-*")
-	if err != nil {
-		return fmt.Errorf("create list output: %w", err)
-	}
-	defer func() {
-		_ = temporaryOutput.Close()
-		_ = os.Remove(temporaryOutput.Name())
-	}()
-	bufferedOutput := bufio.NewWriterSize(temporaryOutput, 64*1024)
+	// Unflushed output is dropped on failure, so a list that fails early leaves stdout empty.
+	bufferedOutput := bufio.NewWriterSize(stdout, 64*1024)
 
 	started := false
 	var encodedEntry bytes.Buffer
@@ -185,14 +178,6 @@ func runList(ctx context.Context, args []string, stdout io.Writer) error {
 	err = bufferedOutput.Flush()
 	if err != nil {
 		return fmt.Errorf("flush list output: %w", err)
-	}
-	_, err = temporaryOutput.Seek(0, io.SeekStart)
-	if err != nil {
-		return fmt.Errorf("rewind list output: %w", err)
-	}
-	_, err = io.Copy(stdout, temporaryOutput)
-	if err != nil {
-		return fmt.Errorf("copy list output: %w", err)
 	}
 	return nil
 }
