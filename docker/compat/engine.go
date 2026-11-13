@@ -2,6 +2,7 @@ package compat
 
 import (
 	"context"
+	jsonv1 "encoding/json"
 	"encoding/json/v2"
 	"fmt"
 	"maps"
@@ -101,7 +102,7 @@ func PrepareRecreateHostConfigForEngine(
 			}
 		}
 	}
-	if err = json.Unmarshal(raw, &inspect); err != nil {
+	if err = json.Unmarshal(raw, &inspect, jsonv1.DefaultOptionsV1()); err != nil {
 		return cloned, sanitized, engine, fmt.Errorf("decode podman user namespace of %s: %w", containerID, err)
 	}
 	usernsMode, err := keepIDUsernsMode(inspect.HostConfig.IDMappings.UIDMap, inspect.HostConfig.IDMappings.GIDMap)

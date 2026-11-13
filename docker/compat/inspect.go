@@ -3,6 +3,7 @@ package compat
 import (
 	"bufio"
 	"context"
+	jsonv1 "encoding/json"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -122,12 +123,13 @@ func repair[T, P any](ctx context.Context, apiClient client.APIClient, decodeErr
 	if err != nil {
 		return repaired, nil, false
 	}
+	// moby types rely on v1 semantics, e.g. time.Duration as nanoseconds.
 	var payload P
-	if json.Unmarshal(raw, &payload) != nil || !repair(payload) {
+	if json.Unmarshal(raw, &payload, jsonv1.DefaultOptionsV1()) != nil || !repair(payload) {
 		return repaired, nil, false
 	}
-	normalized, err := json.Marshal(payload)
-	if err != nil || json.Unmarshal(normalized, &repaired) != nil {
+	normalized, err := json.Marshal(payload, jsonv1.DefaultOptionsV1())
+	if err != nil || json.Unmarshal(normalized, &repaired, jsonv1.DefaultOptionsV1()) != nil {
 		return repaired, nil, false
 	}
 	return repaired, normalized, true

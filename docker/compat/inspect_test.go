@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	containertypes "github.com/moby/moby/api/types/container"
 	networktypes "github.com/moby/moby/api/types/network"
@@ -178,6 +179,26 @@ func TestContainerInspectWithCompatibility(t *testing.T) {
 	endpoint := result.Container.NetworkSettings.Networks["bridge"]
 	if endpoint == nil || endpoint.IPv6Gateway != netip.MustParseAddr("fdd0:0:0:c::1") || endpoint.GlobalIPv6Address != netip.MustParseAddr("fdd0:0:0:c::10") || endpoint.GlobalIPv6PrefixLen != 64 {
 		t.Errorf("endpoint = %+v", endpoint)
+	}
+}
+
+func TestContainerInspectWithCompatibility_Healthcheck(t *testing.T) {
+	t.Parallel()
+
+	dockerClient := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"Id":"abc123","Name":"/app","Config":{"Image":"test:latest","Healthcheck":{"Test":["CMD","true"],"Interval":30000000000,"Timeout":5000000000}},
+			"HostConfig":{"NetworkMode":"bridge"},"NetworkSettings":{"Networks":{"bridge":{"IPv6Gateway":"fdd0:0:0:c::1/64"}}}}`))
+	})
+
+	result, err := ContainerInspectWithCompatibility(t.Context(), dockerClient, "test-container", client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hc := result.Container.Config.Healthcheck; hc == nil || hc.Interval != 30*time.Second || hc.Timeout != 5*time.Second {
+		t.Errorf("healthcheck = %+v", hc)
+	}
+	if result.Container.NetworkSettings.Networks["bridge"].IPv6Gateway != netip.MustParseAddr("fdd0:0:0:c::1") {
+		t.Errorf("networks = %+v", result.Container.NetworkSettings.Networks)
 	}
 }
 
