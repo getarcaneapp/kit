@@ -21,6 +21,7 @@ type (
 
 	hubEntry[T any] struct {
 		cancel      context.CancelFunc
+		done        chan struct{}
 		subscribers map[*hubSubscriber[T]]struct{}
 		last        T
 		hasLast     bool
@@ -35,7 +36,8 @@ type (
 )
 
 // Subscribe attaches to the shared runner for key, starting run when no
-// runner exists yet, and blocks until ctx is done or deliver returns false.
+// runner exists yet, and blocks until ctx is done, deliver returns false, or
+// run returns.
 // run receives a context tied to the runner's lifetime — detached from any
 // single subscriber — and a publish callback for its events. publish never
 // blocks. A subscriber attaching after events were published immediately
@@ -52,20 +54,30 @@ func (h *Hub[T]) Subscribe(ctx context.Context, key string, run func(ctx context
 		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		entry = &hubEntry[T]{
 			cancel:      cancel,
+			done:        make(chan struct{}),
 			subscribers: map[*hubSubscriber[T]]struct{}{},
 		}
 		h.entries[key] = entry
-		go run(runCtx, func(event T) {
-			h.mu.Lock()
-			entry.last = event
-			entry.hasLast = true
-			subscribers := slices.Collect(maps.Keys(entry.subscribers))
-			h.mu.Unlock()
+		go func() {
+			defer close(entry.done)
+			defer cancel()
+			run(runCtx, func(event T) {
+				h.mu.Lock()
+				entry.last = event
+				entry.hasLast = true
+				subscribers := slices.Collect(maps.Keys(entry.subscribers))
+				h.mu.Unlock()
 
-			for _, subscriber := range subscribers {
-				subscriber.set(event)
+				for _, subscriber := range subscribers {
+					subscriber.set(event)
+				}
+			})
+			h.mu.Lock()
+			if h.entries[key] == entry {
+				delete(h.entries, key)
 			}
-		})
+			h.mu.Unlock()
+		}()
 	}
 	entry.subscribers[sub] = struct{}{}
 	if entry.hasLast {
@@ -78,7 +90,9 @@ func (h *Hub[T]) Subscribe(ctx context.Context, key string, run func(ctx context
 		delete(entry.subscribers, sub)
 		if len(entry.subscribers) == 0 {
 			entry.cancel()
-			delete(h.entries, key)
+			if h.entries[key] == entry {
+				delete(h.entries, key)
+			}
 		}
 		h.mu.Unlock()
 	}()
@@ -88,22 +102,27 @@ func (h *Hub[T]) Subscribe(ctx context.Context, key string, run func(ctx context
 		case <-ctx.Done():
 			return
 		case <-sub.wake:
-			event, has := func() (T, bool) {
-				sub.mu.Lock()
-				defer sub.mu.Unlock()
-				if !sub.has {
-					var zero T
-					return zero, false
-				}
-				event := sub.latest
-				sub.has = false
-				return event, true
-			}()
-			if has && !deliver(event) {
+			if event, has := sub.take(); has && !deliver(event) {
 				return
 			}
+		case <-entry.done:
+			if event, has := sub.take(); has {
+				deliver(event)
+			}
+			return
 		}
 	}
+}
+
+func (sub *hubSubscriber[T]) take() (T, bool) {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if !sub.has {
+		var zero T
+		return zero, false
+	}
+	sub.has = false
+	return sub.latest, true
 }
 
 func (sub *hubSubscriber[T]) set(event T) {

@@ -99,3 +99,28 @@ func TestZeroHubSubscribes(t *testing.T) {
 		t.Fatalf("delivered %d, want 7", got)
 	}
 }
+
+func TestHubRunnerExitReleasesSubscribersAndRestarts(t *testing.T) {
+	var hub Hub[int]
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	var starts atomic.Int32
+	runner := func(_ context.Context, publish func(int)) {
+		publish(int(starts.Add(1)))
+	}
+
+	for want := 1; want <= 2; want++ {
+		var got int
+		hub.Subscribe(ctx, "key", runner, func(v int) bool {
+			got = v
+			return true
+		})
+		if ctx.Err() != nil {
+			t.Fatal("Subscribe did not return after the runner exited")
+		}
+		if got != want {
+			t.Fatalf("delivered %d, want %d", got, want)
+		}
+	}
+}
