@@ -39,9 +39,15 @@ func TestRenameReplacesFileAndRejectsNonEmptyDirectoryTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Root{Path: root}.Rename(ctx, "/mover", "/occupied")
-	if !errors.Is(err, ErrNotEmpty) {
-		t.Fatalf("Rename onto non-empty directory error = %v, want ErrNotEmpty", err)
+	err = os.Mkdir(filepath.Join(root, "empty"), 0o750)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, move := range [][2]string{{"/mover", "/occupied"}, {"/mover", "/empty"}, {"/target.txt", "/empty"}} {
+		err = Root{Path: root}.Rename(ctx, move[0], move[1])
+		if !errors.Is(err, ErrAlreadyExists) || errors.Is(err, ErrNotEmpty) {
+			t.Fatalf("Rename %s onto directory %s error = %v, want ErrAlreadyExists", move[0], move[1], err)
+		}
 	}
 
 	err = Root{Path: root}.Rename(ctx, "/occupied", "/occupied/child/nested")

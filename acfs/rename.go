@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"strings"
@@ -77,13 +78,18 @@ func (r Root) Rename(ctx context.Context, sourceLogical, targetLogical string) e
 	return renameError(sourceParent.renameTo(sourceBase, targetParent, targetBase), sourceLogical, targetLogical)
 }
 
-// renameError wraps a rename error, reporting ErrNotEmpty for a non-empty target.
+// renameError wraps a rename error, reporting ErrNotEmpty for a non-empty target
+// and ErrAlreadyExists for an existing directory target, which os.Rename refuses
+// with EEXIST.
 func renameError(err error, source, target string) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+	if errors.Is(err, syscall.ENOTEMPTY) {
 		return fmt.Errorf("%w: %q", ErrNotEmpty, target)
+	}
+	if errors.Is(err, syscall.EEXIST) {
+		return fmt.Errorf("%w: %q: %w", ErrAlreadyExists, target, fs.ErrExist)
 	}
 	return fmt.Errorf("rename %q to %q: %w", source, target, err)
 }
