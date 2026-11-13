@@ -1,3 +1,17 @@
+## tripwire/v0.2.1
+
+### Bug fixes
+
+* release child watches when a directory is renamed([11f3f65](https://github.com/getarcaneapp/kit/commit/11f3f659fcf395b8d48b28e8826e5a50e46549be) by @kmendell)
+
+### Performance improvements
+
+* hand off batch maps instead of clearing and copying([66888f4](https://github.com/getarcaneapp/kit/commit/66888f4153a78a0ca6e60aeb06c35a49ae9b3c16) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/tripwire/v0.2.0...tripwire/v0.2.1
+
 ## tripwire/v0.2.0
 
 ### New features
