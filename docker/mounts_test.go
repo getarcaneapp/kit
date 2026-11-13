@@ -166,6 +166,17 @@ func TestMountForSubpath(t *testing.T) {
 		require.Nil(t, MountForSubpath([]containertypes.MountPoint{hostBind}, "/app/datax/foo", "/workspace"))
 	})
 
+	t.Run("rejects traversal out of the mount", func(t *testing.T) {
+		require.Nil(t, MountForSubpath([]containertypes.MountPoint{hostBind}, "/app/data/projects/../../../etc", "/workspace"))
+		require.Nil(t, MountForSubpath([]containertypes.MountPoint{namedVolume}, "/app/data/../etc", "/workspace"))
+	})
+
+	t.Run("cleans containerPath before joining", func(t *testing.T) {
+		got := MountForSubpath([]containertypes.MountPoint{hostBind}, "/app/data/projects/../other//foo/", "/workspace")
+		require.NotNil(t, got)
+		require.Equal(t, "/host/projects-root/other/foo", got.Source)
+	})
+
 	t.Run("rejects empty containerPath", func(t *testing.T) {
 		require.Nil(t, MountForSubpath([]containertypes.MountPoint{hostBind}, "", "/workspace"))
 	})
@@ -277,6 +288,13 @@ func TestMountForEnclosingPath(t *testing.T) {
 	require.Nil(t, enclosing)
 	enclosing, _ = MountForEnclosingPath(mounts, "", "/restore")
 	require.Nil(t, enclosing)
+	enclosing, relative = MountForEnclosingPath(mounts, "/app/data/projects/../../../etc", "/restore")
+	require.Nil(t, enclosing)
+	require.Empty(t, relative)
+
+	enclosing, relative = MountForEnclosingPath(mounts, "/app/data/projects/demo/../other/", "/restore")
+	require.Equal(t, "/host/projects", enclosing.Source)
+	require.Equal(t, "other", relative)
 }
 
 func TestNestedMounts(t *testing.T) {

@@ -40,6 +40,7 @@ func MountForSubpath(mounts []container.MountPoint, containerPath, target string
 	if strings.TrimSpace(containerPath) == "" {
 		return nil
 	}
+	containerPath = path.Clean(containerPath)
 	if strings.TrimSpace(target) == "" {
 		target = containerPath
 	}
@@ -59,6 +60,9 @@ func MountForSubpath(mounts []container.MountPoint, containerPath, target string
 	}
 
 	relative := strings.TrimPrefix(strings.TrimPrefix(containerPath, best.Destination), "/")
+	if relative == ".." || strings.HasPrefix(relative, "../") {
+		return nil
+	}
 
 	switch best.Type { //nolint:exhaustive // only bind and volume mounts are translatable; the default returns nil for the rest
 	case mount.TypeBind:
@@ -100,6 +104,7 @@ func MountForEnclosingPath(mounts []container.MountPoint, containerPath, target 
 	if strings.TrimSpace(containerPath) == "" {
 		return nil, ""
 	}
+	containerPath = path.Clean(containerPath)
 	var best *container.MountPoint
 	for i := range mounts {
 		m := &mounts[i]
@@ -113,11 +118,15 @@ func MountForEnclosingPath(mounts []container.MountPoint, containerPath, target 
 	if best == nil {
 		return nil, ""
 	}
+	relative := strings.TrimPrefix(strings.TrimPrefix(containerPath, best.Destination), "/")
+	if relative == ".." || strings.HasPrefix(relative, "../") {
+		return nil, ""
+	}
 	enclosing := MountForDestination(mounts, best.Destination, target)
 	if enclosing == nil {
 		return nil, ""
 	}
-	return enclosing, strings.TrimPrefix(strings.TrimPrefix(containerPath, best.Destination), "/")
+	return enclosing, relative
 }
 
 // NestedMounts mirrors every bind or volume mount whose destination lies
