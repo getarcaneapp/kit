@@ -64,7 +64,8 @@ func (u dockerComposeProjectUpdater) UpdateServices(ctx context.Context, project
 	for _, envFile := range metadata.envFiles {
 		args = append(args, "--env-file", envFile)
 	}
-	args = append(args, "up", "-d", "--no-deps", "--force-recreate")
+	// Service names come from container labels; "--" keeps one starting with "-" from parsing as a flag.
+	args = append(args, "up", "-d", "--no-deps", "--force-recreate", "--")
 	args = append(args, services...)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
