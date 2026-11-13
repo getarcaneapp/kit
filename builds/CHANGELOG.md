@@ -1,3 +1,31 @@
+## builds/v0.5.3
+
+### Bug fixes
+
+* skip non-regular files when staging the build context([7aa5d05](https://github.com/getarcaneapp/kit/commit/7aa5d05941a01bd4f7d8daf58d4b7bb7048645a8) by @kmendell)
+* stop copying ignored context files for staged dockerfiles([e85f62a](https://github.com/getarcaneapp/kit/commit/e85f62aaa7c0d23b0f4b1cd75a0b794123276c0a) by @kmendell)
+* stage read-only context directories([d4922b3](https://github.com/getarcaneapp/kit/commit/d4922b32f600fb71597497ac9bad821464d4ce4c) by @kmendell)
+* drop blank platforms once before building([e480af0](https://github.com/getarcaneapp/kit/commit/e480af06833a7128eff48c149e96beb07b34f7b7) by @kmendell)
+* reject git context refs that start with a dash([8e402c0](https://github.com/getarcaneapp/kit/commit/8e402c0cef5673c087f8136b119419614b765abb) by @kmendell)
+* resolve lint issues in context staging and tests([269ee9b](https://github.com/getarcaneapp/kit/commit/269ee9be792c0846f361df2e5a04dc6a9cbda412) by @kmendell)
+* bump deps([a7c1bfe](https://github.com/getarcaneapp/kit/commit/a7c1bfea542b3fb145814e95a2ec01de83791002) by @kmendell)
+
+### Performance improvements
+
+* load registry auth once per push([b3f4c22](https://github.com/getarcaneapp/kit/commit/b3f4c2206628bf54fd9d27733f37477933408b5c) by @kmendell)
+
+### Documentation
+
+* drop git url from the context dir description([be34b32](https://github.com/getarcaneapp/kit/commit/be34b3218cb64418b1c5028fc6915910262ddbee) by @kmendell)
+
+### Other
+
+* type the build provider map([e2d9fa9](https://github.com/getarcaneapp/kit/commit/e2d9fa97d5219e323eb4d637e25a302bf18c8dfc) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.5.2...builds/v0.5.3
+
 ## builds/v0.5.2
 
 ### Bug fixes
