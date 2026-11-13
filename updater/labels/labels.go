@@ -38,6 +38,8 @@ const (
 	LabelUpdateConstraint = LabelUpdater + ".constraint"
 	// LabelUpdateTagPattern selects tags and optionally captures their version.
 	LabelUpdateTagPattern = LabelUpdater + ".tag-pattern"
+	// LabelConfiguredImage holds the image reference a container was configured with when the updater had to run it from an image ID.
+	LabelConfiguredImage = LabelUpdater + ".configured-image"
 	// LabelSwarmServiceID identifies a Docker Swarm task.
 	LabelSwarmServiceID = "com.docker.swarm.service.id"
 	// LabelSwarmServiceName identifies a Docker Swarm task.

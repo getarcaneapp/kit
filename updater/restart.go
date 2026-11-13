@@ -76,7 +76,7 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, targets R
 		newRef, matchValue := match.ResolveContainerImageMatch(summary, nil, targets.ByOldID, updatedNorm)
 		if newRef == "" && match.ShouldInspectUnmatchedContainerForImageMatch(summary) {
 			if inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, summary.ID, client.ContainerInspectOptions{}); inspectErr == nil {
-				inspected = &inspectResult.Container
+				inspected = new(withConfiguredImage(inspectResult.Container))
 				newRef, matchValue = match.ResolveContainerImageMatch(summary, inspected, targets.ByOldID, updatedNorm)
 			}
 		}
@@ -109,7 +109,7 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, targets R
 			if inspectErr != nil {
 				continue
 			}
-			plan.inspect = &inspectResult.Container
+			plan.inspect = new(withConfiguredImage(inspectResult.Container))
 		}
 		pinNetworkContainer(plan.inspect, listResult.Items)
 		containers[i] = deps.ExtractContainerDeps(ctx, scanned.Name, scanned.Container, *plan.inspect)
@@ -253,7 +253,7 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 				results = append(results, failedContainerResult(plan.cnt.ID, candidate.Name, fmt.Sprintf("inspect failed: %v", inspectErr)))
 				continue
 			}
-			plan.inspect = new(inspectResult.Container)
+			plan.inspect = new(withConfiguredImage(inspectResult.Container))
 		}
 		if plan.newRef == "" {
 			results = append(results, standaloneRestartResult(candidate.Name, plan, StatusSkipped, "no matching updated image"))

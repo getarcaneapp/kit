@@ -2,10 +2,14 @@ package updater
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"kit.getarcane.app"
+
+	"kit.getarcane.app/updater/labels"
+	"kit.getarcane.app/updater/refs"
 )
 
 func newTimedResult() (*Result, func(*error)) {
@@ -67,4 +71,19 @@ func labelsFromInspect(inspect container.InspectResponse) map[string]string {
 		return nil
 	}
 	return inspect.Config.Labels
+}
+
+// withConfiguredImage returns inspect configured with the reference recorded in LabelConfiguredImage
+// when the updater ran the container from an image ID, so it keeps receiving updates.
+func withConfiguredImage(inspect container.InspectResponse) container.InspectResponse {
+	configured := strings.TrimSpace(kit.FromPtr(inspect.Config).Labels[labels.LabelConfiguredImage])
+	if !refs.IsImageIDLikeReference(kit.FromPtr(inspect.Config).Image) || configured == "" || refs.IsImageIDLikeReference(configured) {
+		return inspect
+	}
+	// keep: by-value copy of the shared inspected config; a full 25-field container.Config literal reads worse
+	cfg := new(*inspect.Config)
+	cfg.Image = configured
+	// keep: inspect is the caller's by-value copy
+	inspect.Config = cfg
+	return inspect
 }

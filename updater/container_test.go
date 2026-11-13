@@ -730,3 +730,140 @@ func assertTagSelectionUpdated(t *testing.T, scenario tagSelectionScenario, resu
 		t.Fatalf("created %v", docker.created)
 	}
 }
+
+func TestUpdateStandaloneContainerRollbackFromImageIDRecordsConfiguredImage(t *testing.T) {
+	oldImageID := "sha256:" + strings.Repeat("a", 64)
+	var created []container.Config
+	dockerClient := newDockerClientForHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		path := dockerAPIPath(r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(path, "/images/"):
+			writeDockerJSON(t, w, map[string]any{"Id": oldImageID, "Config": map[string]any{}})
+		case path == "/version":
+			writeDockerJSON(t, w, map[string]string{"ApiVersion": "1.41"})
+		case path == "/info":
+			writeDockerJSON(t, w, map[string]any{})
+		case r.Method == http.MethodPost && path == "/containers/old-id/stop":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && path == "/containers/old-id/wait":
+			writeDockerJSON(t, w, map[string]any{"StatusCode": 0})
+		case r.Method == http.MethodPost && path == "/containers/create":
+			var body container.Config
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			created = append(created, body)
+			if body.Image == "app:2" {
+				http.Error(w, "create failed", http.StatusInternalServerError)
+				return
+			}
+			writeDockerJSON(t, w, map[string]any{"Id": "rollback-id", "Warnings": []string{}})
+		case r.Method == http.MethodPost && path == "/containers/rollback-id/start":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unexpected path: "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	})
+	service := newServiceForTest(t, Config{DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}})
+
+	err := service.updateComposeOrStandalone(t.Context(),
+		container.Summary{ID: "old-id", Names: []string{"/app"}},
+		container.InspectResponse{
+			State:      &container.State{Running: true},
+			ID:         "old-id",
+			Name:       "/app",
+			Image:      oldImageID,
+			Config:     &container.Config{Image: "app:1", Labels: map[string]string{"com.example.custom": "keep"}},
+			HostConfig: &container.HostConfig{AutoRemove: true},
+		},
+		"app:2",
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "rollback succeeded") {
+		t.Fatalf("updateComposeOrStandalone() error = %v, want rollback succeeded", err)
+	}
+	if len(created) != 2 || created[1].Image != oldImageID {
+		t.Fatalf("created = %+v, want the new ref then a rollback from the old image ID", created)
+	}
+	if got := created[1].Labels[labels.LabelConfiguredImage]; got != "app:1" {
+		t.Fatalf("rollback %s = %q, want app:1", labels.LabelConfiguredImage, got)
+	}
+	if got := created[1].Labels["com.example.custom"]; got != "keep" {
+		t.Fatalf("rollback custom label = %q, want keep", got)
+	}
+}
+
+func TestContainerRunFromImageIDWithConfiguredImageKeepsUpdating(t *testing.T) {
+	oldImageID, newImageID := "sha256:"+strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64)
+	remote := "sha256:" + strings.Repeat("c", 64)
+	containerLabels := map[string]string{
+		labels.LabelUpdateStrategy:  "digest",
+		labels.LabelConfiguredImage: "app:1.0.0",
+	}
+	var created []container.Config
+	dockerClient := newDockerClientForHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		path := dockerAPIPath(r.URL.Path)
+		switch {
+		case path == "/containers/json":
+			writeDockerJSON(t, w, []container.Summary{{ID: "app", Names: []string{"/web"}, Image: oldImageID, ImageID: oldImageID, Labels: containerLabels}})
+		case path == "/containers/app/json":
+			writeDockerJSON(t, w, container.InspectResponse{
+				State:      &container.State{Running: true},
+				ID:         "app",
+				Name:       "/web",
+				Image:      oldImageID,
+				Config:     &container.Config{Image: oldImageID, Labels: containerLabels},
+				HostConfig: &container.HostConfig{AutoRemove: true},
+			})
+		case path == "/images/"+oldImageID+"/json":
+			writeDockerJSON(t, w, map[string]any{"Id": oldImageID, "RepoDigests": []string{"app@sha256:" + strings.Repeat("d", 64)}, "Config": map[string]any{}})
+		case strings.HasPrefix(path, "/images/"):
+			writeDockerJSON(t, w, map[string]any{"Id": newImageID, "Config": map[string]any{}})
+		case path == "/version":
+			writeDockerJSON(t, w, map[string]string{"ApiVersion": "1.41"})
+		case path == "/info":
+			writeDockerJSON(t, w, map[string]any{})
+		case path == "/containers/app/wait":
+			writeDockerJSON(t, w, map[string]any{"StatusCode": 0})
+		case path == "/containers/create":
+			var body container.Config
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode create body: %v", err)
+			}
+			created = append(created, body)
+			writeDockerJSON(t, w, map[string]string{"Id": "new"})
+		case strings.HasSuffix(path, "/stop") || strings.HasSuffix(path, "/start"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+path, http.StatusNotFound)
+		}
+	})
+	puller := &fakePuller{}
+	service := newServiceForTest(t, Config{
+		DockerClientProvider:   &fakeDockerClientProvider{client: dockerClient},
+		RegistryDigestResolver: &countingDigestResolver{digest: remote},
+		ImagePuller:            puller,
+	})
+
+	check, err := service.CheckContainerUpdate(t.Context(), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if check.Reason != "" || !check.UpdateAvailable || check.CurrentRef != "docker.io/library/app:1.0.0" {
+		t.Fatalf("CheckContainerUpdate() = %+v, want an update for the configured ref", check)
+	}
+
+	result, err := service.UpdateContainer(t.Context(), "app", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Updated != 1 || len(puller.pulled) != 1 || puller.pulled[0] != "docker.io/library/app:1.0.0" {
+		t.Fatalf("UpdateContainer() = %+v, pulls %v, want the configured ref pulled and applied", result, puller.pulled)
+	}
+	if len(created) != 1 || created[0].Image != "app:1.0.0" {
+		t.Fatalf("created = %+v, want the configured ref", created)
+	}
+	if got, ok := created[0].Labels[labels.LabelConfiguredImage]; ok {
+		t.Fatalf("recreated %s = %q, want it dropped", labels.LabelConfiguredImage, got)
+	}
+}

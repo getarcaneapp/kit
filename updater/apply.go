@@ -197,17 +197,18 @@ func (s *Service) usedImages(ctx context.Context, exclusions exclusionPolicy) (m
 			(policy.IsSwarmTask(summary.Labels) && !policy.IsSelfUpdateTarget(summary.Labels)) {
 			continue
 		}
-		if imageRef := refs.NormalizeImageUpdateRef(summary.Image); imageRef != "" {
+		if imageRef := refs.NormalizeImageUpdateRef(summary.Image); imageRef != "" && !refs.IsImageIDLikeReference(summary.Image) {
 			out[imageRef] = struct{}{}
 			continue
 		}
 		inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, summary.ID, client.ContainerInspectOptions{})
-		if inspectErr != nil || inspectResult.Container.Config == nil ||
-			(exclusions == enforceSettingsExclusions && policy.IsUpdateDisabled(inspectResult.Container.Config.Labels)) {
+		inspect := withConfiguredImage(inspectResult.Container)
+		if inspectErr != nil || inspect.Config == nil ||
+			(exclusions == enforceSettingsExclusions && policy.IsUpdateDisabled(inspect.Config.Labels)) {
 			continue
 		}
-		candidates := []string{inspectResult.Container.Config.Image}
-		if imageInspect, imageErr := dockerClient.ImageInspect(ctx, inspectResult.Container.Image); imageErr == nil {
+		candidates := []string{inspect.Config.Image}
+		if imageInspect, imageErr := dockerClient.ImageInspect(ctx, inspect.Image); imageErr == nil {
 			candidates = append(candidates, imageInspect.RepoTags...)
 		}
 		for _, candidate := range candidates {

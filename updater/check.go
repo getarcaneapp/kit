@@ -139,7 +139,7 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 	if err != nil {
 		return types.CheckResult{}, err
 	}
-	inspect := inspected.Container
+	inspect := withConfiguredImage(inspected.Container)
 	excluded, err := s.excludedContainerSet(ctx, enforceSettingsExclusions)
 	if err != nil {
 		return types.CheckResult{ContainerID: cmp.Or(inspect.ID, containerID)}, err

@@ -25,6 +25,7 @@ import (
 
 	"kit.getarcane.app/updater/internal/compose"
 	"kit.getarcane.app/updater/internal/digestcheck"
+	"kit.getarcane.app/updater/labels"
 	"kit.getarcane.app/updater/refs"
 	updatetypes "kit.getarcane.app/updater/types"
 )
@@ -60,9 +61,9 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		appendResult(out, failedContainerResult(target.ID, name, fmt.Sprintf("inspect failed: %v", err)))
 		return out, nil
 	}
-	inspect := inspectResult.Container
-	labels := labelsFromInspect(inspect)
-	defer s.BeginProjectUpdate(compose.ProjectLabel(labels))()
+	inspect := withConfiguredImage(inspectResult.Container)
+	containerLabels := labelsFromInspect(inspect)
+	defer s.BeginProjectUpdate(compose.ProjectLabel(containerLabels))()
 
 	excluded, err := s.excludedContainerSet(ctx, exclusionPolicy(!opts.IgnoreSettingsExclusions))
 	if err != nil {
@@ -88,7 +89,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		return out, nil
 	}
 
-	selection, selectionErr := s.selectImageTag(ctx, "", normalizedRef, s.config.LabelPolicy.TagPolicy(labels))
+	selection, selectionErr := s.selectImageTag(ctx, "", normalizedRef, s.config.LabelPolicy.TagPolicy(containerLabels))
 	if selectionErr != nil {
 		appendResult(out, failedContainerResult(target.ID, name, selectionErr.Error()))
 		return out, nil
@@ -128,10 +129,10 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		return out, nil
 	}
 
-	selfUpdate := s.isSelfUpdateCandidate(target.ID, labels)
+	selfUpdate := s.isSelfUpdateCandidate(target.ID, containerLabels)
 	updateErr := func() error {
 		if selfUpdate {
-			return s.triggerSelfUpdate(ctx, target.ID, name, normalizedRef, labels)
+			return s.triggerSelfUpdate(ctx, target.ID, name, normalizedRef, containerLabels)
 		}
 		return s.updateComposeOrStandalone(ctx, target, inspect, normalizedRef)
 	}()
@@ -183,11 +184,11 @@ func (s *Service) clearPendingRecord(ctx context.Context, containerID, imageRef 
 // updateComposeOrStandalone applies newRef through the container's Compose project when it resolves,
 // and recreates the container standalone otherwise.
 func (s *Service) updateComposeOrStandalone(ctx context.Context, target container.Summary, inspect container.InspectResponse, newRef string) error {
-	labels := labelsFromInspect(inspect)
-	if s.isSelfUpdateCandidate(target.ID, labels) {
+	containerLabels := labelsFromInspect(inspect)
+	if s.isSelfUpdateCandidate(target.ID, containerLabels) {
 		return ErrSelfUpdateContainer
 	}
-	projectName, serviceName := compose.ProjectLabel(labels), compose.ServiceLabel(labels)
+	projectName, serviceName := compose.ProjectLabel(containerLabels), compose.ServiceLabel(containerLabels)
 	if isComposeTagChange(&inspect, newRef) {
 		projectID, err := s.preflightComposeImage(ctx, target.ID, inspect, newRef)
 		if err != nil {
@@ -366,6 +367,7 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 	portBindings := kit.FromPtr(inspect.HostConfig).PortBindings
 	// keep: by-value copy of the inspected config; a full 25-field container.Config literal reads worse
 	cfg := new(kit.FromPtr(inspect.Config))
+	configuredRef := strings.TrimSpace(kit.Ternary(refs.IsImageIDLikeReference(cfg.Image), cfg.Labels[labels.LabelConfiguredImage], cfg.Image))
 	cfg.Image = imageRef
 	cfg.Hostname = kit.Ternary(cfg.Hostname == inspect.ID[:min(12, len(inspect.ID))] || networkMode.IsHost() || networkMode.IsContainer(), "", cfg.Hostname)
 	cfg.Domainname = kit.Ternary(networkMode.IsHost() || networkMode.IsContainer(), "", cfg.Domainname)
@@ -373,8 +375,12 @@ func (s *Service) createAndStartStandaloneContainer(ctx context.Context, dockerC
 	cfg.Labels = maps.Clone(cfg.Labels)
 	maps.DeleteFunc(cfg.Labels, func(key, value string) bool {
 		imageValue, ok := imageConfig.Labels[key]
-		return ok && imageValue == value
+		return key == labels.LabelConfiguredImage || (ok && imageValue == value)
 	})
+	if refs.IsImageIDLikeReference(imageRef) && configuredRef != "" && !refs.IsImageIDLikeReference(configuredRef) {
+		cfg.Labels = kit.Ternary(cfg.Labels == nil, map[string]string{}, cfg.Labels)
+		cfg.Labels[labels.LabelConfiguredImage] = configuredRef
+	}
 	cfg.Volumes = maps.Clone(cfg.Volumes)
 	maps.DeleteFunc(cfg.Volumes, func(target string, _ struct{}) bool {
 		_, ok := imageConfig.Volumes[target]

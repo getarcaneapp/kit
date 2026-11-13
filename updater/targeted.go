@@ -41,15 +41,15 @@ func (s *Service) applyTargetedRecords(ctx context.Context, records []ImageUpdat
 		return err
 	}
 	// Records and implicit candidates share one inspect per container.
-	inspections := map[string]client.ContainerInspectResult{}
+	inspections := map[string]container.InspectResponse{}
 	inspectErrs := map[string]error{}
 	inspect := func(id string) (container.InspectResponse, error) {
-		if result, ok := inspections[id]; ok {
-			return result.Container, inspectErrs[id]
+		if cached, ok := inspections[id]; ok {
+			return cached, inspectErrs[id]
 		}
 		result, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, id, client.ContainerInspectOptions{})
-		inspections[id], inspectErrs[id] = result, inspectErr
-		return result.Container, inspectErr
+		inspections[id], inspectErrs[id] = withConfiguredImage(result.Container), inspectErr
+		return inspections[id], inspectErr
 	}
 	proxy := dockerProxyContainerName(dockerClient.DaemonHost())
 	plansByName, markedForRestart := map[string]*restartPlan{}, map[string]bool{}
