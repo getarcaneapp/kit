@@ -77,6 +77,29 @@ func TestInitEncryptionDecryptsLegacyHexCiphertext(t *testing.T) {
 	}
 }
 
+func TestInitEncryptionRequiresKeyOutsideDevelopment(t *testing.T) {
+	tests := []struct {
+		environment string
+		wantPanic   bool
+	}{
+		{environment: "development"},
+		{environment: "production", wantPanic: true},
+		{environment: "prod", wantPanic: true},
+		{environment: "Production", wantPanic: true},
+		{environment: "", wantPanic: true},
+	}
+	for _, test := range tests {
+		t.Run(test.environment, func(t *testing.T) {
+			defer func() {
+				if panicked := recover() != nil; panicked != test.wantPanic {
+					t.Fatalf("InitEncryption panicked = %t, want %t", panicked, test.wantPanic)
+				}
+			}()
+			InitEncryption(Config{Environment: test.environment})
+		})
+	}
+}
+
 func TestParseEncodedKey(t *testing.T) {
 	raw := bytes.Repeat([]byte{0x42}, KeySize)
 	for _, tc := range []struct {

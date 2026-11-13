@@ -24,8 +24,8 @@ type (
 	// every callsite.
 	Config struct {
 		EncryptionKey string
-		Environment   string
-		AgentMode     bool
+		// Environment must be "development" for an empty EncryptionKey to be accepted.
+		Environment string
 	}
 
 	// Encryptor encrypts and decrypts strings with AES-GCM.
@@ -55,12 +55,13 @@ var (
 )
 
 // InitEncryption initializes the package default encryptor. Applications should
-// prefer constructing an Encryptor with New and passing it explicitly.
+// prefer constructing an Encryptor with New and passing it explicitly. It panics
+// without a key unless Environment is "development", where a public fixed key is used.
 func InitEncryption(cfg Config) {
 	keyStr := strings.TrimSpace(cfg.EncryptionKey)
 	if keyStr == "" {
-		if cfg.Environment == "production" && !cfg.AgentMode {
-			panic("ENCRYPTION_KEY is required in production environment")
+		if cfg.Environment != "development" {
+			panic("ENCRYPTION_KEY is required outside the development environment")
 		}
 		keyStr = "arcane-dev-key"
 	}
