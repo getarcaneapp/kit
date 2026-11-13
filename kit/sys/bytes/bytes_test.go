@@ -22,7 +22,10 @@ func TestCapacityString(t *testing.T) {
 		{want: "1.1K", in: 1149},   // .149 rounds to .1
 		{want: "2K", in: 1990},     // .99 rounds up to the next whole unit
 		{want: "1K", in: Kibibyte}, // 1024 bytes reads as 1K in base 10
-		{want: "1M", in: Megabyte}, // exact-unit fast path
+		{want: "1M", in: Megabyte},
+		{want: "999.9K", in: 999_949},
+		{want: "1M", in: 999_950}, // would round to 1000K
+		{want: "1M", in: 999_960},
 		{want: "1M", in: Mebibyte}, // 1048576 -> 1.048M -> 1M
 		{want: "10.4G", in: 10_400_000_000},
 		{want: "1G", in: Gigabyte},
@@ -32,7 +35,8 @@ func TestCapacityString(t *testing.T) {
 		{want: "1.1G", in: Gibibyte},
 		{want: "1.1T", in: Tebibyte},
 		{want: "999.9P", in: 999_900_000_000_000_000}, // longest fractional output
-		{want: "18.4E", in: maxCapacity},              // longest whole-unit output
+		{want: "1E", in: 999_960_000_000_000_000},
+		{want: "18.4E", in: maxCapacity}, // longest whole-unit output
 	}
 	for _, tt := range tests {
 		if got := tt.in.String(); got != tt.want {

@@ -163,14 +163,9 @@ func (c Capacity) String() string {
 	var buf [len("1023.1P")]byte
 	w := len(buf)
 
-	// Find the largest unit that we can fit into
 	for _, unit := range units {
-		if u == unit.Size {
-			w -= 2
-			buf[w] = '1'
-			buf[w+1] = unit.Suffix
-			break
-		} else if u > unit.Size {
+		// From Size-Size/20000 up, the next unit down would round to "1000".
+		if u >= unit.Size-unit.Size/20000 {
 			w--
 			buf[w] = unit.Suffix
 			w, u = fmtFrac(buf[:w], u, unit.Size)
