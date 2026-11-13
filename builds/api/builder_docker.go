@@ -373,16 +373,22 @@ func (b *Service) pushDockerImages(
 	tags []string,
 	progressWriter io.Writer,
 ) error {
+	authConfigs, loadErr := func() (map[string]dockerregistry.AuthConfig, error) {
+		if b.registryAuthProvider == nil {
+			return nil, nil
+		}
+		return b.registryAuthProvider.GetAllRegistryAuthConfigs(ctx)
+	}()
+	if loadErr != nil {
+		_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for push")
+	}
 	for _, tag := range tags {
 		if strings.TrimSpace(tag) == "" {
 			continue
 		}
 		pushResp, pushErr := dockerClient.ImagePush(ctx, tag, dockerclient.ImagePushOptions{
 			RegistryAuth: func() string {
-				if b.registryAuthProvider == nil {
-					return ""
-				}
-				authHeader, authErr := registryAuthHeaderForImage(ctx, b.registryAuthProvider, tag)
+				authHeader, authErr := registryAuthHeaderForImage(authConfigs, tag)
 				if authErr != nil {
 					_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for "+tag)
 					return ""

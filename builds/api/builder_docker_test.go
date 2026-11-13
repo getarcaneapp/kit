@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -472,4 +474,57 @@ func TestBuildDockerImageOptions_NormalizesPlatformArchitecture(t *testing.T) {
 	require.Len(t, buildOpts.Platforms, 1)
 	assert.Equal(t, "linux", buildOpts.Platforms[0].OS)
 	assert.Equal(t, "amd64", buildOpts.Platforms[0].Architecture)
+}
+
+type countingRegistryAuthProvider struct {
+	authConfigs map[string]dockerregistry.AuthConfig
+	calls       atomic.Int32
+}
+
+func (c *countingRegistryAuthProvider) GetAllRegistryAuthConfigs(_ context.Context) (map[string]dockerregistry.AuthConfig, error) {
+	c.calls.Add(1)
+	return c.authConfigs, nil
+}
+
+func TestPushDockerImages_LoadsRegistryAuthOnce(t *testing.T) {
+	var authHeaders []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/push") {
+			http.NotFound(w, r)
+			return
+		}
+		mu.Lock()
+		authHeaders = append(authHeaders, r.Header.Get("X-Registry-Auth"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "{\"status\":\"pushed\"}\n")
+	}))
+	t.Cleanup(server.Close)
+
+	dockerClient, err := dockerclient.New(
+		dockerclient.WithHost("tcp://"+server.Listener.Addr().String()),
+		dockerclient.WithAPIVersion("1.54"),
+	)
+	require.NoError(t, err)
+	defer func() { _ = dockerClient.Close() }()
+
+	provider := &countingRegistryAuthProvider{authConfigs: map[string]dockerregistry.AuthConfig{
+		"registry.example.com": {
+			Username: "user",
+			Password: "token",
+		},
+	}}
+	service := &Service{registryAuthProvider: provider}
+	require.NoError(t, service.pushDockerImages(t.Context(), dockerClient, []string{
+		"registry.example.com/app:1",
+		"registry.example.com/app:latest",
+		"registry.example.com/app:stable",
+	}, io.Discard))
+
+	assert.Equal(t, int32(1), provider.calls.Load())
+	require.Len(t, authHeaders, 3)
+	for _, header := range authHeaders {
+		assert.NotEmpty(t, header)
+	}
 }
