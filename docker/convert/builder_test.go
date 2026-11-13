@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"kit.getarcane.app/docker/convert"
@@ -94,5 +95,34 @@ func TestConvertKeepsCommandArgumentsVerbatim(t *testing.T) {
 	want := []string{"awk", "-F|", `{print "id=" $1}`}
 	if got := []string(result.Project.Services["app"].Command); !slices.Equal(got, want) {
 		t.Fatalf("compose command = %q, want %q", got, want)
+	}
+}
+
+func TestConvertMapsHostnameAndNetworkEndpoint(t *testing.T) {
+	result, err := convert.Convert("docker run -h web --network backend --ip 10.0.0.5 --network-alias api --network-alias svc --rm nginx", converttypes.Options{})
+	if err != nil {
+		t.Fatalf("Convert returned error: %v", err)
+	}
+
+	service := result.Project.Services["nginx"]
+	if service.Hostname != "web" {
+		t.Fatalf("hostname = %q, want web", service.Hostname)
+	}
+	backend := service.Networks["backend"]
+	if backend == nil || backend.Ipv4Address != "10.0.0.5" || !slices.Equal(backend.Aliases, []string{"api", "svc"}) {
+		t.Fatalf("backend network = %+v", backend)
+	}
+	if !slices.ContainsFunc(result.Warnings, func(w converttypes.Warning) bool { return strings.Contains(w.Message, "rm") }) {
+		t.Fatalf("warnings = %+v, want one for --rm", result.Warnings)
+	}
+}
+
+func TestBuildWarnsOnEndpointWithoutNetwork(t *testing.T) {
+	doc, err := buildWithFlag(t, "ipv4_address", "10.0.0.5")
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(doc.Warnings) != 1 {
+		t.Fatalf("warnings = %+v, want one", doc.Warnings)
 	}
 }

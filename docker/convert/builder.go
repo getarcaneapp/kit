@@ -79,6 +79,7 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 	}
 
 	var warnings []types.Warning
+	endpoint := map[string]any{}
 	for _, flag := range cmd.Flags {
 		switch flag.Name {
 		case "ports", "environment", "env_file", "labels", "extra_hosts", "dns", "cap_add", "cap_drop", "devices", "group_add", "security_opt", "expose":
@@ -95,7 +96,12 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 				appendString(service, "networks", flag.Value)
 				networks[flag.Value] = map[string]any{"external": true}
 			}
-		case "restart", "working_dir", "user", "platform", "pull_policy", "stop_signal", "stop_grace_period":
+		case "ipv4_address":
+			endpoint["ipv4_address"] = flag.Value
+		case "aliases":
+			aliases, _ := endpoint["aliases"].([]string)
+			endpoint["aliases"] = append(aliases, flag.Value)
+		case "hostname", "restart", "working_dir", "user", "platform", "pull_policy", "stop_signal", "stop_grace_period":
 			service[flag.Name] = flag.Value
 		case "entrypoint":
 			// docker run --entrypoint takes a single executable, not a command line.
@@ -130,8 +136,26 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 			} else {
 				appendString(service, "gpus", flag.Value)
 			}
+		case "detach", "name":
 		case "ignored":
 			warnings = append(warnings, types.Warning{Message: "ignored unsupported Docker flag " + flag.Value})
+		default:
+			warnings = append(warnings, types.Warning{Message: "ignored Docker flag without a compose mapping: " + flag.Name})
+		}
+	}
+
+	// docker run applies --ip and --network-alias to the user-defined network.
+	if len(endpoint) > 0 {
+		names, _ := service["networks"].([]string)
+		if len(names) == 0 {
+			warnings = append(warnings, types.Warning{Message: "ignored --ip/--network-alias without a user-defined --network"})
+		} else {
+			networkMap := make(map[string]any, len(names))
+			for _, network := range names {
+				networkMap[network] = map[string]any{}
+			}
+			networkMap[names[0]] = endpoint
+			service["networks"] = networkMap
 		}
 	}
 
