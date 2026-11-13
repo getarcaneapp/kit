@@ -169,8 +169,8 @@ func TestConvertMountsUseLongSyntax(t *testing.T) {
 
 func TestConvertGpusBecomeDeviceRequests(t *testing.T) {
 	tests := []struct {
-		flag string
 		want compose.DeviceRequest
+		flag string
 	}{
 		{flag: "device=0", want: compose.DeviceRequest{Capabilities: []string{"gpu"}, IDs: []string{"0"}}},
 		{flag: "2", want: compose.DeviceRequest{Capabilities: []string{"gpu"}, Count: 2}},

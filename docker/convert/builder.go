@@ -296,8 +296,8 @@ func gpuRequest(value string) (map[string]any, error) {
 				request["count"] = "all"
 				continue
 			}
-			parsed, err := strconv.ParseInt(count, 10, 64)
-			if err != nil {
+			parsed, parseErr := strconv.ParseInt(count, 10, 64)
+			if parseErr != nil {
 				return nil, types.NewConversionError("invalid gpu count %q", count)
 			}
 			request["count"] = parsed
