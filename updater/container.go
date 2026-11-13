@@ -49,6 +49,12 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 
 	target := containerList.Items[0]
 	name := containerSummaryName(target)
+	endContainerUpdate, err := s.BeginContainerUpdate(target.ID)
+	if err != nil {
+		appendResult(out, skippedContainerResult(target.ID, name, err.Error()))
+		return out, nil
+	}
+	defer endContainerUpdate()
 	inspectResult, err := compat.ContainerInspectWithCompatibility(ctx, dockerClient, target.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		appendResult(out, failedContainerResult(target.ID, name, fmt.Sprintf("inspect failed: %v", err)))
@@ -56,7 +62,6 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	}
 	inspect := inspectResult.Container
 	labels := labelsFromInspect(inspect)
-	defer s.BeginContainerUpdate(target.ID)()
 	defer s.BeginProjectUpdate(compose.ProjectLabel(labels))()
 
 	excluded, err := s.excludedContainerSet(ctx, exclusionPolicy(!opts.IgnoreSettingsExclusions))

@@ -1,15 +1,21 @@
 package updater
 
 import (
+	"errors"
+	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestStatusTracksContainers(t *testing.T) {
 	service := newServiceForTest(t, Config{})
-	done := service.BeginContainerUpdate("abc")
+	done, err := service.BeginContainerUpdate("abc")
+	if err != nil {
+		t.Fatalf("BeginContainerUpdate() error = %v", err)
+	}
 	status := service.Status()
 	if status.UpdatingContainers != 1 || len(status.ContainerIDs) != 1 || status.ContainerIDs[0] != "abc" {
 		t.Fatalf("Status() while updating = %#v", status)
@@ -19,6 +25,41 @@ func TestStatusTracksContainers(t *testing.T) {
 	if status.UpdatingContainers != 0 || len(status.ContainerIDs) != 0 {
 		t.Fatalf("Status() after done = %#v", status)
 	}
+}
+
+func TestBeginContainerUpdateClaimsEachContainerOnce(t *testing.T) {
+	service := newServiceForTest(t, Config{})
+	var claimed, attempted atomic.Int32
+	var workers sync.WaitGroup
+	release := make(chan struct{})
+	for range 16 {
+		workers.Go(func() {
+			end, err := service.BeginContainerUpdate("shared")
+			attempted.Add(1)
+			if err != nil {
+				if !errors.Is(err, ErrUpdateInProgress) {
+					t.Errorf("BeginContainerUpdate() error = %v, want ErrUpdateInProgress", err)
+				}
+				return
+			}
+			claimed.Add(1)
+			<-release
+			end()
+		})
+	}
+	for attempted.Load() < 16 {
+		runtime.Gosched()
+	}
+	close(release)
+	workers.Wait()
+	if got := claimed.Load(); got != 1 {
+		t.Fatalf("claims = %d, want exactly 1", got)
+	}
+	end, err := service.BeginContainerUpdate("shared")
+	if err != nil {
+		t.Fatalf("BeginContainerUpdate() after release error = %v", err)
+	}
+	end()
 }
 
 func TestStatusSnapshotsRemainConsistentUnderConcurrentUpdates(t *testing.T) {
@@ -50,7 +91,8 @@ func TestStatusSnapshotsRemainConsistentUnderConcurrentUpdates(t *testing.T) {
 	for workerID := range 16 {
 		workers.Go(func() {
 			for i := range 200 {
-				endContainer := service.BeginContainerUpdate(containerIDs[(workerID+i)%len(containerIDs)])
+				// A claim lost to another worker hands back a no-op release.
+				endContainer, _ := service.BeginContainerUpdate(containerIDs[(workerID+i)%len(containerIDs)])
 				endProject := service.BeginProjectUpdate(projectIDs[(workerID+i)%len(projectIDs)])
 				if message := statusConsistencyError(service.Status()); message != "" {
 					select {

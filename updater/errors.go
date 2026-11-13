@@ -37,6 +37,9 @@ var (
 	// ErrContainerNotFound is returned when the requested container does not
 	// exist. Use errors.Is to detect it; the returned error names the container.
 	ErrContainerNotFound = errors.New("container not found")
+	// ErrUpdateInProgress is returned by BeginContainerUpdate, and reported as a skip reason, while
+	// another update holds the same container.
+	ErrUpdateInProgress = errors.New("container update already in progress")
 )
 
 // Error implements error.

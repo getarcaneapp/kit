@@ -235,6 +235,12 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 	var standalone []deps.ContainerWithDeps
 	standaloneIndexes := map[string]int{}
 	var selfUpdateIndexes []int
+	var endContainerUpdates []func()
+	defer func() {
+		for _, end := range slices.Backward(endContainerUpdates) {
+			end()
+		}
+	}()
 
 	for _, candidate := range sorted {
 		plan := plansByName[candidate.Name]
@@ -254,9 +260,15 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 			continue
 		}
 
+		// The claim is held through the standalone and self-update passes below.
+		endContainerUpdate, beginErr := s.BeginContainerUpdate(plan.cnt.ID)
+		if beginErr != nil {
+			results = append(results, standaloneRestartResult(candidate.Name, plan, StatusSkipped, beginErr.Error()))
+			continue
+		}
+		endContainerUpdates = append(endContainerUpdates, endContainerUpdate)
 		labels := labelsFromInspect(*plan.inspect)
 		projectName := compose.ProjectLabel(labels)
-		endContainerStatus := s.BeginContainerUpdate(plan.cnt.ID)
 		endProjectStatus := s.BeginProjectUpdate(projectName)
 		projectID := ""
 		for id, group := range composeGroups {
@@ -278,7 +290,6 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 			standalone = append(standalone, candidate)
 		}
 		endProjectStatus()
-		endContainerStatus()
 		results = append(results, res)
 	}
 
@@ -292,34 +303,23 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 	for _, index := range selfUpdateIndexes {
 		name := results[index].ResourceName
 		plan := plansByName[name]
-		endContainerStatus := s.BeginContainerUpdate(plan.cnt.ID)
 		if err := s.triggerSelfUpdate(ctx, plan.cnt.ID, name, plan.newRef, labelsFromInspect(*plan.inspect)); err != nil {
 			results[index] = standaloneRestartResult(name, plan, StatusFailed, err.Error())
 		} else {
 			results[index] = standaloneRestartResult(name, plan, StatusUpdated, "")
 		}
-		endContainerStatus()
 	}
 	return results, nil
 }
 
-// updateStandaloneRestartCandidates stops dependents before what they depend on, then recreates in dependency order.
+// updateStandaloneRestartCandidates stops dependents before what they depend on, then recreates in
+// dependency order. The caller holds each candidate's BeginContainerUpdate claim.
 func (s *Service) updateStandaloneRestartCandidates(
 	ctx context.Context,
 	dockerClient *client.Client,
 	candidates []deps.ContainerWithDeps,
 	plansByName map[string]*restartPlan,
 ) map[string]ResourceResult {
-	endStatus := make([]func(), 0, len(candidates))
-	for _, candidate := range candidates {
-		endStatus = append(endStatus, s.BeginContainerUpdate(plansByName[candidate.Name].cnt.ID))
-	}
-	defer func() {
-		for _, end := range slices.Backward(endStatus) {
-			end()
-		}
-	}()
-
 	results := make(map[string]ResourceResult, len(candidates))
 	backups := make(map[string]string, len(candidates))
 	for _, candidate := range slices.Backward(candidates) {
