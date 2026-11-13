@@ -1,3 +1,13 @@
+## docker/v0.3.3
+
+### Bug fixes
+
+* bump docker/moby deps([74c7bbe](https://github.com/getarcaneapp/kit/commit/74c7bbeea90555426f17a59976d6e0ae174ccaed) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.3.2...docker/v0.3.3
+
 ## docker/v0.3.2
 
 ### Bug fixes
