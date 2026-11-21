@@ -1,8 +1,9 @@
 version: "2"
 
 run:
-  go: "1.27.3"
-  timeout: 5m
+  go: "1.27.4"
+  timeout: 15m
+  allow-serial-runners: true
 
 issues:
   max-issues-per-linter: 0
@@ -23,7 +24,7 @@ formatters:
       sections:
         - standard
         - default
-        - localmodule
+        - prefix(kit.getarcane.app)
       custom-order: true
     gofumpt:
       extra:
@@ -35,16 +36,19 @@ linters:
   default: none
   enable:
     - copyloopvar
-    - depguard
     - decorder
+    - depguard
     - errcheck
     - errorlint
+    - exptostd
+    - exhaustruct_v5
     - forbidigo
     - gocognit
-    - grouper
     - gocritic
     - gomodguard_v2
     - govet
+    - grouper
+    - importas
     - ineffassign
     - lll
     - misspell
@@ -63,7 +67,6 @@ linters:
     - gocyclo
 
   settings:
-
     decorder:
       dec-order:
         - type
@@ -79,14 +82,15 @@ linters:
       rules:
         main:
           deny:
-            - pkg: io/ioutil
-              desc: io/ioutil package has been deprecated
             - pkg: github.com/docker/docker/errdefs
               desc: use github.com/containerd/errdefs instead.
             - pkg: "github.com/google/uuid"
               desc: Use stdlib uuid instead.
             - pkg: "gopkg.in/yaml.v3"
               desc: Use go.yaml.in/yaml/v4 instead.
+
+    exhaustruct_v5:
+      explicit-mode: true
 
     forbidigo:
       analyze-types: true
@@ -111,6 +115,19 @@ linters:
     gocognit:
       min-complexity: 45
 
+    importas:
+      alias:
+        - pkg: kit.getarcane.app/docker
+          alias: docker
+        - pkg: kit.getarcane.app
+          alias: kit
+        - pkg: getarcane.dev/arcane/v3/internal/docker
+          alias: dockerInternal
+        - pkg: charm.land/log/v2
+          alias: charmLog
+        - pkg: github.com/compose-spec/compose-go/v2/types
+          alias: composeTypes
+
     lll:
       line-length: 200
 
@@ -122,11 +139,11 @@ linters:
 
     grouper:
       const-require-single-const: true
-      const-require-grouping: true
+      const-require-grouping: false
       var-require-single-var: true
       var-require-grouping: false
       type-require-single-type: true
-      type-require-grouping: true
+      type-require-grouping: false
 
     nakedret:
       # Disallow naked returns if func has more lines of code than this setting.
@@ -137,6 +154,7 @@ linters:
       rules:
         - name: package-comments
           disabled: true
+        - name: redundant-import-alias
 
     sloglint:
       context: "all" # https://github.com/go-simpler/sloglint#context-only
