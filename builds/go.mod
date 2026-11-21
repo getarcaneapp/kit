@@ -22,7 +22,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/tonistiigi/fsutil v0.0.0-20261103125000-e075fd9305eb
 	kit.getarcane.app v0.7.5
-	kit.getarcane.app/docker v0.3.4
+	kit.getarcane.app/docker v0.3.5
 )
 
 require (
