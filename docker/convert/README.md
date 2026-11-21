@@ -123,7 +123,7 @@ go test ./...
 From the repository root:
 
 ```sh
-just release convert v1.2.3
+just release module docker/convert v1.2.3
 ```
 
 ## License

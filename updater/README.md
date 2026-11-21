@@ -147,8 +147,8 @@ Reshaped data types:
 
 ```sh
 just format all
-just test
-just lint
+just test all
+just lint all
 ```
 
 ## Tag-based updates
