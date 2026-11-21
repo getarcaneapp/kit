@@ -88,6 +88,20 @@ func withSep(path string) string {
 	return strings.TrimSuffix(path, sep) + sep
 }
 
+// resolveRealPath evaluates symlinks in path and returns both the symlink-free
+// path and its absolute form.
+func resolveRealPath(path string) (resolved, full string, err error) {
+	resolved, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", "", err
+	}
+	full, err = filepath.Abs(resolved)
+	if err != nil {
+		return "", "", err
+	}
+	return resolved, full, nil
+}
+
 // logical maps a real path to its logical path under a root. It costs one
 // map lookup per path component, independent of how many dirs are watched.
 // When several links share a target, the first one that keeps the path within
@@ -156,12 +170,7 @@ func (t *tree) subscribe(fsw *fsnotify.Watcher, i int) error {
 		return err
 	}
 	t.track(root.path)
-	resolved, err := filepath.EvalSymlinks(root.path)
-	if err != nil {
-		t.unwatch(fsw, root.path)
-		return err
-	}
-	full, err := filepath.Abs(resolved)
+	_, full, err := resolveRealPath(root.path)
 	if err != nil {
 		t.unwatch(fsw, root.path)
 		return err
@@ -230,18 +239,12 @@ func (t *tree) dirTarget(path string) (string, bool) {
 	case !t.follow || info.Mode()&fs.ModeSymlink == 0:
 		return "", false
 	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", false
-	}
-	full, err := filepath.Abs(resolved)
+	resolved, full, err := resolveRealPath(path)
 	if err != nil {
 		return "", false
 	}
 	for _, root := range t.roots {
-		if root.real != "" && (full == root.real ||
-			strings.HasPrefix(full, withSep(root.real)) ||
-			strings.HasPrefix(root.real, withSep(full))) {
+		if root.real != "" && (full == root.real || strings.HasPrefix(full, withSep(root.real)) || strings.HasPrefix(root.real, withSep(full))) {
 			return "", false
 		}
 	}
