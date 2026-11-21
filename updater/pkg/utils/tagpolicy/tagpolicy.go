@@ -7,8 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Masterminds/semver/v3"
-
+	"kit.getarcane.app/semver"
 	"kit.getarcane.app/updater/refs"
 	"kit.getarcane.app/updater/types"
 )
@@ -126,20 +125,20 @@ func compile(policy types.Policy) (*regexp.Regexp, *semver.Constraints, error) {
 	return pattern, constraint, nil
 }
 
-func parse(tag string, pattern *regexp.Regexp) (*semver.Version, error) {
+func parse(tag string, pattern *regexp.Regexp) (semver.Version, error) {
 	value := tag
 	if pattern != nil {
 		matches := pattern.FindStringSubmatch(tag)
 		if matches == nil {
-			return nil, errors.New("tag does not match tag pattern")
+			return semver.Version{}, errors.New("tag does not match tag pattern")
 		}
 		if index := pattern.SubexpIndex("version"); index >= 0 {
 			value = matches[index]
 		}
 	}
-	version, err := semver.StrictNewVersion(strings.TrimPrefix(value, "v"))
+	version, err := semver.ParseStrict(value)
 	if err != nil {
-		return nil, fmt.Errorf("tag must contain a complete semantic version: %w", err)
+		return semver.Version{}, fmt.Errorf("tag must contain a complete semantic version: %w", err)
 	}
 	return version, nil
 }
