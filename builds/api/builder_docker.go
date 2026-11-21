@@ -14,10 +14,8 @@ import (
 	"strings"
 
 	"github.com/containerd/platforms"
-	"github.com/docker/cli/cli/config"
 	"github.com/docker/go-units"
 	"github.com/moby/buildkit/session"
-	"github.com/moby/buildkit/session/auth/authprovider"
 	"github.com/moby/go-archive"
 	dockerbuild "github.com/moby/moby/api/types/build"
 	dockercontainer "github.com/moby/moby/api/types/container"
@@ -26,10 +24,11 @@ import (
 	"github.com/moby/patternmatcher"
 	"github.com/moby/patternmatcher/ignorefile"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"kit.getarcane.app"
 
+	"kit.getarcane.app"
 	dockerutils "kit.getarcane.app/builds/pkg/docker"
 	"kit.getarcane.app/builds/types"
+	"kit.getarcane.app/docker"
 )
 
 type (
@@ -141,15 +140,6 @@ func prepareDockerBuildInput(req types.BuildRequest) (dockerBuildInput, bool, er
 		buildArgs[key] = new(val)
 	}
 
-	labels := map[string]string{}
-	for key, val := range req.Labels {
-		k := strings.TrimSpace(key)
-		if k == "" {
-			continue
-		}
-		labels[k] = val
-	}
-
 	cacheFrom := kit.TrimNonEmpty(req.CacheFrom)
 	extraHosts := kit.TrimNonEmpty(req.ExtraHosts)
 
@@ -162,7 +152,7 @@ func prepareDockerBuildInput(req types.BuildRequest) (dockerBuildInput, bool, er
 			return strings.TrimSpace(req.Platforms[0])
 		}(),
 		buildArgs:   buildArgs,
-		labels:      kit.Ternary(len(labels) == 0, nil, labels),
+		labels:      trimLabels(req.Labels),
 		cacheFrom:   kit.Ternary(len(cacheFrom) == 0, nil, cacheFrom),
 		noCache:     req.NoCache,
 		pullParent:  req.Pull,
@@ -207,13 +197,9 @@ func prepareBuildContext(input buildFilesystemInput) (string, string, func(), er
 		return input.contextDir, input.relDockerfile, func() {}, nil
 	}
 
-	excludes, err := readDockerignore(input.contextDir)
+	matcher, _, err := newDockerignoreMatcher(input.contextDir)
 	if err != nil {
 		return "", "", nil, err
-	}
-	matcher, err := patternmatcher.New(excludes)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("invalid .dockerignore: %w", err)
 	}
 
 	stagingDir, err := os.MkdirTemp("", "arcane-docker-build-*")
@@ -341,9 +327,7 @@ func (b *Service) performDockerBuild(
 	if err != nil {
 		return err
 	}
-	buildSession.Allow(authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
-		AuthConfigProvider: buildkitAuthConfigProvider(authprovider.LoadAuthConfig(config.LoadDefaultConfigFile(os.Stderr)), b.registryAuthProvider),
-	}))
+	buildSession.Allow(b.dockerAuthProvider())
 	// keep: buildOpts is a by-value copy; SessionID only known after session creation
 	buildOpts.SessionID = buildSession.ID()
 
@@ -374,15 +358,7 @@ func (b *Service) pushDockerImages(
 	tags []string,
 	progressWriter io.Writer,
 ) error {
-	authConfigs, loadErr := func() (map[string]dockerregistry.AuthConfig, error) {
-		if b.registryAuthProvider == nil {
-			return nil, nil
-		}
-		return b.registryAuthProvider.GetAllRegistryAuthConfigs(ctx)
-	}()
-	if loadErr != nil {
-		_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for push")
-	}
+	authConfigs := b.loadRegistryAuthConfigs(ctx, progressWriter, "push")
 	for _, tag := range tags {
 		if strings.TrimSpace(tag) == "" {
 			continue
@@ -400,7 +376,7 @@ func (b *Service) pushDockerImages(
 		if pushErr != nil {
 			return pushErr
 		}
-		if err := dockerutils.RenderJSONMessageStream(pushResp, progressWriter); err != nil {
+		if err := docker.RenderJSONMessageStream(pushResp, progressWriter); err != nil {
 			_ = pushResp.Close()
 			return err
 		}
@@ -478,17 +454,7 @@ func (b *Service) buildWithDocker(ctx context.Context, req types.BuildRequest, p
 	}
 	defer func() { _ = buildContext.Close() }()
 
-	buildOpts, buildOptsErr := buildDockerImageOptions(req, input, dockerfileForBuild, func() map[string]dockerregistry.AuthConfig {
-		if b.registryAuthProvider == nil {
-			return nil
-		}
-		loadedAuthConfigs, authErr := b.registryAuthProvider.GetAllRegistryAuthConfigs(ctx)
-		if authErr != nil {
-			_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for build")
-			return nil
-		}
-		return loadedAuthConfigs
-	}())
+	buildOpts, buildOptsErr := buildDockerImageOptions(req, input, dockerfileForBuild, b.loadRegistryAuthConfigs(ctx, progressWriter, "build"))
 	if buildOptsErr != nil {
 		return nil, buildOptsErr
 	}
@@ -529,18 +495,22 @@ func readDockerignore(contextDir string) ([]string, error) {
 	return patterns, nil
 }
 
-func dockerfileExcludedByDockerignore(contextDir, dockerfilePath string) (bool, error) {
+func newDockerignoreMatcher(contextDir string) (*patternmatcher.PatternMatcher, bool, error) {
 	patterns, err := readDockerignore(contextDir)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
-	if len(patterns) == 0 {
-		return false, nil
-	}
-
 	matcher, err := patternmatcher.New(patterns)
 	if err != nil {
-		return false, fmt.Errorf("invalid .dockerignore: %w", err)
+		return nil, false, fmt.Errorf("invalid .dockerignore: %w", err)
+	}
+	return matcher, len(patterns) > 0, nil
+}
+
+func dockerfileExcludedByDockerignore(contextDir, dockerfilePath string) (bool, error) {
+	matcher, hasPatterns, err := newDockerignoreMatcher(contextDir)
+	if err != nil || !hasPatterns {
+		return false, err
 	}
 
 	relDockerfile := filepath.ToSlash(filepath.Clean(dockerfilePath))

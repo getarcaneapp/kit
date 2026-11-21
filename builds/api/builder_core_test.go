@@ -46,6 +46,7 @@ func TestBuildkitAuthConfigProvider_UsesRegistryAuthProviderForHost(t *testing.T
 			return configtypes.AuthConfig{Username: "default"}, nil
 		},
 		fakeRegistryAuthProvider{authConfigs: map[string]dockerregistry.AuthConfig{"ghcr.io": registryCfg}},
+		nil,
 	)
 
 	cfg, err := provider(t.Context(), "ghcr.io", nil, nil)
@@ -67,6 +68,7 @@ func TestBuildkitAuthConfigProvider_FallsBackToDefaultProvider(t *testing.T) {
 				return defaultCfg, nil
 			},
 			fakeRegistryAuthProvider{err: errors.New("db unavailable")},
+			nil,
 		)
 
 		cfg, err := provider(t.Context(), "docker.io", nil, nil)
@@ -83,6 +85,7 @@ func TestBuildkitAuthConfigProvider_FallsBackToDefaultProvider(t *testing.T) {
 				return defaultCfg, nil
 			},
 			fakeRegistryAuthProvider{authConfigs: map[string]dockerregistry.AuthConfig{"ghcr.io": {Username: "db-user"}}},
+			nil,
 		)
 
 		cfg, err := provider(t.Context(), "docker.io", nil, nil)

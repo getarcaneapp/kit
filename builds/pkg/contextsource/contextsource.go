@@ -4,9 +4,8 @@ import (
 	"path"
 	"strings"
 
-	"kit.getarcane.app/git"
-
 	"kit.getarcane.app/builds/types"
+	"kit.getarcane.app/git"
 )
 
 type (
@@ -83,13 +82,4 @@ func NormalizeGitBuildContextSourceForMatch(raw string) string {
 		return ""
 	}
 	return git.NormalizeForMatch(source.RepositoryURL)
-}
-
-func IsPotentialRemoteBuildContextSource(raw string) bool {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return false
-	}
-
-	return git.IsSupportedRepositoryURL(trimmed)
 }

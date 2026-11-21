@@ -7,17 +7,21 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/docker/cli/cli/config"
 	configtypes "github.com/docker/cli/cli/config/types"
 	buildkit "github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth/authprovider"
-	"kit.getarcane.app"
-	"kit.getarcane.app/utils"
+	dockerregistry "github.com/moby/moby/api/types/registry"
 
+	"kit.getarcane.app"
 	dockerutils "kit.getarcane.app/builds/pkg/docker"
 	"kit.getarcane.app/builds/types"
+	"kit.getarcane.app/utils"
 )
 
 type (
@@ -135,7 +139,7 @@ func (b *Service) buildWithBuildkitSession(
 	var buildErr error
 	defer func() {
 		if cerr := bkSession.Close(buildErr); cerr != nil {
-			slog.WarnContext(ctx, "build session close error", "provider", providerName, "error", cerr)
+			b.logger.WarnContext(ctx, "build session close error", "provider", providerName, "error", cerr)
 		}
 	}()
 
@@ -160,7 +164,7 @@ func (b *Service) buildWithBuildkitSession(
 	}
 
 	if streamErr := <-streamErrCh; streamErr != nil && !errors.Is(streamErr, context.Canceled) {
-		slog.WarnContext(ctx, "build progress stream error", "provider", providerName, "error", streamErr)
+		b.logger.WarnContext(ctx, "build progress stream error", "provider", providerName, "error", streamErr)
 	}
 
 	if loadErrCh != nil {
@@ -205,12 +209,52 @@ func wrapBuildkitSolveError(err error, providerName string) error {
 	return err
 }
 
-func buildkitAuthConfigProvider(defaultProvider authprovider.AuthConfigProvider, registryAuthProvider types.RegistryAuthProvider) authprovider.AuthConfigProvider {
+func (b *Service) dockerAuthProvider() session.Attachable {
+	return authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
+		AuthConfigProvider: buildkitAuthConfigProvider(
+			authprovider.LoadAuthConfig(config.LoadDefaultConfigFile(os.Stderr)),
+			b.registryAuthProvider,
+			b.logger,
+		),
+	})
+}
+
+func (b *Service) loadRegistryAuthConfigs(ctx context.Context, progressWriter io.Writer, action string) map[string]dockerregistry.AuthConfig {
+	if b.registryAuthProvider == nil {
+		return nil
+	}
+	authConfigs, err := b.registryAuthProvider.GetAllRegistryAuthConfigs(ctx)
+	if err != nil {
+		_, _ = fmt.Fprintln(progressWriter, "registry auth unavailable for "+action)
+		return nil
+	}
+	return authConfigs
+}
+
+func trimLabels(raw map[string]string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	labels := make(map[string]string, len(raw))
+	for key, val := range raw {
+		if k := strings.TrimSpace(key); k != "" {
+			labels[k] = val
+		}
+	}
+	return kit.Ternary(len(labels) == 0, nil, labels)
+}
+
+func buildkitAuthConfigProvider(
+	defaultProvider authprovider.AuthConfigProvider,
+	registryAuthProvider types.RegistryAuthProvider,
+	logger *slog.Logger,
+) authprovider.AuthConfigProvider {
+	log := cmp.Or(logger, slog.Default())
 	return func(ctx context.Context, host string, scope []string, cacheCheck authprovider.ExpireCachedAuthCheck) (configtypes.AuthConfig, error) {
 		if registryAuthProvider != nil {
 			registryCfg, ok, err := registryAuthConfigForHost(ctx, registryAuthProvider, host)
 			if err != nil {
-				slog.WarnContext(ctx, "failed to resolve build registry auth from database, falling back to docker config", "registry", host, "error", err)
+				log.WarnContext(ctx, "failed to resolve build registry auth from database, falling back to docker config", "registry", host, "error", err)
 			} else if ok {
 				return configtypes.AuthConfig{
 					Username:      registryCfg.Username,

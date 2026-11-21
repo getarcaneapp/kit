@@ -2,7 +2,10 @@ module kit.getarcane.app/builds
 
 go 1.27
 
-replace kit.getarcane.app => ../kit
+replace (
+	kit.getarcane.app => ../kit
+	kit.getarcane.app/docker => ../docker
+)
 
 require (
 	github.com/containerd/platforms v1.0.0-rc.5
@@ -19,6 +22,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/tonistiigi/fsutil v0.0.0-20261103125000-e075fd9305eb
 	kit.getarcane.app v0.7.2
+	kit.getarcane.app/docker v0.3.3
 )
 
 require (
@@ -61,6 +65,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
+	github.com/samber/mo v1.17.0 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.11.1 // indirect
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect

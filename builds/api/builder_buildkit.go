@@ -11,15 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/cli/cli/config"
 	buildkit "github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/session"
-	"github.com/moby/buildkit/session/auth/authprovider"
 	"github.com/tonistiigi/fsutil"
-	"kit.getarcane.app"
 
-	dockerutils "kit.getarcane.app/builds/pkg/docker"
+	"kit.getarcane.app"
 	"kit.getarcane.app/builds/types"
+	"kit.getarcane.app/docker"
 )
 
 // parseBuildkitCacheEntries parses --cache-from/--cache-to style values.
@@ -140,12 +138,8 @@ func (b *Service) buildSolveOpt(ctx context.Context, req types.BuildRequest, pro
 	for key, val := range req.BuildArgs {
 		frontendAttrs["build-arg:"+key] = val
 	}
-	for key, val := range req.Labels {
-		k := strings.TrimSpace(key)
-		if k == "" {
-			continue
-		}
-		frontendAttrs["label:"+k] = val
+	for key, val := range trimLabels(req.Labels) {
+		frontendAttrs["label:"+key] = val
 	}
 
 	contextMount, err := fsutil.NewFS(fsInput.contextDir)
@@ -200,7 +194,7 @@ func (b *Service) buildSolveOpt(ctx context.Context, req types.BuildRequest, pro
 				return
 			}
 			defer func() { _ = loadResp.Close() }()
-			loadErrCh <- dockerutils.RenderJSONMessageStream(loadResp, io.Discard)
+			loadErrCh <- docker.RenderJSONMessageStream(loadResp, io.Discard)
 		}()
 
 		return append(exports, buildkit.ExportEntry{
@@ -222,15 +216,11 @@ func (b *Service) buildSolveOpt(ctx context.Context, req types.BuildRequest, pro
 			"context":    contextMount,
 			"dockerfile": dockerfileMount,
 		},
-		Frontend:      "dockerfile.v0",
-		FrontendAttrs: frontendAttrs,
-		CacheExports:  cacheExports,
-		CacheImports:  cacheImports,
-		Session: []session.Attachable{
-			authprovider.NewDockerAuthProvider(authprovider.DockerAuthProviderConfig{
-				AuthConfigProvider: buildkitAuthConfigProvider(authprovider.LoadAuthConfig(config.LoadDefaultConfigFile(os.Stderr)), b.registryAuthProvider),
-			}),
-		},
+		Frontend:            "dockerfile.v0",
+		FrontendAttrs:       frontendAttrs,
+		CacheExports:        cacheExports,
+		CacheImports:        cacheImports,
+		Session:             []session.Attachable{b.dockerAuthProvider()},
 		AllowedEntitlements: kit.Unique(append(kit.TrimNonEmpty(req.Entitlements), kit.Ternary(req.Privileged, []string{"security.insecure"}, nil)...)),
 	}, loadErrCh, cleanup, nil
 }

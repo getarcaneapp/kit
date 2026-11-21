@@ -8,6 +8,7 @@ import (
 	ref "github.com/distribution/reference"
 	"github.com/moby/moby/api/pkg/authconfig"
 	dockerregistry "github.com/moby/moby/api/types/registry"
+
 	"kit.getarcane.app"
 	"kit.getarcane.app/registry"
 )
@@ -45,14 +46,16 @@ func registryAuthHeaderForImage(authConfigs map[string]dockerregistry.AuthConfig
 		return "", nil
 	}
 
-	encoded, err := authconfig.Encode(dockerregistry.AuthConfig{
-		Username:      cfg.Username,
-		Password:      cfg.Password,
-		Auth:          cfg.Auth,
-		ServerAddress: kit.Ternary(strings.TrimSpace(cfg.ServerAddress) == "", registryHost, cfg.ServerAddress),
-		IdentityToken: cfg.IdentityToken,
-		RegistryToken: cfg.RegistryToken,
-	})
+	encoded, err := authconfig.Encode(
+		dockerregistry.AuthConfig{
+			Username:      cfg.Username,
+			Password:      cfg.Password,
+			Auth:          cfg.Auth,
+			ServerAddress: kit.Ternary(strings.TrimSpace(cfg.ServerAddress) == "", registryHost, cfg.ServerAddress),
+			IdentityToken: cfg.IdentityToken,
+			RegistryToken: cfg.RegistryToken,
+		},
+	)
 	if err != nil {
 		return "", fmt.Errorf("encode registry auth header: %w", err)
 	}

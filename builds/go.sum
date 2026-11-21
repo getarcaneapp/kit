@@ -228,6 +228,8 @@ github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINE
 github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 h1:GFCKgmp0tecUJ0sJuv4pzYCqS9+RGSn52M3FUwPs+uo=
 github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10/go.mod h1:t/avpk3KcrXxUnYOhZhMXJlSEyie6gQbtLq5NM3loB8=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/samber/mo v1.17.0 h1:EbeLc7nxIdpalstxQQakLOcXxULuMRqo7PJPtY18bQg=
+github.com/samber/mo v1.17.0/go.mod h1:DlgzJ4SYhOh41nP1L9kh9rDNERuf8IqWSAs+gj2Vxag=
 github.com/secure-systems-lab/go-securesystemslib v0.11.1 h1:ayahDPjfSIqKegyt5YVGEvQ7SAi72GHXTy+b2YjUd5w=
 github.com/secure-systems-lab/go-securesystemslib v0.11.1/go.mod h1:UyOjhoZLi76ir63u1ptubEevVe6dlNPmNxwgVvKqFFY=
 github.com/shibumi/go-pathspec v1.3.0 h1:QUyMZhFo0Md5B8zV8x2tesohbb5kfbpTi9rBnKh5dkI=

@@ -13,8 +13,8 @@ import (
 	depotmachine "github.com/depot/depot-go/machine"
 	cliv1 "github.com/depot/depot-go/proto/depot/cli/v1"
 	"github.com/moby/buildkit/client"
-	"kit.getarcane.app"
 
+	"kit.getarcane.app"
 	"kit.getarcane.app/builds/types"
 )
 
