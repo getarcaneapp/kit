@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -16,18 +17,11 @@ func DockerHostRoot(containerID string) (string, error) {
 	if len(containerID) != 64 {
 		return "", errors.New("full Docker container identity is unavailable")
 	}
-	data, err := os.ReadFile("/proc/self/cgroup")
+	paths, err := readProcFile("/proc/self/cgroup", parseProcCgroup)
 	if err != nil {
 		return "", err
 	}
-	processPath := func() string {
-		for line := range strings.SplitSeq(string(data), "\n") {
-			if path, ok := strings.CutPrefix(line, "0::"); ok {
-				return path
-			}
-		}
-		return ""
-	}()
+	processPath := paths.Unified
 	if !filepath.IsAbs(processPath) || processPath == "/" || filepath.Clean(processPath) != processPath {
 		return "", errors.New("process is not in a descendant cgroup v2 path")
 	}
@@ -44,21 +38,11 @@ func DockerHostRoot(containerID string) (string, error) {
 		return "", errors.New("process cgroup does not match the Docker container identity")
 	}
 
-	mounts, err := os.ReadFile("/proc/self/mountinfo")
+	mounts, err := readProcFile("/proc/self/mountinfo", parseCgroupMounts)
 	if err != nil {
 		return "", err
 	}
-	mounted := false
-	for line := range strings.SplitSeq(string(mounts), "\n") {
-		before, after, ok := strings.Cut(line, " - ")
-		fields := strings.Fields(before)
-		// These fixed paths contain no mountinfo escape sequences.
-		if ok && len(fields) >= 6 && fields[3] == "/" && fields[4] == root && strings.HasPrefix(after, "cgroup2 ") {
-			mounted = true
-			break
-		}
-	}
-	if !mounted {
+	if !slices.ContainsFunc(mounts, func(m cgroupMount) bool { return m.V2 && m.Root == "/" && m.Point == root }) {
 		return "", errors.New("cgroup v2 namespace root is not mounted")
 	}
 	_, err = os.Stat(filepath.Join(root, processPath, "cgroup.procs"))

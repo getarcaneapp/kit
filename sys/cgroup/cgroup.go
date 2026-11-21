@@ -221,33 +221,18 @@ func DetectLimits() (*Limits, error) {
 
 	limits := &Limits{
 		MemoryLimit: func() int64 {
-			memLimit, limitErr := readCgroupV1Int64(filepath.Join(memoryDir, "memory.limit_in_bytes"))
+			memLimit, limitErr := readCgroupInt64(filepath.Join(memoryDir, "memory.limit_in_bytes"), false)
 			if limitErr != nil || memLimit >= unrestricted {
 				return -1
 			}
 			return memLimit
 		}(),
-		MemoryUsage: func() int64 {
-			memUsage, usageErr := readCgroupV1Int64(filepath.Join(memoryDir, "memory.usage_in_bytes"))
-			if usageErr != nil {
-				return -1
-			}
-			// memory.usage_in_bytes includes reclaimable page cache; subtract
-			// total_inactive_file (from memory.stat) to match `docker stats`.
-			inactiveFile, statErr := readMemoryStatValue(filepath.Join(memoryDir, "memory.stat"), "total_inactive_file")
-			if statErr != nil {
-				return memUsage
-			}
-			return max(memUsage-inactiveFile, 0)
-		}(),
-		CPUQuota:  quota,
-		CPUPeriod: period,
-		CPUCount: func() int {
-			if quota <= 0 || period <= 0 {
-				return -1
-			}
-			return max(int((quota+period-1)/period), 1)
-		}(),
+		// memory.usage_in_bytes includes reclaimable page cache; subtract
+		// total_inactive_file (from memory.stat) to match `docker stats`.
+		MemoryUsage: readCgroupMemoryUsage(memoryDir, "memory.usage_in_bytes", "total_inactive_file", false),
+		CPUQuota:    quota,
+		CPUPeriod:   period,
+		CPUCount:    cpuCount(quota, period),
 	}
 	if !guest && !isFiniteLimit(limits.MemoryLimit) && limits.CPUCount < 0 {
 		return nil, errors.New("not running in a cgroup")
@@ -372,12 +357,13 @@ func readProcFile[T any](path string, parse func(io.Reader) (T, error)) (T, erro
 // open fails cheaply on non-ZFS systems (including macOS dev machines) and this
 // returns 0 there.
 func ZFSARCReclaimable() uint64 {
-	f, err := os.Open("/proc/spl/kstat/zfs/arcstats")
+	reclaimable, err := readProcFile("/proc/spl/kstat/zfs/arcstats", func(r io.Reader) (uint64, error) {
+		return parseARCStats(r), nil
+	})
 	if err != nil {
 		return 0
 	}
-	defer func() { _ = f.Close() }()
-	return parseARCStats(f)
+	return reclaimable
 }
 
 func detectCgroupV2Limits(dir string) *Limits {
@@ -406,95 +392,74 @@ func detectCgroupV2Limits(dir string) *Limits {
 
 	return &Limits{
 		MemoryLimit: func() int64 {
-			memLimit, limitErr := readCgroupV2Int64(filepath.Join(dir, "memory.max"))
+			memLimit, limitErr := readCgroupInt64(filepath.Join(dir, "memory.max"), true)
 			if limitErr != nil || memLimit == unrestricted {
 				return -1
 			}
 			return memLimit
 		}(),
-		MemoryUsage: func() int64 {
-			memUsage, usageErr := readCgroupV2Int64(filepath.Join(dir, "memory.current"))
-			if usageErr != nil {
-				return -1
-			}
-			// memory.current includes reclaimable page cache; subtract inactive_file
-			// to match what `docker stats` reports as usage.
-			inactiveFile, statErr := readMemoryStatValue(filepath.Join(dir, "memory.stat"), "inactive_file")
-			if statErr != nil {
-				return memUsage
-			}
-			return max(memUsage-inactiveFile, 0)
-		}(),
-		CPUQuota:  quota,
-		CPUPeriod: period,
-		CPUCount: func() int {
-			if quota <= 0 || period <= 0 {
-				return -1
-			}
-			return max(int((quota+period-1)/period), 1)
-		}(),
+		// memory.current includes reclaimable page cache; subtract inactive_file
+		// to match what `docker stats` reports as usage.
+		MemoryUsage: readCgroupMemoryUsage(dir, "memory.current", "inactive_file", true),
+		CPUQuota:    quota,
+		CPUPeriod:   period,
+		CPUCount:    cpuCount(quota, period),
 	}
 }
 
-func readCgroupV1Int64(path string) (int64, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
+func cpuCount(quota, period int64) int {
+	if quota <= 0 || period <= 0 {
+		return -1
 	}
-
-	value, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return value, nil
+	return max(int((quota+period-1)/period), 1)
 }
 
-// readMemoryStatValue reads a single "key value" line from a cgroup memory.stat
-// file and returns the value for the given key.
-func readMemoryStatValue(path, key string) (int64, error) {
-	file, err := os.Open(path)
+func readCgroupMemoryUsage(dir, usageFile, statKey string, allowMax bool) int64 {
+	memUsage, err := readCgroupInt64(filepath.Join(dir, usageFile), allowMax)
 	if err != nil {
-		return 0, err
+		return -1
 	}
-	defer func() { _ = file.Close() }()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) == 0 || fields[0] != key {
-			continue
-		}
-		if len(fields) != 2 {
-			return 0, fmt.Errorf("invalid %q entry in %s", key, path)
-		}
-		return strconv.ParseInt(fields[1], 10, 64)
+	inactiveFile, statErr := readMemoryStatValue(filepath.Join(dir, "memory.stat"), statKey)
+	if statErr != nil {
+		return memUsage
 	}
-	err = scanner.Err()
-	if err != nil {
-		return 0, err
-	}
-
-	return 0, fmt.Errorf("key %q not found in %s", key, path)
+	return max(memUsage-inactiveFile, 0)
 }
 
-func readCgroupV2Int64(path string) (int64, error) {
+func readCgroupInt64(path string, allowMax bool) (int64, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}
 
 	content := strings.TrimSpace(string(data))
-	if content == "max" {
+	if allowMax && content == "max" {
 		return unrestricted, nil
 	}
 
-	value, err := strconv.ParseInt(content, 10, 64)
-	if err != nil {
-		return 0, err
-	}
+	return strconv.ParseInt(content, 10, 64)
+}
 
-	return value, nil
+// readMemoryStatValue reads a single "key value" line from a cgroup memory.stat
+// file and returns the value for the given key.
+func readMemoryStatValue(path, key string) (int64, error) {
+	return readProcFile(path, func(r io.Reader) (int64, error) {
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			fields := strings.Fields(scanner.Text())
+			if len(fields) == 0 || fields[0] != key {
+				continue
+			}
+			if len(fields) != 2 {
+				return 0, fmt.Errorf("invalid %q entry in %s", key, path)
+			}
+			return strconv.ParseInt(fields[1], 10, 64)
+		}
+		if err := scanner.Err(); err != nil {
+			return 0, err
+		}
+		return 0, fmt.Errorf("key %q not found in %s", key, path)
+	})
 }
 
 func isFiniteLimit(value int64) bool {
@@ -503,7 +468,7 @@ func isFiniteLimit(value int64) bool {
 
 func readCgroupV1CPUControllerInt64(dirs []string, filename string) int64 {
 	for _, dir := range dirs {
-		if value, err := readCgroupV1Int64(filepath.Join(dir, filename)); err == nil {
+		if value, err := readCgroupInt64(filepath.Join(dir, filename), false); err == nil {
 			return value
 		}
 	}
