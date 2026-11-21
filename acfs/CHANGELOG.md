@@ -1,3 +1,13 @@
+## acfs/v0.10.4
+
+### Other
+
+* deduplicate root path, host attr, and temp creation helpers([5c89985](https://github.com/getarcaneapp/kit/commit/5c89985ceb0c5cad9b4c3643220d2d009d13f039) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/acfs/v0.10.3...acfs/v0.10.4
+
 ## acfs/v0.10.3
 
 ### Bug fixes
