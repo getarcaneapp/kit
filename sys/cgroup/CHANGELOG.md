@@ -1,3 +1,13 @@
+## sys/cgroup/v0.3.4
+
+### Other
+
+* unify cgroup v1/v2 int64, cpu count, and memory usage readers([245ab83](https://github.com/getarcaneapp/kit/commit/245ab83af6cbfae0a2cda0590ae4039d8cf40bdc) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/sys/cgroup/v0.3.3...sys/cgroup/v0.3.4
+
 ## sys/cgroup/v0.3.3
 
 ### Bug fixes
