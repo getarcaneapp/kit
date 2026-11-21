@@ -196,7 +196,7 @@ func (c *Capacity) Set(s string) error {
 // returned wraps ErrInvalidCapacity.
 func ParseCapacity(s string) (Capacity, error) {
 	if s == "" {
-		return 0, parseError("empty string")
+		return 0, &capacityError{detail: "empty string"}
 	}
 	if s == "0" {
 		return 0, nil
@@ -212,12 +212,12 @@ func ParseCapacity(s string) (Capacity, error) {
 		d := uint64(s[i] - '0')
 		// Reject values that would silently wrap around uint64.
 		if c > (uint64(maxCapacity)-d)/10 {
-			return 0, parseError(strconv.Quote(orig) + ": out of range")
+			return 0, &capacityError{detail: strconv.Quote(orig) + ": out of range"}
 		}
 		c = c*10 + d
 	}
 	if i == 0 {
-		return 0, parseError(strconv.Quote(orig) + ": no digits")
+		return 0, &capacityError{detail: strconv.Quote(orig) + ": no digits"}
 	}
 	s = s[i:]
 
@@ -227,10 +227,10 @@ func ParseCapacity(s string) (Capacity, error) {
 
 	unit, ok := unitSuffixes[s]
 	if !ok {
-		return 0, parseError(strconv.Quote(orig))
+		return 0, &capacityError{detail: strconv.Quote(orig)}
 	}
 	if c > uint64(maxCapacity)/uint64(unit) {
-		return 0, parseError(strconv.Quote(orig) + ": out of range")
+		return 0, &capacityError{detail: strconv.Quote(orig) + ": out of range"}
 	}
 	return Capacity(c) * unit, nil
 }
@@ -277,11 +277,6 @@ func fmtInt(buf []byte, v uint64) int {
 		}
 	}
 	return w
-}
-
-// parseError builds an error wrapping ErrInvalidCapacity with detail.
-func parseError(detail string) error {
-	return &capacityError{detail: detail}
 }
 
 func (e *capacityError) Error() string {

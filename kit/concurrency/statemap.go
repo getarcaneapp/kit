@@ -84,27 +84,25 @@ func (s *StateMap[K, V]) ApplyTyped[R any](
 	if mutate == nil {
 		return zero, errors.New("state map mutation unavailable")
 	}
-	work := func(context.Context) (R, error) {
-		completed := false
-		defer func() {
-			if !completed {
-				s.publish()
-			}
-		}()
-		result, changed, err := mutate(s.values)
-		completed = true
-		if changed || err != nil {
-			s.publish()
-		}
-		return result, err
-	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	return work(ctx)
+
+	completed := false
+	defer func() {
+		if !completed {
+			s.publish()
+		}
+	}()
+	result, changed, err := mutate(s.values)
+	completed = true
+	if changed || err != nil {
+		s.publish()
+	}
+	return result, err
 }
 
 // Store publishes a value and returns the value it replaced, if any.

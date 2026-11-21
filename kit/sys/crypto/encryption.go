@@ -143,18 +143,10 @@ func ParseKey(in string) ([]byte, error) {
 		return nil, &InvalidKeyError{Reason: "key is empty"}
 	}
 	if encoded, ok := strings.CutPrefix(clean, "hex:"); ok {
-		decoded, err := hex.DecodeString(strings.TrimSpace(encoded))
-		if err != nil {
-			return nil, &InvalidKeyError{Reason: "hex key is invalid"}
-		}
-		return validateEncodedKey(decoded)
+		return decodeEncodedKey(encoded, "hex", hex.DecodeString)
 	}
 	if encoded, ok := strings.CutPrefix(clean, "base64:"); ok {
-		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
-		if err != nil {
-			return nil, &InvalidKeyError{Reason: "base64 key is invalid"}
-		}
-		return validateEncodedKey(decoded)
+		return decodeEncodedKey(encoded, "base64", base64.StdEncoding.DecodeString)
 	}
 	clean = strings.TrimPrefix(clean, "raw:")
 	if clean == "" {
@@ -255,11 +247,12 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 	return cipher.NewGCMWithRandomNonce(block)
 }
 
-func validateEncodedKey(key []byte) ([]byte, error) {
-	if len(key) != KeySize {
-		return nil, &InvalidKeyError{Reason: fmt.Sprintf("encoded key must be %d bytes, got %d", KeySize, len(key))}
+func decodeEncodedKey(encoded, kind string, decode func(string) ([]byte, error)) ([]byte, error) {
+	decoded, err := decode(strings.TrimSpace(encoded))
+	if err != nil {
+		return nil, &InvalidKeyError{Reason: kind + " key is invalid"}
 	}
-	return copyAESKey(key)
+	return copyAESKey(decoded)
 }
 
 func copyAESKey(key []byte) ([]byte, error) {

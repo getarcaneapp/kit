@@ -14,22 +14,16 @@ import (
 // host and a repository path.
 func IsSupportedRepositoryURL(raw string) bool {
 	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return false
-	}
-
 	if strings.HasPrefix(trimmed, "git@") {
 		return true
 	}
-
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
+	parsed, ok := parseRepositoryURL(trimmed)
+	if !ok {
 		return false
 	}
-
 	switch strings.ToLower(parsed.Scheme) {
 	case "git", "ssh", "http", "https":
-		return parsed.Host != "" && !slices.Contains([]string{"", "/"}, strings.TrimSpace(parsed.Path))
+		return true
 	default:
 		return false
 	}
@@ -41,23 +35,30 @@ func IsSupportedRepositoryURL(raw string) bool {
 // a probe.
 func RequiresRemoteProbe(raw string) bool {
 	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" || strings.HasPrefix(trimmed, "git@") {
+	if strings.HasPrefix(trimmed, "git@") {
 		return false
 	}
-
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
+	parsed, ok := parseRepositoryURL(trimmed)
+	if !ok {
 		return false
 	}
-
 	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https":
-		return parsed.Host != "" &&
-			!slices.Contains([]string{"", "/"}, strings.TrimSpace(parsed.Path)) &&
-			!strings.HasSuffix(strings.ToLower(strings.TrimRight(parsed.Path, "/")), ".git")
+		return !strings.HasSuffix(strings.ToLower(strings.TrimRight(parsed.Path, "/")), ".git")
 	default:
 		return false
 	}
+}
+
+func parseRepositoryURL(trimmed string) (*url.URL, bool) {
+	if trimmed == "" {
+		return nil, false
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" || slices.Contains([]string{"", "/"}, strings.TrimSpace(parsed.Path)) {
+		return nil, false
+	}
+	return parsed, true
 }
 
 // NormalizeForMatch normalizes a repository URL for equality comparison by

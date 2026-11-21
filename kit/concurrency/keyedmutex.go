@@ -57,6 +57,13 @@ func (k *KeyedMutex) release(key string, entry *keyedMutexEntry) {
 	}
 }
 
+func (k *KeyedMutex) unlock(key string, entry *keyedMutexEntry) func() {
+	return func() {
+		entry.mu.Unlock()
+		k.release(key, entry)
+	}
+}
+
 // Lock blocks until the key's mutex is held and returns its unlock function.
 // Intended to be deferred at the point of acquisition:
 //
@@ -64,21 +71,14 @@ func (k *KeyedMutex) release(key string, entry *keyedMutexEntry) {
 func (k *KeyedMutex) Lock(key string) func() {
 	entry := k.reserve(key)
 	entry.mu.Lock()
-
-	return func() {
-		entry.mu.Unlock()
-		k.release(key, entry)
-	}
+	return k.unlock(key, entry)
 }
 
 // LockContext is Lock bounded by ctx. When ctx ends first the key is left
 // untouched and the waiter is released once the lock would have been taken.
 func (k *KeyedMutex) LockContext(ctx context.Context, key string) (func(), error) {
 	entry := k.reserve(key)
-	unlock := func() {
-		entry.mu.Unlock()
-		k.release(key, entry)
-	}
+	unlock := k.unlock(key, entry)
 	// Exactly one side claims the outcome: the worker once it holds the lock,
 	// or the caller once ctx ends. The loser is responsible for nothing, so
 	// the lock can never be left held by an exited goroutine.
@@ -126,8 +126,5 @@ func (k *KeyedMutex) TryLock(key string) (func(), bool) {
 		return nil, false
 	}
 
-	return func() {
-		entry.mu.Unlock()
-		k.release(key, entry)
-	}, true
+	return k.unlock(key, entry), true
 }

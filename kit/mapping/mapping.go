@@ -11,30 +11,10 @@ import (
 )
 
 var typeConverters = []copier.TypeConverter{
-	converter(func(raw string) (netip.Prefix, error) {
-		if raw = strings.TrimSpace(raw); raw == "" {
-			return netip.Prefix{}, nil
-		}
-		return netip.ParsePrefix(raw)
-	}),
-	converter(func(raw string) (netip.Addr, error) {
-		if raw = strings.TrimSpace(raw); raw == "" {
-			return netip.Addr{}, nil
-		}
-		return netip.ParseAddr(raw)
-	}),
-	converter(func(prefix netip.Prefix) (string, error) {
-		if !prefix.IsValid() {
-			return "", nil
-		}
-		return prefix.String(), nil
-	}),
-	converter(func(addr netip.Addr) (string, error) {
-		if !addr.IsValid() {
-			return "", nil
-		}
-		return addr.String(), nil
-	}),
+	parseConverter(netip.ParsePrefix),
+	parseConverter(netip.ParseAddr),
+	formatConverter[netip.Prefix](),
+	formatConverter[netip.Addr](),
 }
 
 // MapStruct deep-copies source into destination.
@@ -58,6 +38,28 @@ func MapSlice[S, D any](source []S) ([]D, error) {
 		}
 	}
 	return dest, nil
+}
+
+func parseConverter[T any](parse func(string) (T, error)) copier.TypeConverter {
+	return converter(func(raw string) (T, error) {
+		if raw = strings.TrimSpace(raw); raw == "" {
+			var zero T
+			return zero, nil
+		}
+		return parse(raw)
+	})
+}
+
+func formatConverter[T interface {
+	IsValid() bool
+	String() string
+}]() copier.TypeConverter {
+	return converter(func(value T) (string, error) {
+		if !value.IsValid() {
+			return "", nil
+		}
+		return value.String(), nil
+	})
 }
 
 // converter adapts a typed conversion into a copier converter.
