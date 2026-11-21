@@ -1,3 +1,13 @@
+## docker/v0.3.5
+
+### Bug fixes
+
+* bump deps([402d3a1](https://github.com/getarcaneapp/kit/commit/402d3a139ec3a783447f54a294e3c561109df625) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.3.4...docker/v0.3.5
+
 ## docker/v0.3.4
 
 ### Other
