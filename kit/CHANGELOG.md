@@ -1,3 +1,13 @@
+## kit/v0.7.5
+
+### Other
+
+* deduplicate generic helpers and clean up composite literals([44bf6b0](https://github.com/getarcaneapp/kit/commit/44bf6b0aa06361b86c16e160cffe39f77e46ec9d) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/kit/v0.7.4...kit/v0.7.5
+
 ## kit/v0.7.4
 
 ### Bug fixes
