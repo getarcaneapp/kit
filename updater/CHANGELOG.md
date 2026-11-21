@@ -1,3 +1,17 @@
+## updater/v0.12.5
+
+### Bug fixes
+
+* bump deps([226381c](https://github.com/getarcaneapp/kit/commit/226381c10651f3c26a13a47bcf9583aebf4aac5d) by @kmendell)
+
+### Other
+
+* deduplicate registry, compose, and result helpers and inject logger([58be8d7](https://github.com/getarcaneapp/kit/commit/58be8d79fba283e07540284403cf35efb30c077a) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.12.4...updater/v0.12.5
+
 ## updater/v0.12.4
 
 ### Bug fixes
