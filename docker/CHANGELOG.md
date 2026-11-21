@@ -1,3 +1,13 @@
+## docker/v0.3.4
+
+### Other
+
+* replace global volume usage cache with VolumeUsageCache and deduplicate helpers([0b17285](https://github.com/getarcaneapp/kit/commit/0b172854db87f2d0de38628fee4dc8e1e8de1cf0) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/v0.3.3...docker/v0.3.4
+
 ## docker/v0.3.3
 
 ### Bug fixes
