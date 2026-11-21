@@ -1,3 +1,13 @@
+## docker/convert/v0.4.5
+
+### Bug fixes
+
+* bump deps([402d3a1](https://github.com/getarcaneapp/kit/commit/402d3a139ec3a783447f54a294e3c561109df625) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.4.4...docker/convert/v0.4.5
+
 ## docker/convert/v0.4.4
 
 ### Bug fixes
