@@ -1,3 +1,17 @@
+## builds/v0.5.5
+
+### Bug fixes
+
+* bump deps([226381c](https://github.com/getarcaneapp/kit/commit/226381c10651f3c26a13a47bcf9583aebf4aac5d) by @kmendell)
+
+### Other
+
+* remove duplicate builder and jsonstream helpers and inject logger([cb12b62](https://github.com/getarcaneapp/kit/commit/cb12b62fa7b0406e3847b002fadf88b2210c01bc) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.5.4...builds/v0.5.5
+
 ## builds/v0.5.4
 
 ### Bug fixes
