@@ -16,7 +16,6 @@ import (
 	"syscall"
 
 	"kit.getarcane.app"
-
 	acfstypes "kit.getarcane.app/acfs/types"
 )
 

@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"kit.getarcane.app"
-	kitfs "kit.getarcane.app/fs"
 )
 
 type (
@@ -60,11 +59,7 @@ func (r Root) OpenFile(ctx context.Context, logicalPath string, options OpenOpti
 	if err != nil {
 		return nil, err
 	}
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return nil, err
-	}
-	err = rejectReservedPath(relativePath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return nil, err
 	}

@@ -12,9 +12,8 @@ import (
 	"strings"
 	"syscall"
 
-	kitfs "kit.getarcane.app/fs"
-
 	acfstypes "kit.getarcane.app/acfs/types"
+	kitfs "kit.getarcane.app/fs"
 )
 
 const (
@@ -91,16 +90,12 @@ func (r Root) Apply(ctx context.Context, staging Root, manifest acfstypes.ApplyM
 }
 
 func normalizeMutationPath(logicalPath string) (string, error) {
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return "", err
 	}
 	if relativePath == "." {
 		return "", fmt.Errorf("%w: workspace root is not a mutation target", ErrInvalidPath)
-	}
-	err = rejectReservedPath(relativePath)
-	if err != nil {
-		return "", err
 	}
 	return relativePath, nil
 }

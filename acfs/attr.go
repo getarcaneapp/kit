@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"time"
-
-	kitfs "kit.getarcane.app/fs"
 )
 
 // Chmod changes the mode of a root-confined path, refusing symbolic links with
@@ -49,11 +47,7 @@ func (r Root) changeAttributes(ctx context.Context, op, logicalPath string, chan
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return err
-	}
-	err = rejectReservedPath(relativePath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return err
 	}
@@ -84,58 +78,37 @@ func (r Root) changeAttributes(ctx context.Context, op, logicalPath string, chan
 }
 
 // Chmod changes the mode of a host path, following symbolic links.
-func (Host) Chmod(ctx context.Context, hostPath string, mode os.FileMode) error {
+func (h Host) Chmod(ctx context.Context, hostPath string, mode os.FileMode) error {
 	if mode&^chmodModeMask != 0 {
 		return fmt.Errorf("invalid file mode %v", mode)
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	targetPath, err := cleanHostPath(hostPath)
-	if err != nil {
-		return err
-	}
-	err = os.Chmod(targetPath, mode)
-	if err != nil {
-		return fmt.Errorf("chmod %q: %w", targetPath, err)
-	}
-	return nil
+	return h.changeAttributes(ctx, "chmod", hostPath, func(targetPath string) error {
+		return os.Chmod(targetPath, mode)
+	})
 }
 
 // Chown changes the owner of a host path, following symbolic links.
-func (Host) Chown(ctx context.Context, hostPath string, uid, gid int) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	targetPath, err := cleanHostPath(hostPath)
-	if err != nil {
-		return err
-	}
-	err = os.Chown(targetPath, uid, gid)
-	if err != nil {
-		return fmt.Errorf("chown %q: %w", targetPath, err)
-	}
-	return nil
+func (h Host) Chown(ctx context.Context, hostPath string, uid, gid int) error {
+	return h.changeAttributes(ctx, "chown", hostPath, func(targetPath string) error {
+		return os.Chown(targetPath, uid, gid)
+	})
 }
 
 // Lchown changes the owner of a host path without following its final link.
-func (Host) Lchown(ctx context.Context, hostPath string, uid, gid int) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	targetPath, err := cleanHostPath(hostPath)
-	if err != nil {
-		return err
-	}
-	err = os.Lchown(targetPath, uid, gid)
-	if err != nil {
-		return fmt.Errorf("lchown %q: %w", targetPath, err)
-	}
-	return nil
+func (h Host) Lchown(ctx context.Context, hostPath string, uid, gid int) error {
+	return h.changeAttributes(ctx, "lchown", hostPath, func(targetPath string) error {
+		return os.Lchown(targetPath, uid, gid)
+	})
 }
 
 // Chtimes changes the times of a host path, following symbolic links.
-func (Host) Chtimes(ctx context.Context, hostPath string, atime, mtime time.Time) error {
+func (h Host) Chtimes(ctx context.Context, hostPath string, atime, mtime time.Time) error {
+	return h.changeAttributes(ctx, "chtimes", hostPath, func(targetPath string) error {
+		return os.Chtimes(targetPath, atime, mtime)
+	})
+}
+
+func (Host) changeAttributes(ctx context.Context, op, hostPath string, change func(targetPath string) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -143,9 +116,8 @@ func (Host) Chtimes(ctx context.Context, hostPath string, atime, mtime time.Time
 	if err != nil {
 		return err
 	}
-	err = os.Chtimes(targetPath, atime, mtime)
-	if err != nil {
-		return fmt.Errorf("chtimes %q: %w", targetPath, err)
+	if err = change(targetPath); err != nil {
+		return fmt.Errorf("%s %q: %w", op, targetPath, err)
 	}
 	return nil
 }

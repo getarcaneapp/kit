@@ -8,8 +8,6 @@ import (
 	"os"
 	"path"
 	"syscall"
-
-	kitfs "kit.getarcane.app/fs"
 )
 
 // Sync flushes a root-confined regular file or directory to stable storage.
@@ -18,11 +16,7 @@ func (r Root) Sync(ctx context.Context, logicalPath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return err
-	}
-	err = rejectReservedPath(relativePath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return err
 	}

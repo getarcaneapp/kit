@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"kit.getarcane.app"
-	kitfs "kit.getarcane.app/fs"
-
 	acfstypes "kit.getarcane.app/acfs/types"
+	kitfs "kit.getarcane.app/fs"
 )
 
 func newEntry(name, logicalPath, mode, linkTarget string, info os.FileInfo) acfstypes.Entry {

@@ -9,9 +9,8 @@ import (
 	"path/filepath"
 
 	"kit.getarcane.app"
-	kitfs "kit.getarcane.app/fs"
-
 	acfstypes "kit.getarcane.app/acfs/types"
+	kitfs "kit.getarcane.app/fs"
 )
 
 // ListEach visits the children of a host directory in name order, bounded by

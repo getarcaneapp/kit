@@ -149,11 +149,7 @@ func (r Root) Readlink(ctx context.Context, logicalPath string) (string, error) 
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return "", err
-	}
-	err = rejectReservedPath(relativePath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return "", err
 	}

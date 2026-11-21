@@ -3,7 +3,6 @@ package acfs
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,14 +16,8 @@ func (Host) WriteFrom(ctx context.Context, hostPath string, source io.Reader, op
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if source == nil {
-		return 0, errors.New("source reader is required")
-	}
-	if options.Size < 0 {
-		return 0, fmt.Errorf("%w: size must be non-negative", ErrSizeMismatch)
-	}
-	if options.Mode&^chmodModeMask != 0 {
-		return 0, fmt.Errorf("invalid file options.Mode %v", options.Mode)
+	if err := options.validate(source); err != nil {
+		return 0, err
 	}
 	targetPath, err := cleanHostFilePath(hostPath)
 	if err != nil {

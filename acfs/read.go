@@ -27,59 +27,12 @@ type (
 // OpenRead opens a root-confined file for a streaming read of at most maxBytes
 // when positive.
 func (r Root) OpenRead(ctx context.Context, logicalPath string, maxBytes int64) (io.ReadCloser, int64, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, 0, err
-	}
-
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return nil, 0, err
-	}
-	err = rejectReservedPath(relativePath)
+	file, fileSize, err := r.openRead(ctx, logicalPath)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	root, err := os.OpenRoot(r.Path)
-	if err != nil {
-		return nil, 0, fmt.Errorf("open workspace root: %w", err)
-	}
-	defer func() {
-		_ = root.Close()
-	}()
-
-	resolvedPath, info, err := resolvePath(root, relativePath, resolveOptions{FollowFinal: true})
-	if err != nil {
-		return nil, 0, err
-	}
-	if info == nil {
-		info, err = root.Stat(resolvedPath)
-		if err != nil {
-			return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
-		}
-	}
-	if info.IsDir() {
-		return nil, 0, ErrIsDirectory
-	}
-	if !info.Mode().IsRegular() {
-		return nil, 0, ErrNotFile
-	}
-
-	file, err := root.OpenFile(resolvedPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, 0, fmt.Errorf("open %q: %w", kitfs.LogicalPath(resolvedPath), err)
-	}
-	info, err = file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return nil, 0, fmt.Errorf("stat %q: %w", kitfs.LogicalPath(resolvedPath), err)
-	}
-	if !info.Mode().IsRegular() {
-		_ = file.Close()
-		return nil, 0, ErrNotFile
-	}
-
-	size := kit.Ternary(maxBytes > 0, min(maxBytes, info.Size()), info.Size())
+	size := kit.Ternary(maxBytes > 0, min(maxBytes, fileSize), fileSize)
 	return &contextReadCloser{
 		ctx:    ctx,
 		reader: io.LimitReader(file, size),
@@ -107,15 +60,19 @@ func (r *contextReadSeekCloser) Close() error {
 
 // OpenReadSeek opens a root-confined regular file for a seekable read.
 func (r Root) OpenReadSeek(ctx context.Context, logicalPath string) (io.ReadSeekCloser, int64, error) {
+	file, size, err := r.openRead(ctx, logicalPath)
+	if err != nil {
+		return nil, 0, err
+	}
+	return &contextReadSeekCloser{ctx: ctx, file: file}, size, nil
+}
+
+func (r Root) openRead(ctx context.Context, logicalPath string) (*os.File, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
 
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return nil, 0, err
-	}
-	err = rejectReservedPath(relativePath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -159,7 +116,7 @@ func (r Root) OpenReadSeek(ctx context.Context, logicalPath string) (io.ReadSeek
 		return nil, 0, ErrNotFile
 	}
 
-	return &contextReadSeekCloser{ctx: ctx, file: file}, info.Size(), nil
+	return file, info.Size(), nil
 }
 
 // ReadFile returns the contents of a root-confined regular file.

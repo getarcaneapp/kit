@@ -61,27 +61,30 @@ func (o WriteOptions) validate() error {
 	return nil
 }
 
+func (o WriteFromOptions) validate(source io.Reader) error {
+	if source == nil {
+		return errors.New("source reader is required")
+	}
+	if o.Size < 0 {
+		return fmt.Errorf("%w: size must be non-negative", ErrSizeMismatch)
+	}
+	if o.Mode&^chmodModeMask != 0 {
+		return fmt.Errorf("invalid file options.Mode %v", o.Mode)
+	}
+	return nil
+}
+
 // WriteFrom atomically writes exactly options.Size bytes from source to a
 // root-confined file.
 func (r Root) WriteFrom(ctx context.Context, logicalPath string, source io.Reader, options WriteFromOptions) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if source == nil {
-		return 0, errors.New("source reader is required")
-	}
-	if options.Size < 0 {
-		return 0, fmt.Errorf("%w: size must be non-negative", ErrSizeMismatch)
-	}
-	if options.Mode&^chmodModeMask != 0 {
-		return 0, fmt.Errorf("invalid file options.Mode %v", options.Mode)
-	}
-
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
+	if err := options.validate(source); err != nil {
 		return 0, err
 	}
-	err = rejectReservedPath(relativePath)
+
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return 0, err
 	}
@@ -122,11 +125,7 @@ func (r Root) Write(ctx context.Context, logicalPath string, data []byte, option
 	if err := options.validate(); err != nil {
 		return err
 	}
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return err
-	}
-	err = rejectReservedPath(relativePath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return err
 	}
@@ -265,11 +264,7 @@ func (r Root) WriteAt(ctx context.Context, logicalPath string, offset int64, dat
 		return fmt.Errorf("%w: offset must be non-negative", ErrInvalidPath)
 	}
 
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return err
-	}
-	err = rejectReservedPath(relativePath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return err
 	}
@@ -327,6 +322,18 @@ func writeAtAndClose(file *os.File, displayPath string, offset int64, data []byt
 		return fmt.Errorf("write %q at offset %d: %w", displayPath, offset, err)
 	}
 	return nil
+}
+
+func normalizeRootPath(logicalPath string) (string, error) {
+	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
+	if err != nil {
+		return "", err
+	}
+	err = rejectReservedPath(relativePath)
+	if err != nil {
+		return "", err
+	}
+	return relativePath, nil
 }
 
 func rejectReservedPath(relativePath string) error {

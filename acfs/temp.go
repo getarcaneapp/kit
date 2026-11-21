@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-
-	kitfs "kit.getarcane.app/fs"
 )
 
 const (
@@ -90,11 +88,7 @@ func (r Root) openTemporaryDirectory(ctx context.Context, logicalDir, pattern st
 		return nil, nil, err
 	}
 
-	relativeDir, err := kitfs.NormalizeLogicalPath(logicalDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	err = rejectReservedPath(relativeDir)
+	relativeDir, err := normalizeRootPath(logicalDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -159,42 +153,35 @@ func temporaryName(pattern string) string {
 
 // MkdirTemp creates a uniquely named directory in a host directory like Root.MkdirTemp.
 func (Host) MkdirTemp(ctx context.Context, hostDir, pattern string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	if err := validateTemporaryPattern(pattern); err != nil {
-		return "", err
-	}
-	directory, err := cleanHostPath(hostDir)
-	if err != nil {
-		return "", err
-	}
-	_, name, err := createTemporary(pattern, func(name string) (struct{}, error) {
-		return struct{}{}, os.Mkdir(filepath.Join(directory, name), temporaryDirectoryMode)
+	_, fullPath, err := createHostTemporary(ctx, hostDir, pattern, "directory", func(fullPath string) (struct{}, error) {
+		return struct{}{}, os.Mkdir(fullPath, temporaryDirectoryMode)
 	})
-	if err != nil {
-		return "", fmt.Errorf("create temporary directory in %q: %w", directory, err)
-	}
-	return filepath.Join(directory, name), nil
+	return fullPath, err
 }
 
 // CreateTemp creates a uniquely named file in a host directory like Root.CreateTemp.
 func (Host) CreateTemp(ctx context.Context, hostDir, pattern string) (*os.File, string, error) {
+	return createHostTemporary(ctx, hostDir, pattern, "file", func(fullPath string) (*os.File, error) {
+		return os.OpenFile(fullPath, os.O_RDWR|os.O_CREATE|os.O_EXCL, temporaryFileMode)
+	})
+}
+
+func createHostTemporary[T any](ctx context.Context, hostDir, pattern, kind string, create func(fullPath string) (T, error)) (T, string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, "", err
+		return *new(T), "", err
 	}
 	if err := validateTemporaryPattern(pattern); err != nil {
-		return nil, "", err
+		return *new(T), "", err
 	}
 	directory, err := cleanHostPath(hostDir)
 	if err != nil {
-		return nil, "", err
+		return *new(T), "", err
 	}
-	file, name, err := createTemporary(pattern, func(name string) (*os.File, error) {
-		return os.OpenFile(filepath.Join(directory, name), os.O_RDWR|os.O_CREATE|os.O_EXCL, temporaryFileMode)
+	created, name, err := createTemporary(pattern, func(name string) (T, error) {
+		return create(filepath.Join(directory, name))
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("create temporary file in %q: %w", directory, err)
+		return *new(T), "", fmt.Errorf("create temporary %s in %q: %w", kind, directory, err)
 	}
-	return file, filepath.Join(directory, name), nil
+	return created, filepath.Join(directory, name), nil
 }

@@ -9,8 +9,6 @@ import (
 	"path"
 	"strings"
 	"syscall"
-
-	kitfs "kit.getarcane.app/fs"
 )
 
 // Rename moves sourceLogical onto targetLogical inside the root like os.Rename,
@@ -101,11 +99,7 @@ func renameError(err error, source, target string) error {
 
 // resolveRenameEndpoint resolves the parent and base name of a rename endpoint.
 func resolveRenameEndpoint(root *os.Root, logicalPath string) (string, string, error) {
-	relativePath, err := kitfs.NormalizeLogicalPath(logicalPath)
-	if err != nil {
-		return "", "", err
-	}
-	err = rejectReservedPath(relativePath)
+	relativePath, err := normalizeRootPath(logicalPath)
 	if err != nil {
 		return "", "", err
 	}
