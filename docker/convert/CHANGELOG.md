@@ -1,3 +1,17 @@
+## docker/convert/v0.4.4
+
+### Bug fixes
+
+* bump deps([226381c](https://github.com/getarcaneapp/kit/commit/226381c10651f3c26a13a47bcf9583aebf4aac5d) by @kmendell)
+
+### Other
+
+* deduplicate builder and YAML helpers with generics([3777643](https://github.com/getarcaneapp/kit/commit/3777643f45b172a209480135f8e93064a53b8b39) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/docker/convert/v0.4.3...docker/convert/v0.4.4
+
 ## docker/convert/v0.4.3
 
 ### Bug fixes
