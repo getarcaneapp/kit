@@ -1,3 +1,13 @@
+## tripwire/v0.2.2
+
+### Other
+
+* deduplicate symlink path resolution([2d9738b](https://github.com/getarcaneapp/kit/commit/2d9738b7be6d96a2ca31c63db163ebac01929ae7) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/tripwire/v0.2.1...tripwire/v0.2.2
+
 ## tripwire/v0.2.1
 
 ### Bug fixes
