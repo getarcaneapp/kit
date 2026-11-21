@@ -2,6 +2,7 @@
 package agg
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
@@ -45,6 +46,8 @@ type (
 		Version func(item T) string
 		// Run is the poller body; it must return when ctx is canceled.
 		Run func(ctx context.Context, item T)
+		// Logger receives warnings when listing items fails. Nil uses slog.Default().
+		Logger *slog.Logger
 		// Label names the stream in log messages.
 		Label string
 		// Interval is how often List is re-checked. Zero or negative means one minute.
@@ -92,12 +95,8 @@ func Run[T any](ctx context.Context, cfg Config[T]) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	events := make(chan T, cfg.Buffer)
 	var wg sync.WaitGroup
-	wg.Add(len(cfg.Producers))
 	for _, producer := range cfg.Producers {
-		go func(producer Producer[T]) {
-			defer wg.Done()
-			producer(streamCtx, events)
-		}(producer)
+		wg.Go(func() { producer(streamCtx, events) })
 	}
 	defer wg.Wait()
 	defer cancel()
@@ -115,23 +114,26 @@ func Run[T any](ctx context.Context, cfg Config[T]) error {
 		case <-streamCtx.Done():
 			return nil
 		case event := <-events:
-			if err := json.MarshalWrite(cfg.Writer, event, jsontext.AllowInvalidUTF8(true)); err != nil {
-				return fmt.Errorf("encode stream event: %w", err)
+			if err := writeFrame(cfg.Writer, cfg.Flush, event, "event"); err != nil {
+				return err
 			}
-			if _, err := io.WriteString(cfg.Writer, "\n"); err != nil {
-				return fmt.Errorf("terminate stream event: %w", err)
-			}
-			cfg.Flush()
 		case <-heartbeat:
-			if err := json.MarshalWrite(cfg.Writer, cfg.MakeHeartbeat(), jsontext.AllowInvalidUTF8(true)); err != nil {
-				return fmt.Errorf("encode stream heartbeat: %w", err)
+			if err := writeFrame(cfg.Writer, cfg.Flush, cfg.MakeHeartbeat(), "heartbeat"); err != nil {
+				return err
 			}
-			if _, err := io.WriteString(cfg.Writer, "\n"); err != nil {
-				return fmt.Errorf("terminate stream heartbeat: %w", err)
-			}
-			cfg.Flush()
 		}
 	}
+}
+
+func writeFrame[T any](w io.Writer, flush func(), frame T, kind string) error {
+	if err := json.MarshalWrite(w, frame, jsontext.AllowInvalidUTF8(true)); err != nil {
+		return fmt.Errorf("encode stream %s: %w", kind, err)
+	}
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		return fmt.Errorf("terminate stream %s: %w", kind, err)
+	}
+	flush()
+	return nil
 }
 
 // Send forwards an event to the stream's event channel, giving up when ctx is
@@ -160,11 +162,12 @@ func ReconcilePollersByKey[T any](ctx context.Context, cfg PollerConfig[T]) {
 		}
 	}()
 
+	logger := cmp.Or(cfg.Logger, slog.Default())
 	reconcile := func() {
 		items, err := cfg.List(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
-				slog.Default().WarnContext(ctx, "failed to list poller items", "stream", cfg.Label, "error", err)
+				logger.WarnContext(ctx, "failed to list poller items", "stream", cfg.Label, "error", err)
 			}
 			return
 		}
@@ -188,11 +191,7 @@ func ReconcilePollersByKey[T any](ctx context.Context, cfg PollerConfig[T]) {
 					continue
 				}
 				existing.cancel()
-				select {
-				case <-existing.done:
-				case <-set.ctx.Done():
-					<-existing.done
-				}
+				<-existing.done
 				delete(set.active, key)
 			}
 

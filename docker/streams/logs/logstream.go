@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"kit.getarcane.app"
-
 	"kit.getarcane.app/docker/streams/internal/buffer"
 )
 
@@ -131,7 +130,7 @@ func (b *Broadcaster) Subscribe() (<-chan Entry, func()) {
 	for {
 		current := b.loadSubscribers()
 		next := &logSubscriberSnapshot{
-			subscribers: append(append([]chan Entry(nil), current.subscribers...), ch),
+			subscribers: append(slices.Clone(current.subscribers), ch),
 		}
 		if b.subscribers.CompareAndSwap(current, next) {
 			break
@@ -147,10 +146,7 @@ func (b *Broadcaster) Subscribe() (<-chan Entry, func()) {
 			}
 
 			next := &logSubscriberSnapshot{
-				subscribers: append(
-					append(make([]chan Entry, 0, len(current.subscribers)-1), current.subscribers[:index]...),
-					current.subscribers[index+1:]...,
-				),
+				subscribers: slices.Concat(current.subscribers[:index], current.subscribers[index+1:]),
 			}
 			if b.subscribers.CompareAndSwap(current, next) {
 				b.deliveryMu.Lock()
@@ -213,40 +209,19 @@ func (h *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &slogHandler{
 		base: h.base.WithAttrs(attrs),
 		b:    h.b,
-		attrs: func() []boundAttrs {
-			copied := make([]boundAttrs, 0, len(h.attrs))
-			for _, bound := range h.attrs {
-				copied = append(copied, boundAttrs{
-					groups: slices.Clone(bound.groups),
-					attrs:  slices.Clone(bound.attrs),
-				})
-			}
-			return append(copied, boundAttrs{
-				groups: slices.Clone(h.group),
-				attrs:  slices.Clone(attrs),
-			})
-		}(),
+		attrs: append(cloneBoundAttrs(h.attrs), boundAttrs{
+			groups: slices.Clone(h.group),
+			attrs:  slices.Clone(attrs),
+		}),
 		group: slices.Clone(h.group),
 	}
 }
 
 func (h *slogHandler) WithGroup(name string) slog.Handler {
 	return &slogHandler{
-		base: h.base.WithGroup(name),
-		b:    h.b,
-		attrs: func() []boundAttrs {
-			if len(h.attrs) == 0 {
-				return nil
-			}
-			copied := make([]boundAttrs, 0, len(h.attrs))
-			for _, bound := range h.attrs {
-				copied = append(copied, boundAttrs{
-					groups: slices.Clone(bound.groups),
-					attrs:  slices.Clone(bound.attrs),
-				})
-			}
-			return copied
-		}(),
+		base:  h.base.WithGroup(name),
+		b:     h.b,
+		attrs: cloneBoundAttrs(h.attrs),
 		group: func() []string {
 			if name == "" {
 				return slices.Clone(h.group)
@@ -254,6 +229,20 @@ func (h *slogHandler) WithGroup(name string) slog.Handler {
 			return append(slices.Clone(h.group), name)
 		}(),
 	}
+}
+
+func cloneBoundAttrs(src []boundAttrs) []boundAttrs {
+	if len(src) == 0 {
+		return nil
+	}
+	copied := make([]boundAttrs, 0, len(src))
+	for _, bound := range src {
+		copied = append(copied, boundAttrs{
+			groups: slices.Clone(bound.groups),
+			attrs:  slices.Clone(bound.attrs),
+		})
+	}
+	return copied
 }
 
 // groupMap returns the map nested under groups in dst, creating it as needed.

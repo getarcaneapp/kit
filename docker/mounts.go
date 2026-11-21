@@ -10,6 +10,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
+
 	"kit.getarcane.app"
 )
 
@@ -37,64 +38,14 @@ import (
 // Returns nil if no mount destination is a prefix of containerPath or if
 // the matching mount is of an unsupported type.
 func MountForSubpath(mounts []container.MountPoint, containerPath, target string) *mount.Mount {
-	if strings.TrimSpace(containerPath) == "" {
+	best, relative, ok := findCoveringMount(mounts, containerPath)
+	if !ok {
 		return nil
 	}
-	containerPath = path.Clean(containerPath)
 	if strings.TrimSpace(target) == "" {
-		target = containerPath
+		target = path.Clean(containerPath)
 	}
-
-	var best *container.MountPoint
-	for i := range mounts {
-		m := &mounts[i]
-		if m.Destination == "" || !pathHasPrefix(containerPath, m.Destination) {
-			continue
-		}
-		if best == nil || len(m.Destination) > len(best.Destination) {
-			best = m
-		}
-	}
-	if best == nil {
-		return nil
-	}
-
-	relative := strings.TrimPrefix(strings.TrimPrefix(containerPath, best.Destination), "/")
-	if relative == ".." || strings.HasPrefix(relative, "../") {
-		return nil
-	}
-
-	switch best.Type { //nolint:exhaustive // only bind and volume mounts are translatable; the default returns nil for the rest
-	case mount.TypeBind:
-		if strings.TrimSpace(best.Source) == "" {
-			return nil
-		}
-		return &mount.Mount{
-			Type:        mount.TypeBind,
-			Source:      kit.Ternary(relative != "", strings.TrimRight(best.Source, "/")+"/"+relative, best.Source),
-			Target:      target,
-			ReadOnly:    !best.RW,
-			BindOptions: kit.Ternary(best.Propagation == "", nil, &mount.BindOptions{Propagation: best.Propagation}),
-		}
-	case mount.TypeVolume:
-		if strings.TrimSpace(best.Name) == "" {
-			return nil
-		}
-		return &mount.Mount{
-			Type:     mount.TypeVolume,
-			Source:   best.Name,
-			Target:   target,
-			ReadOnly: !best.RW,
-			VolumeOptions: func() *mount.VolumeOptions {
-				if relative == "" {
-					return nil
-				}
-				return &mount.VolumeOptions{Subpath: relative}
-			}(),
-		}
-	default:
-		return nil
-	}
+	return buildMirrorMount(*best, target, relative)
 }
 
 // MountForEnclosingPath returns the most-specific mount covering containerPath
@@ -102,25 +53,8 @@ func MountForSubpath(mounts []container.MountPoint, containerPath, target string
 // Unlike MountForSubpath the subpath need not exist yet, so restores can create
 // it. Returns nil when no bind or volume mount covers containerPath.
 func MountForEnclosingPath(mounts []container.MountPoint, containerPath, target string) (*mount.Mount, string) {
-	if strings.TrimSpace(containerPath) == "" {
-		return nil, ""
-	}
-	containerPath = path.Clean(containerPath)
-	var best *container.MountPoint
-	for i := range mounts {
-		m := &mounts[i]
-		if m.Destination == "" || !pathHasPrefix(containerPath, m.Destination) {
-			continue
-		}
-		if best == nil || len(m.Destination) > len(best.Destination) {
-			best = m
-		}
-	}
-	if best == nil {
-		return nil, ""
-	}
-	relative := strings.TrimPrefix(strings.TrimPrefix(containerPath, best.Destination), "/")
-	if relative == ".." || strings.HasPrefix(relative, "../") {
+	best, relative, ok := findCoveringMount(mounts, containerPath)
+	if !ok {
 		return nil, ""
 	}
 	enclosing := MountForDestination(mounts, best.Destination, target)
@@ -128,6 +62,62 @@ func MountForEnclosingPath(mounts []container.MountPoint, containerPath, target 
 		return nil, ""
 	}
 	return enclosing, relative
+}
+
+func findCoveringMount(mounts []container.MountPoint, containerPath string) (*container.MountPoint, string, bool) {
+	if strings.TrimSpace(containerPath) == "" {
+		return nil, "", false
+	}
+	cleaned := path.Clean(containerPath)
+
+	var best *container.MountPoint
+	for i := range mounts {
+		m := &mounts[i]
+		if m.Destination == "" || !pathHasPrefix(cleaned, m.Destination) {
+			continue
+		}
+		if best == nil || len(m.Destination) > len(best.Destination) {
+			best = m
+		}
+	}
+	if best == nil {
+		return nil, "", false
+	}
+
+	relative := strings.TrimPrefix(strings.TrimPrefix(cleaned, best.Destination), "/")
+	if relative == ".." || strings.HasPrefix(relative, "../") {
+		return nil, "", false
+	}
+	return best, relative, true
+}
+
+func buildMirrorMount(mp container.MountPoint, target, subpath string) *mount.Mount {
+	switch mp.Type { //nolint:exhaustive // only bind and volume mounts are translatable; the default returns nil for the rest
+	case mount.TypeBind:
+		if strings.TrimSpace(mp.Source) == "" {
+			return nil
+		}
+		return &mount.Mount{
+			Type:        mount.TypeBind,
+			Source:      kit.Ternary(subpath != "", strings.TrimRight(mp.Source, "/")+"/"+subpath, mp.Source),
+			Target:      target,
+			ReadOnly:    !mp.RW,
+			BindOptions: kit.Ternary(mp.Propagation == "", nil, &mount.BindOptions{Propagation: mp.Propagation}),
+		}
+	case mount.TypeVolume:
+		if strings.TrimSpace(mp.Name) == "" {
+			return nil
+		}
+		return &mount.Mount{
+			Type:          mount.TypeVolume,
+			Source:        mp.Name,
+			Target:        target,
+			ReadOnly:      !mp.RW,
+			VolumeOptions: kit.Ternary(subpath == "", nil, &mount.VolumeOptions{Subpath: subpath}),
+		}
+	default:
+		return nil
+	}
 }
 
 // NestedMounts mirrors every bind or volume mount whose destination lies
@@ -178,42 +168,8 @@ func MountForDestination(mounts []container.MountPoint, destination, target stri
 	}
 
 	for _, m := range mounts {
-		if m.Destination != destination {
-			continue
-		}
-
-		switch m.Type {
-		case mount.TypeVolume:
-			if strings.TrimSpace(m.Name) == "" {
-				return nil
-			}
-			return &mount.Mount{
-				Type:     mount.TypeVolume,
-				Source:   m.Name,
-				Target:   target,
-				ReadOnly: !m.RW,
-			}
-		case mount.TypeBind:
-			if strings.TrimSpace(m.Source) == "" {
-				return nil
-			}
-			return &mount.Mount{
-				Type:        mount.TypeBind,
-				Source:      m.Source,
-				Target:      target,
-				ReadOnly:    !m.RW,
-				BindOptions: kit.Ternary(m.Propagation == "", nil, &mount.BindOptions{Propagation: m.Propagation}),
-			}
-		case mount.TypeTmpfs:
-			return nil
-		case mount.TypeNamedPipe:
-			return nil
-		case mount.TypeCluster:
-			return nil
-		case mount.TypeImage:
-			return nil
-		default:
-			return nil
+		if m.Destination == destination {
+			return buildMirrorMount(m, target, "")
 		}
 	}
 

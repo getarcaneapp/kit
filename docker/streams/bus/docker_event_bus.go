@@ -69,7 +69,7 @@ func (b *DockerEventBus) Subscribe(eventType events.Type, opts SubscribeOptions)
 		}
 
 		subscribers := maps.Clone(current.subscribers)
-		subscribers[eventType] = append(append([]chan events.Message(nil), subscribers[eventType]...), ch)
+		subscribers[eventType] = append(slices.Clone(subscribers[eventType]), ch)
 		if b.state.CompareAndSwap(current, &dockerEventBusState{subscribers: subscribers}) {
 			break
 		}
@@ -88,10 +88,7 @@ func (b *DockerEventBus) Subscribe(eventType events.Type, opts SubscribeOptions)
 			if len(subscriptions) == 1 {
 				delete(subscribers, eventType)
 			} else {
-				next := make([]chan events.Message, 0, len(subscriptions)-1)
-				next = append(next, subscriptions[:index]...)
-				next = append(next, subscriptions[index+1:]...)
-				subscribers[eventType] = next
+				subscribers[eventType] = slices.Concat(subscriptions[:index], subscriptions[index+1:])
 			}
 
 			if b.state.CompareAndSwap(current, &dockerEventBusState{closed: current.closed, subscribers: subscribers}) {

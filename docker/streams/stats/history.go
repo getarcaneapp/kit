@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dockercontainer "github.com/moby/moby/api/types/container"
+
 	"kit.getarcane.app"
 )
 
@@ -87,6 +88,7 @@ func NewStore(cfg StoreConfig) *Store {
 // CLI's OnlineCPUs multiplier, preserving Arcane's historical 0-100 normalized
 // chart scale.
 func BuildSample(stats dockercontainer.StatsResponse) StatsHistorySample {
+	usage := calculateMemoryUsage(stats)
 	return StatsHistorySample{
 		CPUTenths: uint16(math.Round(func() float64 {
 			cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage) - float64(stats.PreCPUStats.CPUUsage.TotalUsage)
@@ -97,14 +99,12 @@ func BuildSample(stats dockercontainer.StatsResponse) StatsHistorySample {
 			return min(max((cpuDelta/systemDelta)*100, 0), 100)
 		}() * 10)),
 		MemoryTenths: uint16(math.Round(func() float64 {
-			limit := stats.MemoryStats.Limit
-			if limit == 0 {
+			if stats.MemoryStats.Limit == 0 {
 				return 0
 			}
-			usage := calculateMemoryUsage(stats)
-			return min(max((float64(usage)/float64(limit))*100, 0), 100)
+			return min(max((float64(usage)/float64(stats.MemoryStats.Limit))*100, 0), 100)
 		}() * 10)),
-		MemoryUsageBytes: calculateMemoryUsage(stats),
+		MemoryUsageBytes: usage,
 	}
 }
 
@@ -221,12 +221,10 @@ func (s *Store) pruneLocked(now time.Time) {
 
 func calculateMemoryUsage(stats dockercontainer.StatsResponse) uint64 {
 	usage := stats.MemoryStats.Usage
-	if totalInactiveFile, ok := stats.MemoryStats.Stats["total_inactive_file"]; ok && totalInactiveFile < usage {
-		return usage - totalInactiveFile
+	for _, key := range []string{"total_inactive_file", "inactive_file"} {
+		if inactive, ok := stats.MemoryStats.Stats[key]; ok && inactive < usage {
+			return usage - inactive
+		}
 	}
-	if inactiveFile, ok := stats.MemoryStats.Stats["inactive_file"]; ok && inactiveFile < usage {
-		return usage - inactiveFile
-	}
-
 	return usage
 }

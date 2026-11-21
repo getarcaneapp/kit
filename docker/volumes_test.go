@@ -13,12 +13,13 @@ import (
 	"github.com/moby/moby/api/types/volume"
 	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
+
 	"kit.getarcane.app/cache"
 )
 
 func TestVolumeUsageCacheBehavior(t *testing.T) {
 	t.Run("deduplicates refresh and honors waiter context", func(t *testing.T) {
-		resetVolumeUsageCacheForTest()
+		usageCache := NewVolumeUsageCache(VolumeUsageCacheConfig{})
 
 		started := make(chan struct{})
 		release := make(chan struct{})
@@ -38,7 +39,7 @@ func TestVolumeUsageCacheBehavior(t *testing.T) {
 		go func() {
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 			defer cancel()
-			_, err := GetVolumeUsageData(ctx, dockerClient)
+			_, err := usageCache.Get(ctx, dockerClient)
 			firstResult <- err
 		}()
 
@@ -51,7 +52,7 @@ func TestVolumeUsageCacheBehavior(t *testing.T) {
 		waiterCtx, waiterCancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 		defer waiterCancel()
 		waiterStartedAt := time.Now()
-		_, err := GetVolumeUsageData(waiterCtx, dockerClient)
+		_, err := usageCache.Get(waiterCtx, dockerClient)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Less(t, time.Since(waiterStartedAt), 250*time.Millisecond)
 
@@ -61,7 +62,7 @@ func TestVolumeUsageCacheBehavior(t *testing.T) {
 	})
 
 	t.Run("serves stale data while one refresh runs", func(t *testing.T) {
-		resetVolumeUsageCacheForTest()
+		usageCache := NewVolumeUsageCache(VolumeUsageCacheConfig{})
 
 		secondStarted := make(chan struct{})
 		releaseSecond := make(chan struct{})
@@ -84,13 +85,13 @@ func TestVolumeUsageCacheBehavior(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
-		_, err := GetVolumeUsageData(ctx, dockerClient)
+		_, err := usageCache.Get(ctx, dockerClient)
 		require.NoError(t, err)
 
 		key := volumeUsageCacheKey(dockerClient)
-		cached, found := volumeUsageCache.Peek(key)
+		cached, found := usageCache.cache.Peek(key)
 		require.True(t, found)
-		volumeUsageCache.Set(cache.Entry[string, []volume.Volume]{
+		usageCache.cache.Set(cache.Entry[string, []volume.Volume]{
 			Key:   key,
 			Value: cached,
 			TTL:   time.Nanosecond,
@@ -98,7 +99,7 @@ func TestVolumeUsageCacheBehavior(t *testing.T) {
 		time.Sleep(time.Millisecond)
 
 		startedAt := time.Now()
-		stale, found := GetVolumeUsageDataStaleWhileRevalidate(ctx, dockerClient).Get()
+		stale, found := usageCache.GetStaleWhileRevalidate(ctx, dockerClient).Get()
 		require.True(t, found)
 		require.Len(t, stale, 1)
 		require.Equal(t, "stale", stale[0].Name)
@@ -109,18 +110,18 @@ func TestVolumeUsageCacheBehavior(t *testing.T) {
 		case <-time.After(time.Second):
 			require.FailNow(t, "background volume usage refresh did not start")
 		}
-		_, _ = GetVolumeUsageDataStaleWhileRevalidate(ctx, dockerClient).Get()
+		_, _ = usageCache.GetStaleWhileRevalidate(ctx, dockerClient).Get()
 		require.Equal(t, int32(2), requests.Load())
 
 		close(releaseSecond)
-		fresh, err := GetVolumeUsageData(ctx, dockerClient)
+		fresh, err := usageCache.Get(ctx, dockerClient)
 		require.NoError(t, err)
 		require.Len(t, fresh, 1)
 		require.Equal(t, "fresh", fresh[0].Name)
 	})
 
 	t.Run("isolates and invalidates by daemon host", func(t *testing.T) {
-		resetVolumeUsageCacheForTest()
+		usageCache := NewVolumeUsageCache(VolumeUsageCacheConfig{})
 
 		clientA := newVolumeUsageTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 			writeVolumeUsageResponse(t, w, "host-a", 1)
@@ -131,21 +132,21 @@ func TestVolumeUsageCacheBehavior(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
-		_, err := GetVolumeUsageData(ctx, clientA)
+		_, err := usageCache.Get(ctx, clientA)
 		require.NoError(t, err)
-		_, err = GetVolumeUsageData(ctx, clientB)
+		_, err = usageCache.Get(ctx, clientB)
 		require.NoError(t, err)
 
-		cachedA, foundA := volumeUsageCache.Peek(volumeUsageCacheKey(clientA))
-		cachedB, foundB := volumeUsageCache.Peek(volumeUsageCacheKey(clientB))
+		cachedA, foundA := usageCache.cache.Peek(volumeUsageCacheKey(clientA))
+		cachedB, foundB := usageCache.cache.Peek(volumeUsageCacheKey(clientB))
 		require.True(t, foundA)
 		require.True(t, foundB)
 		require.Equal(t, "host-a", cachedA[0].Name)
 		require.Equal(t, "host-b", cachedB[0].Name)
 
-		InvalidateVolumeUsageCache(clientA)
-		_, foundA = volumeUsageCache.Peek(volumeUsageCacheKey(clientA))
-		cachedB, foundB = volumeUsageCache.Peek(volumeUsageCacheKey(clientB))
+		usageCache.Invalidate(clientA)
+		_, foundA = usageCache.cache.Peek(volumeUsageCacheKey(clientA))
+		cachedB, foundB = usageCache.cache.Peek(volumeUsageCacheKey(clientB))
 		require.False(t, foundA)
 		require.True(t, foundB)
 		require.Equal(t, "host-b", cachedB[0].Name)
@@ -172,8 +173,4 @@ func writeVolumeUsageResponse(t *testing.T, w http.ResponseWriter, name string, 
 	w.Header().Set("Content-Type", "application/json")
 	_, err := fmt.Fprintf(w, `{"VolumeUsage":{"Items":[{"Name":%q,"UsageData":{"Size":%d,"RefCount":1}}]}}`, name, size)
 	require.NoError(t, err)
-}
-
-func resetVolumeUsageCacheForTest() {
-	volumeUsageCache.Purge()
 }

@@ -18,6 +18,7 @@ import (
 	containertypes "github.com/moby/moby/api/types/container"
 	networktypes "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+
 	"kit.getarcane.app"
 )
 
@@ -56,6 +57,9 @@ func (c *compatibilityClient) NetworkList(ctx context.Context, options client.Ne
 // raw daemon JSON, stripping CIDR suffixes that newer Moby address types reject.
 func ContainerInspectWithCompatibility(ctx context.Context, apiClient client.APIClient, containerID string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
 	result, err := apiClient.ContainerInspect(ctx, containerID, options)
+	if err == nil {
+		return result, nil
+	}
 	query := url.Values{}
 	if options.Size {
 		query.Set("size", "1")
@@ -70,6 +74,9 @@ func ContainerInspectWithCompatibility(ctx context.Context, apiClient client.API
 // daemon JSON, stripping CIDR suffixes that newer Moby address types reject.
 func NetworkInspectWithCompatibility(ctx context.Context, apiClient client.APIClient, networkID string, options client.NetworkInspectOptions) (client.NetworkInspectResult, error) {
 	result, err := apiClient.NetworkInspect(ctx, networkID, options)
+	if err == nil {
+		return result, nil
+	}
 	query := url.Values{}
 	if options.Verbose {
 		query.Set("verbose", "true")
@@ -87,6 +94,9 @@ func NetworkInspectWithCompatibility(ctx context.Context, apiClient client.APICl
 // daemon JSON, stripping CIDR suffixes that newer Moby address types reject.
 func NetworkListWithCompatibility(ctx context.Context, apiClient client.APIClient, options client.NetworkListOptions) (client.NetworkListResult, error) {
 	result, err := apiClient.NetworkList(ctx, options)
+	if err == nil {
+		return result, nil
+	}
 	query := url.Values{}
 	if len(options.Filters) > 0 {
 		filtersJSON, marshalErr := json.Marshal(options.Filters)

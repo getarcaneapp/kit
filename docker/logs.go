@@ -82,27 +82,19 @@ func StreamMultiplexedLogs(ctx context.Context, logs io.ReadCloser, logsChan cha
 		done <- ReadLogLines(ctx, stderrReader, logsChan, "[STDERR] ")
 	}()
 
-	select {
-	case <-ctx.Done():
-		closeInputs()
-		return ctx.Err()
-	case err := <-done:
-		if err != nil && !errors.Is(err, io.EOF) {
-			closeInputs()
-			return err
-		}
+	for range 2 {
 		select {
 		case <-ctx.Done():
 			closeInputs()
 			return ctx.Err()
-		case err = <-done:
+		case err := <-done:
 			if err != nil && !errors.Is(err, io.EOF) {
 				closeInputs()
 				return err
 			}
-			return nil
 		}
 	}
+	return nil
 }
 
 // ReadLogLines sends each non-empty line from reader to logsChan, prepending

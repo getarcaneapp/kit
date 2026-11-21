@@ -10,6 +10,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
 	"kit.getarcane.app"
 )
 
@@ -112,7 +113,7 @@ func ContainerAnswersToHostname(c *container.Summary, host string) bool {
 			return true
 		}
 	}
-	if c.Labels["com.docker.compose.service"] == host {
+	if c.Labels[ComposeServiceLabelKey] == host {
 		return true
 	}
 	for _, endpoint := range c.NetworkSettings.Networks {
