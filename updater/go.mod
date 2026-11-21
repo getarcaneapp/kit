@@ -19,7 +19,7 @@ require (
 	github.com/moby/moby/client v0.6.3
 	github.com/opencontainers/go-digest v1.0.0
 	kit.getarcane.app v0.7.5
-	kit.getarcane.app/docker v0.3.4
+	kit.getarcane.app/docker v0.3.5
 )
 
 require (

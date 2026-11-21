@@ -1,3 +1,13 @@
+## updater/v0.12.6
+
+### Bug fixes
+
+* bump deps([402d3a1](https://github.com/getarcaneapp/kit/commit/402d3a139ec3a783447f54a294e3c561109df625) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.12.5...updater/v0.12.6
+
 ## updater/v0.12.5
 
 ### Bug fixes
