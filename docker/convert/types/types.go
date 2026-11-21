@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	composegotypes "github.com/compose-spec/compose-go/v2/types"
+	composeTypes "github.com/compose-spec/compose-go/v2/types"
 )
 
 type (
@@ -24,7 +24,7 @@ type (
 
 	Result struct {
 		YAML     []byte
-		Project  *composegotypes.Project
+		Project  *composeTypes.Project
 		Services []ServiceResult
 		EnvFile  []byte
 		Warnings []Warning

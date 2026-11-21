@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/loader"
-	compose "github.com/compose-spec/compose-go/v2/types"
-	"kit.getarcane.app"
+	composeTypes "github.com/compose-spec/compose-go/v2/types"
 
+	"kit.getarcane.app"
 	"kit.getarcane.app/docker/convert/types"
 )
 
@@ -27,9 +27,9 @@ func Convert(input string, opts types.Options) (*types.Result, error) {
 		return nil, err
 	}
 
-	project, err := loader.LoadWithContext(context.Background(), compose.ConfigDetails{
+	project, err := loader.LoadWithContext(context.Background(), composeTypes.ConfigDetails{
 		WorkingDir: ".",
-		ConfigFiles: []compose.ConfigFile{
+		ConfigFiles: []composeTypes.ConfigFile{
 			{Filename: "compose.yaml", Content: yamlData},
 		},
 		Environment: map[string]string{},

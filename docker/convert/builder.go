@@ -11,11 +11,11 @@ import (
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/format"
-	compose "github.com/compose-spec/compose-go/v2/types"
+	composeTypes "github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/go-units"
 	"go.yaml.in/yaml/v4"
-	"kit.getarcane.app"
 
+	"kit.getarcane.app"
 	"kit.getarcane.app/docker/convert/types"
 )
 
@@ -64,14 +64,8 @@ func Build(commands []types.RunCommand, opts types.Options) (*types.Document, er
 
 	// Definitions from the existing file win over the external stubs added for
 	// converted commands.
-	existingNetworks, _ := existing["networks"].(map[string]any)
-	for name, definition := range existingNetworks {
-		networks[name], _ = definition.(map[string]any)
-	}
-	existingVolumes, _ := existing["volumes"].(map[string]any)
-	for name, definition := range existingVolumes {
-		volumes[name], _ = definition.(map[string]any)
-	}
+	copyExistingDefinitions(networks, existing, "networks")
+	copyExistingDefinitions(volumes, existing, "volumes")
 	maps.DeleteFunc(existing, func(key string, _ any) bool {
 		return key == "services" || key == "networks" || key == "volumes"
 	})
@@ -99,8 +93,7 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 		case "ports", "environment", "env_file", "labels", "extra_hosts", "dns", "cap_add", "cap_drop", "devices", "group_add", "security_opt", "expose":
 			appendString(service, flag.Name, flag.Value)
 		case "volumes":
-			items, _ := service["volumes"].([]any)
-			service["volumes"] = append(items, flag.Value)
+			appendSlice(service, "volumes", any(flag.Value))
 			if err := registerVolume(volumes, flag.Value); err != nil {
 				return nil, nil, err
 			}
@@ -109,8 +102,7 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 			if err != nil {
 				return nil, nil, err
 			}
-			items, _ := service["volumes"].([]any)
-			service["volumes"] = append(items, volume)
+			appendSlice(service, "volumes", any(volume))
 			warnings = append(warnings, mountWarnings...)
 			if source, _ := volume["source"].(string); volume["type"] == "volume" && source != "" && !strings.Contains(source, "$") {
 				volumes[source] = map[string]any{"external": true}
@@ -125,14 +117,16 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 		case "ipv4_address":
 			endpoint["ipv4_address"] = flag.Value
 		case "aliases":
-			aliases, _ := endpoint["aliases"].([]string)
-			endpoint["aliases"] = append(aliases, flag.Value)
+			appendSlice(endpoint, "aliases", flag.Value)
 		case "hostname", "restart", "working_dir", "user", "platform", "pull_policy", "stop_signal":
 			service[flag.Name] = flag.Value
 		case "stop_grace_period":
 			// docker run --stop-timeout is whole seconds; compose needs a duration.
-			_, err := strconv.ParseUint(flag.Value, 10, 64)
-			service["stop_grace_period"] = kit.Ternary(err == nil, flag.Value+"s", flag.Value)
+			if _, err := strconv.ParseUint(flag.Value, 10, 64); err == nil {
+				service["stop_grace_period"] = flag.Value + "s"
+			} else {
+				service["stop_grace_period"] = flag.Value
+			}
 		case "entrypoint":
 			// docker run --entrypoint takes a single executable, not a command line.
 			if flag.Value != "" {
@@ -141,7 +135,7 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 		case "healthcheck":
 			service["healthcheck"] = map[string]any{"test": flag.Value}
 		case "memory", "cpus":
-			ensureNestedMap(ensureNestedMap(ensureNestedMap(service, "deploy"), "resources"), "limits")[flag.Name] = flag.Value
+			ensureNestedMap(service, "deploy", "resources", "limits")[flag.Name] = flag.Value
 		case "ulimits":
 			ulimit, err := units.ParseUlimit(flag.Value)
 			if err != nil {
@@ -155,7 +149,7 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 			if !ok {
 				return nil, nil, types.NewConversionError("invalid log option %q", flag.Value)
 			}
-			ensureNestedMap(ensureNestedMap(service, "logging"), "options")[key] = value
+			ensureNestedMap(service, "logging", "options")[key] = value
 		case "interactive":
 			service["stdin_open"] = true
 		case "tty", "privileged", "init", "read_only", "oom_kill_disable":
@@ -169,8 +163,7 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 			if err != nil {
 				return nil, nil, err
 			}
-			items, _ := service["gpus"].([]any)
-			service["gpus"] = append(items, request)
+			appendSlice(service, "gpus", any(request))
 		case "detach", "name":
 		case "ignored":
 			warnings = append(warnings, types.Warning{Message: "ignored unsupported Docker flag " + flag.Value})
@@ -179,20 +172,7 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 		}
 	}
 
-	// docker run applies --ip and --network-alias to the user-defined network.
-	if len(endpoint) > 0 {
-		names, _ := service["networks"].([]string)
-		if len(names) == 0 {
-			warnings = append(warnings, types.Warning{Message: "ignored --ip/--network-alias without a user-defined --network"})
-		} else {
-			networkMap := make(map[string]any, len(names))
-			for _, network := range names {
-				networkMap[network] = map[string]any{}
-			}
-			networkMap[names[0]] = endpoint
-			service["networks"] = networkMap
-		}
-	}
+	warnings = append(warnings, applyServiceEndpoint(service, endpoint)...)
 
 	if len(cmd.Command) > 0 {
 		service["command"] = slices.Clone(cmd.Command)
@@ -201,21 +181,54 @@ func mapService(cmd types.RunCommand, networks, volumes map[string]map[string]an
 	return service, warnings, nil
 }
 
+// applyServiceEndpoint attaches --ip/--network-alias settings to the first user-defined network.
+func applyServiceEndpoint(service types.Service, endpoint map[string]any) []types.Warning {
+	if len(endpoint) == 0 {
+		return nil
+	}
+	names, _ := service["networks"].([]string)
+	if len(names) == 0 {
+		return []types.Warning{{Message: "ignored --ip/--network-alias without a user-defined --network"}}
+	}
+	networkMap := make(map[string]any, len(names))
+	for _, network := range names {
+		networkMap[network] = map[string]any{}
+	}
+	networkMap[names[0]] = endpoint
+	service["networks"] = networkMap
+	return nil
+}
+
+func appendSlice[T any](target map[string]any, key string, value T) {
+	values, _ := target[key].([]T)
+	target[key] = append(values, value)
+}
+
 func appendString(service types.Service, key, value string) {
 	if value == "" {
 		return
 	}
-	values, _ := service[key].([]string)
-	service[key] = append(values, value)
+	appendSlice(service, key, value)
 }
 
-func ensureNestedMap(parent map[string]any, key string) map[string]any {
-	if existing, ok := parent[key].(map[string]any); ok {
-		return existing
+func copyExistingDefinitions(dst map[string]map[string]any, existing map[string]any, key string) {
+	section, _ := existing[key].(map[string]any)
+	for name, definition := range section {
+		dst[name], _ = definition.(map[string]any)
 	}
-	next := make(map[string]any)
-	parent[key] = next
-	return next
+}
+
+func ensureNestedMap(parent map[string]any, keys ...string) map[string]any {
+	cur := parent
+	for _, key := range keys {
+		existing, ok := cur[key].(map[string]any)
+		if !ok {
+			existing = make(map[string]any)
+			cur[key] = existing
+		}
+		cur = existing
+	}
+	return cur
 }
 
 // mountVolume converts a docker run --mount value into a compose long-syntax
@@ -322,7 +335,7 @@ func registerVolume(volumes map[string]map[string]any, value string) error {
 	if err != nil {
 		return types.NewConversionError("invalid volume %q: %v", value, err)
 	}
-	if volume.Type != compose.VolumeTypeVolume || volume.Source == "" || strings.Contains(volume.Source, "$") {
+	if volume.Type != composeTypes.VolumeTypeVolume || volume.Source == "" || strings.Contains(volume.Source, "$") {
 		return nil
 	}
 	volumes[volume.Source] = map[string]any{"external": true}

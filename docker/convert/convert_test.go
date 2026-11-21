@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"kit.getarcane.app"
-
 	"kit.getarcane.app/docker/convert"
 	converttypes "kit.getarcane.app/docker/convert/types"
 )

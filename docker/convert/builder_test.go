@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	compose "github.com/compose-spec/compose-go/v2/types"
+	composeTypes "github.com/compose-spec/compose-go/v2/types"
 
 	"kit.getarcane.app/docker/convert"
 	converttypes "kit.getarcane.app/docker/convert/types"
@@ -169,13 +169,13 @@ func TestConvertMountsUseLongSyntax(t *testing.T) {
 
 func TestConvertGpusBecomeDeviceRequests(t *testing.T) {
 	tests := []struct {
-		want compose.DeviceRequest
+		want composeTypes.DeviceRequest
 		flag string
 	}{
-		{flag: "device=0", want: compose.DeviceRequest{Capabilities: []string{"gpu"}, IDs: []string{"0"}}},
-		{flag: "2", want: compose.DeviceRequest{Capabilities: []string{"gpu"}, Count: 2}},
-		{flag: `'"device=0,1",capabilities=compute'`, want: compose.DeviceRequest{Capabilities: []string{"compute"}, IDs: []string{"0", "1"}}},
-		{flag: "count=all,driver=nvidia", want: compose.DeviceRequest{Capabilities: []string{"gpu"}, Driver: "nvidia", Count: -1}},
+		{flag: "device=0", want: composeTypes.DeviceRequest{Capabilities: []string{"gpu"}, IDs: []string{"0"}}},
+		{flag: "2", want: composeTypes.DeviceRequest{Capabilities: []string{"gpu"}, Count: 2}},
+		{flag: `'"device=0,1",capabilities=compute'`, want: composeTypes.DeviceRequest{Capabilities: []string{"compute"}, IDs: []string{"0", "1"}}},
+		{flag: "count=all,driver=nvidia", want: composeTypes.DeviceRequest{Capabilities: []string{"gpu"}, Driver: "nvidia", Count: -1}},
 	}
 
 	for _, tt := range tests {

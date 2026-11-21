@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v4"
-	"kit.getarcane.app"
 
+	"kit.getarcane.app"
 	"kit.getarcane.app/docker/convert/types"
 )
 
@@ -133,31 +133,19 @@ func anyNode(value any) *yaml.Node {
 	case nil:
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
 	case []any:
-		var content []*yaml.Node
-		for _, item := range v {
-			content = append(content, anyNode(item))
-		}
-		return &yaml.Node{Kind: yaml.SequenceNode, Content: content}
+		return sequenceNode(v, anyNode)
 	case []string:
-		var content []*yaml.Node
-		for _, item := range v {
-			content = append(content, scalarNode(item))
-		}
-		return &yaml.Node{Kind: yaml.SequenceNode, Content: content}
+		return sequenceNode(v, scalarNode)
 	case map[string]any:
 		preferred := []string{"resources", "limits", "memory", "cpus", "soft", "hard", "driver", "options", "test"}
 		var content []*yaml.Node
-		for _, key := range slices.Concat(preferred, slices.DeleteFunc(slices.Sorted(maps.Keys(v)), func(name string) bool { return slices.Contains(preferred, name) })) {
-			item, ok := v[key]
-			if !ok {
-				continue
-			}
-			content = append(content, scalarNode(key), anyNode(item))
+		for _, key := range orderedKeys(v, preferred) {
+			content = append(content, scalarNode(key), anyNode(v[key]))
 		}
 		return new(yaml.Node{Kind: yaml.MappingNode, Content: content})
 	case types.Service:
 		var content []*yaml.Node
-		for _, key := range slices.Concat(serviceKeyOrder, slices.DeleteFunc(slices.Sorted(maps.Keys(v)), func(name string) bool { return slices.Contains(serviceKeyOrder, name) })) {
+		for _, key := range orderedKeys(v, serviceKeyOrder) {
 			if isZeroValue(v[key]) {
 				continue
 			}
@@ -167,6 +155,26 @@ func anyNode(value any) *yaml.Node {
 	default:
 		return &yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprintf("%v", v)}
 	}
+}
+
+func sequenceNode[T any](items []T, encode func(T) *yaml.Node) *yaml.Node {
+	content := make([]*yaml.Node, 0, len(items))
+	for _, item := range items {
+		content = append(content, encode(item))
+	}
+	return &yaml.Node{Kind: yaml.SequenceNode, Content: content}
+}
+
+func orderedKeys[M ~map[string]V, V any](m M, preferred []string) []string {
+	keys := make([]string, 0, len(m))
+	for _, key := range preferred {
+		if _, ok := m[key]; ok {
+			keys = append(keys, key)
+		}
+	}
+	return slices.Concat(keys, slices.DeleteFunc(slices.Sorted(maps.Keys(m)), func(name string) bool {
+		return slices.Contains(preferred, name)
+	}))
 }
 
 // scalarNode returns a string node. The encoder quotes it only when
