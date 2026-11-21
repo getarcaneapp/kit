@@ -26,7 +26,7 @@ func FetchTags(ctx context.Context, req Request) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	tags, err := remote.List(repo, remote.WithContext(ctx), remote.WithAuth(authenticator(req.Credential)), remote.WithTransport(baseTransport(req.HTTPClient)), remote.WithPageSize(tagsPageSize))
+	tags, err := remote.List(repo, remoteOptions(ctx, req, remote.WithPageSize(tagsPageSize))...)
 	if err != nil {
 		return nil, fmt.Errorf("list registry tags: %w", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+
 	"kit.getarcane.app"
 	kitregistry "kit.getarcane.app/registry"
 )
@@ -87,15 +88,17 @@ func FetchRegistryRateLimit(ctx context.Context, req Request) (*RateLimitInfo, e
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	repo, err := parseRepository(req.Host, req.Repository)
+	repo, ref, err := parseTag(req)
 	if err != nil {
 		return nil, err
 	}
-	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(req.Tag))
-	if err != nil {
-		return nil, fmt.Errorf("parse image tag: %w", err)
-	}
-	authorized, err := transport.NewWithContext(requestCtx, repo.Registry, authenticator(req.Credential), baseTransport(req.HTTPClient), []string{repo.Scope(transport.PullScope)})
+	authorized, err := transport.NewWithContext(
+		requestCtx,
+		repo.Registry,
+		authenticator(req.Credential),
+		cmp.Or(kit.FromPtr(req.HTTPClient).Transport, http.DefaultTransport),
+		[]string{repo.Scope(transport.PullScope)},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("authorize registry: %w", err)
 	}
@@ -145,15 +148,11 @@ func FetchDigest(ctx context.Context, req Request) (string, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	repo, err := parseRepository(req.Host, req.Repository)
+	_, ref, err := parseTag(req)
 	if err != nil {
 		return "", err
 	}
-	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(req.Tag))
-	if err != nil {
-		return "", fmt.Errorf("parse image tag: %w", err)
-	}
-	options := []remote.Option{remote.WithContext(requestCtx), remote.WithAuth(authenticator(req.Credential)), remote.WithTransport(baseTransport(req.HTTPClient))}
+	options := remoteOptions(requestCtx, req)
 
 	// HEAD does not count as a pull. Fall back to GET only when the registry
 	// answered without a digest header, since GET computes it from the manifest.
@@ -171,6 +170,26 @@ func FetchDigest(ctx context.Context, req Request) (string, error) {
 	return desc.Digest.String(), nil
 }
 
+func parseTag(req Request) (name.Repository, name.Tag, error) {
+	repo, err := parseRepository(req.Host, req.Repository)
+	if err != nil {
+		return name.Repository{}, name.Tag{}, err
+	}
+	ref, err := name.NewTag(repo.Name() + ":" + strings.TrimSpace(req.Tag))
+	if err != nil {
+		return name.Repository{}, name.Tag{}, fmt.Errorf("parse image tag: %w", err)
+	}
+	return repo, ref, nil
+}
+
+func remoteOptions(ctx context.Context, req Request, extra ...remote.Option) []remote.Option {
+	return append([]remote.Option{
+		remote.WithContext(ctx),
+		remote.WithAuth(authenticator(req.Credential)),
+		remote.WithTransport(cmp.Or(kit.FromPtr(req.HTTPClient).Transport, http.DefaultTransport)),
+	}, extra...)
+}
+
 func parseRepository(registryHost, repository string) (name.Repository, error) {
 	registryHost = kitregistry.Normalize(registryHost)
 	if registryHost == "docker.io" {
@@ -181,10 +200,6 @@ func parseRepository(registryHost, repository string) (name.Repository, error) {
 		return name.Repository{}, fmt.Errorf("parse registry repository: %w", err)
 	}
 	return repo, nil
-}
-
-func baseTransport(httpClient *http.Client) http.RoundTripper {
-	return cmp.Or(kit.FromPtr(httpClient).Transport, http.DefaultTransport)
 }
 
 func authenticator(credential *authn.AuthConfig) authn.Authenticator {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 
@@ -28,10 +29,12 @@ type (
 
 	defaultImagePuller struct {
 		dockerClientProvider DockerClientProvider
+		logger               *slog.Logger
 	}
 
 	defaultRegistryDigestResolver struct {
 		httpClient *http.Client
+		logger     *slog.Logger
 	}
 )
 
@@ -106,7 +109,7 @@ func (p defaultImagePuller) PullImage(ctx context.Context, imageRef string, prog
 	if err != nil {
 		return fmt.Errorf("docker connect: %w", err)
 	}
-	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
+	authConfig, ok, err := defaultDockerConfigRegistryAuthConfig(ctx, p.logger, imageRef)
 	if err != nil {
 		return fmt.Errorf("registry auth: %w", err)
 	}
@@ -156,25 +159,33 @@ func (p defaultImagePuller) PullImage(ctx context.Context, imageRef string, prog
 }
 
 func (r defaultRegistryDigestResolver) ImageDigest(ctx context.Context, imageRef string) (string, error) {
-	parsed, err := refs.NormalizeReference(imageRef)
+	req, err := defaultRegistryRequest(ctx, r.logger, imageRef, r.httpClient)
 	if err != nil {
 		return "", err
 	}
-	// With no usable credential this is the zero AuthConfig, which registry treats as anonymous.
-	authConfig, _, err := defaultDockerConfigRegistryAuthConfig(ctx, imageRef)
+	return registry.FetchDigest(ctx, req)
+}
+
+func defaultRegistryRequest(ctx context.Context, logger *slog.Logger, imageRef string, httpClient *http.Client) (registry.Request, error) {
+	parsed, err := refs.NormalizeReference(imageRef)
 	if err != nil {
-		return "", fmt.Errorf("registry auth: %w", err)
+		return registry.Request{}, err
 	}
-	return registry.FetchDigest(ctx, registry.Request{
+	// With no usable credential this is the zero AuthConfig, which registry treats as anonymous.
+	authConfig, _, err := defaultDockerConfigRegistryAuthConfig(ctx, logger, imageRef)
+	if err != nil {
+		return registry.Request{}, fmt.Errorf("registry auth: %w", err)
+	}
+	return registry.Request{
 		Credential: &authn.AuthConfig{
 			Username:      authConfig.Username,
 			Password:      authConfig.Password,
 			IdentityToken: authConfig.IdentityToken,
 			RegistryToken: authConfig.RegistryToken,
 		},
-		HTTPClient: r.httpClient,
+		HTTPClient: httpClient,
 		Host:       parsed.RegistryHost,
 		Repository: parsed.Repository,
 		Tag:        parsed.Tag,
-	})
+	}, nil
 }

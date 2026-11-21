@@ -1,6 +1,7 @@
 package deps
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -8,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
-	"kit.getarcane.app"
 
+	"kit.getarcane.app"
 	"kit.getarcane.app/updater/labels"
 )
 
@@ -63,7 +64,7 @@ func (s *ContainerSorter) Sort() ([]ContainerWithDeps, error) {
 
 // ExtractContainerDeps extracts dependency information from a container
 // inspect response, keyed by the caller's display name for the container.
-func ExtractContainerDeps(ctx context.Context, name string, cnt container.Summary, inspect container.InspectResponse) ContainerWithDeps {
+func ExtractContainerDeps(ctx context.Context, logger *slog.Logger, name string, cnt container.Summary, inspect container.InspectResponse) ContainerWithDeps {
 	var links []string
 	for _, link := range kit.FromPtr(inspect.HostConfig).Links {
 		linkName, _, _ := strings.Cut(link, ":")
@@ -83,7 +84,7 @@ func ExtractContainerDeps(ctx context.Context, name string, cnt container.Summar
 		),
 	}
 
-	slog.DebugContext(ctx, "ExtractContainerDeps: extracted dependencies", "container", c.Name, "links", c.Links, "dependsOn", c.DependsOn, "networkDeps", c.NetworkDeps)
+	cmp.Or(logger, slog.Default()).DebugContext(ctx, "ExtractContainerDeps: extracted dependencies", "container", c.Name, "links", c.Links, "dependsOn", c.DependsOn, "networkDeps", c.NetworkDeps)
 	return c
 }
 

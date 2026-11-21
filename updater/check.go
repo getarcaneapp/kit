@@ -8,9 +8,9 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
 	"kit.getarcane.app"
 	"kit.getarcane.app/docker/compat"
-
 	"kit.getarcane.app/updater/digest"
 	"kit.getarcane.app/updater/internal/digestcheck"
 	"kit.getarcane.app/updater/pkg/utils/tagpolicy"
@@ -56,7 +56,11 @@ func (s *Service) CheckImageUpdate(ctx context.Context, request types.CheckReque
 	if err != nil {
 		return digestResult("", "", false), err
 	}
-	check := digestcheck.NewChecker(dockerClient, s.config.RegistryDigestResolver).CheckImageNeedsUpdate(ctx, result.CurrentRef)
+	check := digestcheck.NewChecker(digestcheck.CheckerConfig{
+		DockerClient:   dockerClient,
+		DigestResolver: s.config.RegistryDigestResolver,
+		Logger:         s.logger,
+	}).CheckImageNeedsUpdate(ctx, result.CurrentRef)
 	return digestResult(check.LocalDigest, check.RemoteDigest, check.Error == nil && check.NeedsUpdate), check.Error
 }
 

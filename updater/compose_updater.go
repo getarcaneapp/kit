@@ -10,8 +10,9 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
-	"kit.getarcane.app"
 
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker"
 	"kit.getarcane.app/updater/internal/compose"
 )
 
@@ -97,7 +98,7 @@ func (u dockerComposeProjectUpdater) resolveProjectMetadata(ctx context.Context,
 		return dockerComposeProjectMetadata{}, fmt.Errorf("docker connect: %w", err)
 	}
 
-	filters := make(client.Filters).Add("label", compose.ProjectLabelKey+"="+composeName, compose.ServiceContainerFilter)
+	filters := make(client.Filters).Add("label", docker.ComposeProjectLabelKey+"="+composeName, compose.ServiceContainerFilter)
 	containers, err := dockerClient.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
 	if err != nil {
 		return dockerComposeProjectMetadata{}, fmt.Errorf("list compose containers: %w", err)

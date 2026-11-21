@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -15,7 +16,8 @@ import (
 
 // defaultDockerConfigRegistryAuthConfig loads usable Docker config credentials for imageRef's registry,
 // reporting false when the request should go out anonymously.
-func defaultDockerConfigRegistryAuthConfig(ctx context.Context, imageRef string) (dockerregistry.AuthConfig, bool, error) {
+func defaultDockerConfigRegistryAuthConfig(ctx context.Context, logger *slog.Logger, imageRef string) (dockerregistry.AuthConfig, bool, error) {
+	logger = cmp.Or(logger, slog.Default())
 	parsed, err := refs.NormalizeReference(imageRef)
 	if err != nil {
 		return dockerregistry.AuthConfig{}, false, fmt.Errorf("get registry address: %w", err)
@@ -27,7 +29,7 @@ func defaultDockerConfigRegistryAuthConfig(ctx context.Context, imageRef string)
 
 	authConfig, err := configFile.GetAuthConfig(parsed.RegistryHost)
 	if err != nil {
-		slog.DebugContext(ctx, "registry credentials unavailable; proceeding anonymously", "imageRef", imageRef, "reason", "credential lookup failed", "error", err)
+		logger.DebugContext(ctx, "registry credentials unavailable; proceeding anonymously", "imageRef", imageRef, "reason", "credential lookup failed", "error", err)
 		return dockerregistry.AuthConfig{}, false, nil
 	}
 	// docker/cli decodes "auth" into Username and Password when it loads the config.
@@ -40,7 +42,7 @@ func defaultDockerConfigRegistryAuthConfig(ctx context.Context, imageRef string)
 		RegistryToken: strings.TrimSpace(authConfig.RegistryToken),
 	}
 	if (credential.Username == "" || credential.Password == "") && credential.IdentityToken == "" && credential.RegistryToken == "" {
-		slog.DebugContext(ctx, "registry credentials unavailable; proceeding anonymously", "imageRef", imageRef, "reason", "no usable username/password or token")
+		logger.DebugContext(ctx, "registry credentials unavailable; proceeding anonymously", "imageRef", imageRef, "reason", "no usable username/password or token")
 		return dockerregistry.AuthConfig{}, false, nil
 	}
 	return credential, true, nil

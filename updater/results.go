@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
-	"kit.getarcane.app"
 
+	"kit.getarcane.app"
 	"kit.getarcane.app/updater/labels"
 	"kit.getarcane.app/updater/refs"
 )
@@ -46,22 +46,12 @@ func (s *Service) appendRecordedResult(ctx context.Context, out *Result, item Re
 	}
 }
 
-func failedContainerResult(id, name, message string) ResourceResult {
+func containerResult(id, name string, status ResourceStatus, message string) ResourceResult {
 	return ResourceResult{
 		ResourceID:   id,
 		ResourceName: name,
 		ResourceType: ResourceTypeContainer,
-		Status:       StatusFailed,
-		Error:        message,
-	}
-}
-
-func skippedContainerResult(id, name, message string) ResourceResult {
-	return ResourceResult{
-		ResourceID:   id,
-		ResourceName: name,
-		ResourceType: ResourceTypeContainer,
-		Status:       StatusSkipped,
+		Status:       status,
 		Error:        message,
 	}
 }

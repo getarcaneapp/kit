@@ -10,8 +10,8 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"kit.getarcane.app/docker/compat"
 
+	"kit.getarcane.app/docker/compat"
 	"kit.getarcane.app/updater/internal/deps"
 	"kit.getarcane.app/updater/pkg/utils/tagpolicy"
 	"kit.getarcane.app/updater/refs"
@@ -161,7 +161,7 @@ func (s *Service) collectImplicitCandidates(
 		}
 		pinNetworkContainer(&inspected, listed)
 		plansByName[name] = &restartPlan{cnt: cnt, inspect: &inspected}
-		implicit = append(implicit, deps.ExtractContainerDeps(ctx, name, cnt, inspected))
+		implicit = append(implicit, deps.ExtractContainerDeps(ctx, s.logger, name, cnt, inspected))
 	}
 	return implicit
 }
@@ -195,7 +195,7 @@ func (s *Service) collectTargetRecord(
 		if inspectErr != nil {
 			// An unscoped record cannot safely be cleared after an incomplete scan.
 			failed = true
-			s.appendRecordedResult(ctx, out, failedContainerResult(cnt.ID, name, inspectErr.Error()))
+			s.appendRecordedResult(ctx, out, containerResult(cnt.ID, name, StatusFailed, inspectErr.Error()))
 			continue
 		}
 		if record.ContainerID == "" && (inspect.Config == nil || refs.NormalizeImageUpdateRef(inspect.Config.Image) != recordRef) {
@@ -203,7 +203,7 @@ func (s *Service) collectTargetRecord(
 		}
 		if proxy != "" && name == proxy {
 			failed = true
-			s.appendRecordedResult(ctx, out, skippedContainerResult(cnt.ID, proxy, "Docker proxy excluded from pending updates"))
+			s.appendRecordedResult(ctx, out, containerResult(cnt.ID, proxy, StatusSkipped, "Docker proxy excluded from pending updates"))
 			continue
 		}
 		targets = append(targets, cnt.ID)
@@ -211,9 +211,9 @@ func (s *Service) collectTargetRecord(
 		if planErr != nil || reason != "" {
 			failed = true
 			if reason != "" {
-				s.appendRecordedResult(ctx, out, skippedContainerResult(cnt.ID, name, reason))
+				s.appendRecordedResult(ctx, out, containerResult(cnt.ID, name, StatusSkipped, reason))
 			} else {
-				s.appendRecordedResult(ctx, out, failedContainerResult(cnt.ID, name, planErr.Error()))
+				s.appendRecordedResult(ctx, out, containerResult(cnt.ID, name, StatusFailed, planErr.Error()))
 			}
 			continue
 		}
@@ -225,11 +225,11 @@ func (s *Service) collectTargetRecord(
 		}
 		pinNetworkContainer(plan.inspect, containers)
 		plansByName[name] = plan
-		planned = append(planned, deps.ExtractContainerDeps(ctx, name, cnt, *plan.inspect))
+		planned = append(planned, deps.ExtractContainerDeps(ctx, s.logger, name, cnt, *plan.inspect))
 		markedForRestart[name] = true
 	}
 	if len(targets) == 0 {
-		s.appendRecordedResult(ctx, out, skippedContainerResult(record.ContainerID, record.ImageRef(), "pending update has no matching container"))
+		s.appendRecordedResult(ctx, out, containerResult(record.ContainerID, record.ImageRef(), StatusSkipped, "pending update has no matching container"))
 	}
 	return targetedRecord{
 		record:  record,

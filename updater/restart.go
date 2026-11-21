@@ -9,10 +9,10 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"kit.getarcane.app"
-	"kit.getarcane.app/docker/compat"
 
-	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker"
+	"kit.getarcane.app/docker/compat"
 	"kit.getarcane.app/updater/internal/deps"
 	"kit.getarcane.app/updater/internal/digestcheck"
 	"kit.getarcane.app/updater/internal/match"
@@ -58,7 +58,7 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, targets R
 	proxy := dockerProxyContainerName(dockerClient.DaemonHost())
 
 	updatedNorm := refs.NormalizeImageUpdateRefMapKeys(targets.ByOldRef)
-	targetImageIDs := digestcheck.NewRefIDCache(digestcheck.NewChecker(dockerClient, nil))
+	targetImageIDs := digestcheck.NewRefIDCache(digestcheck.NewChecker(digestcheck.CheckerConfig{DockerClient: dockerClient, Logger: s.logger}))
 	policy := s.config.LabelPolicy
 	plansByName, markedForRestart := map[string]*restartPlan{}, map[string]bool{}
 	var containers []deps.ContainerWithDeps
@@ -112,7 +112,7 @@ func (s *Service) RestartContainersUsingOldImages(ctx context.Context, targets R
 			plan.inspect = new(withConfiguredImage(inspectResult.Container))
 		}
 		pinNetworkContainer(plan.inspect, listResult.Items)
-		containers[i] = deps.ExtractContainerDeps(ctx, scanned.Name, scanned.Container, *plan.inspect)
+		containers[i] = deps.ExtractContainerDeps(ctx, s.logger, scanned.Name, scanned.Container, *plan.inspect)
 	}
 	scan := &restartScan{
 		plansByName:      plansByName,
@@ -195,7 +195,7 @@ func partitionRestartUnits(scan *restartScan) [][]deps.ContainerWithDeps {
 			union(candidate.Name, dep)
 		}
 		plan := kit.FromPtr(scan.plansByName[candidate.Name])
-		project := cmp.Or(compose.ProjectLabel(labelsFromInspect(kit.FromPtr(plan.inspect))), compose.ProjectLabel(candidate.Container.Labels))
+		project := cmp.Or(docker.ComposeProjectLabel(labelsFromInspect(kit.FromPtr(plan.inspect))), docker.ComposeProjectLabel(candidate.Container.Labels))
 		for _, key := range []string{
 			kit.Ternary(project != "", "project:"+project, ""),
 			kit.Ternary(scan.markedForRestart[candidate.Name] && plan.newRef != "", "ref:"+plan.newRef, ""),
@@ -250,7 +250,7 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 		if plan.inspect == nil {
 			inspectResult, inspectErr := compat.ContainerInspectWithCompatibility(ctx, dockerClient, plan.cnt.ID, client.ContainerInspectOptions{})
 			if inspectErr != nil {
-				results = append(results, failedContainerResult(plan.cnt.ID, candidate.Name, fmt.Sprintf("inspect failed: %v", inspectErr)))
+				results = append(results, containerResult(plan.cnt.ID, candidate.Name, StatusFailed, fmt.Sprintf("inspect failed: %v", inspectErr)))
 				continue
 			}
 			plan.inspect = new(withConfiguredImage(inspectResult.Container))
@@ -268,7 +268,7 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 		}
 		endContainerUpdates = append(endContainerUpdates, endContainerUpdate)
 		labels := labelsFromInspect(*plan.inspect)
-		projectName := compose.ProjectLabel(labels)
+		projectName := docker.ComposeProjectLabel(labels)
 		endProjectStatus := s.BeginProjectUpdate(projectName)
 		projectID := ""
 		for id, group := range composeGroups {
@@ -283,7 +283,7 @@ func (s *Service) executeRestartPlans(ctx context.Context, dockerClient *client.
 			selfUpdateIndexes = append(selfUpdateIndexes, len(results))
 		case isComposeTagChange(plan.inspect, plan.newRef) && projectID == "":
 			res = standaloneRestartResult(candidate.Name, plan, StatusFailed, "compose tag update project could not be resolved")
-		case projectID != "" && compose.ServiceLabel(labels) != "":
+		case projectID != "" && docker.ComposeServiceLabel(labels) != "":
 			res = s.applyComposeServiceUpdate(ctx, dockerClient, candidate.Name, plan, projectID, composeGroups[projectID], projectErrs)
 		default:
 			standaloneIndexes[candidate.Name] = len(results)
@@ -379,7 +379,7 @@ func (s *Service) applyComposeServiceUpdate(
 	}
 
 	labels := labelsFromInspect(*plan.inspect)
-	projectName, serviceName := compose.ProjectLabel(labels), compose.ServiceLabel(labels)
+	projectName, serviceName := docker.ComposeProjectLabel(labels), docker.ComposeServiceLabel(labels)
 	if group.tagChanges && projectErr != nil {
 		return standaloneRestartResult(name, plan, StatusFailed, projectErr.Error())
 	}

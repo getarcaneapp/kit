@@ -20,9 +20,10 @@ import (
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
-	"kit.getarcane.app"
-	"kit.getarcane.app/docker/compat"
 
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker"
+	"kit.getarcane.app/docker/compat"
 	"kit.getarcane.app/updater/internal/compose"
 	"kit.getarcane.app/updater/internal/digestcheck"
 	"kit.getarcane.app/updater/labels"
@@ -52,18 +53,18 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	name := containerSummaryName(target)
 	endContainerUpdate, err := s.BeginContainerUpdate(target.ID)
 	if err != nil {
-		appendResult(out, skippedContainerResult(target.ID, name, err.Error()))
+		appendResult(out, containerResult(target.ID, name, StatusSkipped, err.Error()))
 		return out, nil
 	}
 	defer endContainerUpdate()
 	inspectResult, err := compat.ContainerInspectWithCompatibility(ctx, dockerClient, target.ID, client.ContainerInspectOptions{})
 	if err != nil {
-		appendResult(out, failedContainerResult(target.ID, name, fmt.Sprintf("inspect failed: %v", err)))
+		appendResult(out, containerResult(target.ID, name, StatusFailed, fmt.Sprintf("inspect failed: %v", err)))
 		return out, nil
 	}
 	inspect := withConfiguredImage(inspectResult.Container)
 	containerLabels := labelsFromInspect(inspect)
-	defer s.BeginProjectUpdate(compose.ProjectLabel(containerLabels))()
+	defer s.BeginProjectUpdate(docker.ComposeProjectLabel(containerLabels))()
 
 	excluded, err := s.excludedContainerSet(ctx, exclusionPolicy(!opts.IgnoreSettingsExclusions))
 	if err != nil {
@@ -74,7 +75,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		reason = "immutable image reference"
 	}
 	if reason != "" {
-		appendResult(out, skippedContainerResult(target.ID, name, reason))
+		appendResult(out, containerResult(target.ID, name, StatusSkipped, reason))
 		return out, nil
 	}
 	imageRef := refs.PullableImageRef(target.Image, inspect.Config.Image, nil)
@@ -85,19 +86,19 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	}
 	normalizedRef := refs.NormalizeImageUpdateRef(imageRef)
 	if normalizedRef == "" {
-		appendResult(out, skippedContainerResult(target.ID, name, "unable to resolve a pullable image reference for container"))
+		appendResult(out, containerResult(target.ID, name, StatusSkipped, "unable to resolve a pullable image reference for container"))
 		return out, nil
 	}
 
 	selection, selectionErr := s.selectImageTag(ctx, "", normalizedRef, s.config.LabelPolicy.TagPolicy(containerLabels))
 	if selectionErr != nil {
-		appendResult(out, failedContainerResult(target.ID, name, selectionErr.Error()))
+		appendResult(out, containerResult(target.ID, name, StatusFailed, selectionErr.Error()))
 		return out, nil
 	}
 	tagChanged := selection.UpdateAvailable && selection.UpdateType == string(UpdateTypeTag)
 	normalizedRef = selection.TargetRef
 	if _, preflightErr := s.preflightComposeImage(ctx, target.ID, inspect, normalizedRef); preflightErr != nil {
-		appendResult(out, failedContainerResult(target.ID, name, preflightErr.Error()))
+		appendResult(out, containerResult(target.ID, name, StatusFailed, preflightErr.Error()))
 		return out, nil
 	}
 	if opts.DryRun {
@@ -114,17 +115,17 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	}
 
 	if pullErr := s.config.ImagePuller.PullImage(ctx, normalizedRef, io.Discard); pullErr != nil {
-		appendResult(out, failedContainerResult(target.ID, name, fmt.Sprintf("pull failed: %v", pullErr)))
+		appendResult(out, containerResult(target.ID, name, StatusFailed, fmt.Sprintf("pull failed: %v", pullErr)))
 		return out, nil
 	}
 
-	changed, compareErr := digestcheck.NewChecker(dockerClient, nil).CompareWithPulled(ctx, inspect.Image, normalizedRef)
+	changed, compareErr := digestcheck.NewChecker(digestcheck.CheckerConfig{DockerClient: dockerClient, Logger: s.logger}).CompareWithPulled(ctx, inspect.Image, normalizedRef)
 	if compareErr != nil && tagChanged {
-		appendResult(out, failedContainerResult(target.ID, name, compareErr.Error()))
+		appendResult(out, containerResult(target.ID, name, StatusFailed, compareErr.Error()))
 		return out, nil
 	}
 	if compareErr == nil && !changed && !opts.Force && !tagChanged {
-		appendResult(out, skippedContainerResult(target.ID, name, "image digest unchanged after pull"))
+		appendResult(out, containerResult(target.ID, name, StatusSkipped, "image digest unchanged after pull"))
 		s.clearPendingRecord(ctx, target.ID, normalizedRef)
 		return out, nil
 	}
@@ -137,7 +138,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		return s.updateComposeOrStandalone(ctx, target, inspect, normalizedRef)
 	}()
 	if updateErr != nil {
-		appendResult(out, failedContainerResult(target.ID, name, updateErr.Error()))
+		appendResult(out, containerResult(target.ID, name, StatusFailed, updateErr.Error()))
 		return out, nil
 	}
 	appendResult(out, ResourceResult{
@@ -188,7 +189,7 @@ func (s *Service) updateComposeOrStandalone(ctx context.Context, target containe
 	if s.isSelfUpdateCandidate(target.ID, containerLabels) {
 		return ErrSelfUpdateContainer
 	}
-	projectName, serviceName := compose.ProjectLabel(containerLabels), compose.ServiceLabel(containerLabels)
+	projectName, serviceName := docker.ComposeProjectLabel(containerLabels), docker.ComposeServiceLabel(containerLabels)
 	if isComposeTagChange(&inspect, newRef) {
 		projectID, err := s.preflightComposeImage(ctx, target.ID, inspect, newRef)
 		if err != nil {

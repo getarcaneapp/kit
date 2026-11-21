@@ -3,6 +3,7 @@
 package digestcheck
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,9 +12,9 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
+
 	"kit.getarcane.app"
 	"kit.getarcane.app/cache"
-
 	"kit.getarcane.app/updater/digest"
 	"kit.getarcane.app/updater/refs"
 )
@@ -25,10 +26,18 @@ type (
 		ImageDigest(ctx context.Context, imageRef string) (string, error)
 	}
 
+	// CheckerConfig configures a digest Checker.
+	CheckerConfig struct {
+		DockerClient   *client.Client
+		DigestResolver Resolver
+		Logger         *slog.Logger
+	}
+
 	// Checker compares local image digests with remote digests.
 	Checker struct {
 		dockerClient   *client.Client
 		digestResolver Resolver
+		logger         *slog.Logger
 	}
 
 	// CheckResult contains the result of a digest check.
@@ -47,10 +56,14 @@ type (
 	}
 )
 
-// NewChecker creates a digest checker. Both arguments are optional; checks that
-// need a missing one report an error.
-func NewChecker(dockerClient *client.Client, digestResolver Resolver) *Checker {
-	return &Checker{dockerClient: dockerClient, digestResolver: digestResolver}
+// NewChecker creates a digest checker. Missing dependencies cause checks that
+// need them to report an error; a nil Logger falls back to slog.Default().
+func NewChecker(cfg CheckerConfig) *Checker {
+	return &Checker{
+		dockerClient:   cfg.DockerClient,
+		digestResolver: cfg.DigestResolver,
+		logger:         cmp.Or(cfg.Logger, slog.Default()),
+	}
 }
 
 // RepoDigests returns the normalized digests in repoDigests that belong to
@@ -81,15 +94,11 @@ func (c *Checker) CheckImageNeedsUpdate(ctx context.Context, imageRef string) Ch
 		return CheckResult{Error: errors.New("docker client unavailable")}
 	}
 
-	slog.DebugContext(ctx, "CheckImageNeedsUpdate: checking image", "imageRef", imageRef, "normalizedRef", refs.NormalizeImageUpdateRef(imageRef))
+	c.logger.DebugContext(ctx, "CheckImageNeedsUpdate: checking image", "imageRef", imageRef, "normalizedRef", refs.NormalizeImageUpdateRef(imageRef))
 
-	inspect, err := c.dockerClient.ImageInspect(ctx, imageRef)
+	localDigests, err := c.localDigests(ctx, imageRef)
 	if err != nil {
 		return CheckResult{NeedsUpdate: true, Error: fmt.Errorf("image not found locally: %w", err)}
-	}
-	localDigests := RepoDigests(inspect.RepoDigests, imageRef)
-	if len(localDigests) == 0 && inspect.ID != "" {
-		localDigests = []string{inspect.ID}
 	}
 	if len(localDigests) == 0 {
 		return CheckResult{NeedsUpdate: true, Error: errors.New("no digest available for image")}
@@ -124,7 +133,7 @@ func (c *Checker) CheckImageMatchesKnownDigest(ctx context.Context, imageRef, kn
 		return CheckResult{RemoteDigest: normalizedDigest, Error: errors.New("docker client unavailable")}
 	}
 
-	inspect, err := c.dockerClient.ImageInspect(ctx, imageRef)
+	localDigests, err := c.localDigests(ctx, imageRef)
 	if err != nil {
 		return CheckResult{
 			NeedsUpdate:  true,
@@ -133,15 +142,30 @@ func (c *Checker) CheckImageMatchesKnownDigest(ctx context.Context, imageRef, kn
 		}
 	}
 
-	localDigests := RepoDigests(inspect.RepoDigests, imageRef)
-	if len(localDigests) == 0 {
-		localDigests = []string{strings.TrimSpace(inspect.ID)}
+	matched := slices.Contains(localDigests, normalizedDigest)
+	firstDigest := ""
+	if len(localDigests) > 0 {
+		firstDigest = localDigests[0]
 	}
 	return CheckResult{
-		NeedsUpdate:  !slices.Contains(localDigests, normalizedDigest),
-		LocalDigest:  kit.Ternary(slices.Contains(localDigests, normalizedDigest), normalizedDigest, localDigests[0]),
+		NeedsUpdate:  !matched,
+		LocalDigest:  kit.Ternary(matched, normalizedDigest, firstDigest),
 		RemoteDigest: normalizedDigest,
 	}
+}
+
+func (c *Checker) localDigests(ctx context.Context, imageRef string) ([]string, error) {
+	inspect, err := c.dockerClient.ImageInspect(ctx, imageRef)
+	if err != nil {
+		return nil, err
+	}
+	localDigests := RepoDigests(inspect.RepoDigests, imageRef)
+	if len(localDigests) == 0 {
+		if id := strings.TrimSpace(inspect.ID); id != "" {
+			localDigests = []string{id}
+		}
+	}
+	return localDigests, nil
 }
 
 // CompareWithPulled compares the current container image ID with a freshly pulled image.

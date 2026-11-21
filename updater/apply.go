@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/moby/moby/client"
+
 	"kit.getarcane.app"
 	"kit.getarcane.app/docker/compat"
-
 	"kit.getarcane.app/updater/internal/digestcheck"
 	"kit.getarcane.app/updater/internal/match"
 	"kit.getarcane.app/updater/refs"
@@ -40,7 +40,11 @@ func (s *Service) ApplyPending(ctx context.Context, opts Options) (out *Result, 
 	}
 
 	dockerClient, dockerErr := s.dockerClient(ctx)
-	digestChecker := digestcheck.NewChecker(dockerClient, s.config.RegistryDigestResolver)
+	digestChecker := digestcheck.NewChecker(digestcheck.CheckerConfig{
+		DockerClient:   dockerClient,
+		DigestResolver: s.config.RegistryDigestResolver,
+		Logger:         s.logger,
+	})
 	var plans []updatePlan
 	for _, record := range records {
 		oldRef := record.ImageRef()

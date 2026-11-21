@@ -8,9 +8,10 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"kit.getarcane.app"
-	"kit.getarcane.app/docker/compat"
 
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker"
+	"kit.getarcane.app/docker/compat"
 	"kit.getarcane.app/updater/internal/compose"
 	"kit.getarcane.app/updater/refs"
 	updatetypes "kit.getarcane.app/updater/types"
@@ -23,7 +24,7 @@ func (s *Service) preflightComposeImage(ctx context.Context, containerID string,
 	if s.isSelfUpdateCandidate(containerID, labels) || !isComposeTagChange(&inspect, newRef) {
 		return "", nil
 	}
-	projectName, serviceName := compose.ProjectLabel(labels), compose.ServiceLabel(labels)
+	projectName, serviceName := docker.ComposeProjectLabel(labels), docker.ComposeServiceLabel(labels)
 	if projectName == "" || serviceName == "" {
 		return "", errors.New("compose tag update requires project and service labels")
 	}
@@ -45,7 +46,7 @@ func (s *Service) preflightComposeImage(ctx context.Context, containerID string,
 func isComposeTagChange(inspect *container.InspectResponse, newRef string) bool {
 	config := kit.FromPtr(kit.FromPtr(inspect).Config)
 	return refs.NormalizeImageUpdateRef(config.Image) != refs.NormalizeImageUpdateRef(newRef) &&
-		(compose.ProjectLabel(config.Labels) != "" || compose.ServiceLabel(config.Labels) != "")
+		(docker.ComposeProjectLabel(config.Labels) != "" || docker.ComposeServiceLabel(config.Labels) != "")
 }
 
 // verifyComposeService checks that a service has running containers that run targetRef or, without a
@@ -61,7 +62,7 @@ func verifyComposeService(ctx context.Context, dockerClient *client.Client, proj
 			return errors.New("verify compose service: target image has no image ID")
 		}
 	}
-	filters := make(client.Filters).Add("label", compose.ProjectLabelKey+"="+projectName, compose.ServiceLabelKey+"="+serviceName, compose.ServiceContainerFilter)
+	filters := make(client.Filters).Add("label", docker.ComposeProjectLabelKey+"="+projectName, docker.ComposeServiceLabelKey+"="+serviceName, compose.ServiceContainerFilter)
 	containers, err := dockerClient.ContainerList(ctx, client.ContainerListOptions{Filters: filters})
 	if err != nil {
 		return fmt.Errorf("verify compose service: list service containers: %w", err)

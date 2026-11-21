@@ -17,7 +17,7 @@ import (
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 
-	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/docker"
 	"kit.getarcane.app/updater/internal/deps"
 	"kit.getarcane.app/updater/labels"
 	updatetypes "kit.getarcane.app/updater/types"
@@ -74,7 +74,7 @@ func (f *targetedDocker) handler(t *testing.T) http.HandlerFunc {
 			var summaries []container.Summary
 			for _, cnt := range f.containers {
 				filter := r.URL.Query().Get("filters")
-				if filter != "" && !strings.Contains(filter, compose.ServiceLabelKey+"="+cnt.Config.Labels[compose.ServiceLabelKey]) {
+				if filter != "" && !strings.Contains(filter, docker.ComposeServiceLabelKey+"="+cnt.Config.Labels[docker.ComposeServiceLabelKey]) {
 					continue
 				}
 				state := container.StateExited
@@ -219,8 +219,8 @@ func TestApplyPendingTargetedRetainsRejected(t *testing.T) {
 		{name: "changed constraint", change: func(c *container.InspectResponse) { c.Config.Labels[labels.LabelUpdateConstraint] = "<1.1.0" }},
 		{name: "changed strategy", change: func(c *container.InspectResponse) { c.Config.Labels[labels.LabelUpdateStrategy] = "digest" }},
 		{name: "unsupported compose", change: func(c *container.InspectResponse) {
-			c.Config.Labels[compose.ProjectLabelKey] = "app"
-			c.Config.Labels[compose.ServiceLabelKey] = "web"
+			c.Config.Labels[docker.ComposeProjectLabelKey] = "app"
+			c.Config.Labels[docker.ComposeServiceLabelKey] = "web"
 		}},
 		{name: "pull failure", pullError: true, wantPulls: 1},
 	} {
@@ -268,7 +268,7 @@ func (f *targetedComposeAdapter) UpdateServiceImages(_ context.Context, projectI
 	defer f.fixture.mu.Unlock()
 	for i := range f.fixture.containers {
 		cnt := &f.fixture.containers[i]
-		if change, ok := changes[cnt.Config.Labels[compose.ServiceLabelKey]]; ok {
+		if change, ok := changes[cnt.Config.Labels[docker.ComposeServiceLabelKey]]; ok {
 			cnt.Config.Image = change.TargetRef
 		}
 	}
@@ -285,11 +285,11 @@ func TestApplyPendingTargetedComposeGroups(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fixture := &targetedDocker{containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", "1.x")}, created: map[string]string{}}
 			for i := range fixture.containers {
-				fixture.containers[i].Config.Labels[compose.ProjectLabelKey] = "app"
-				fixture.containers[i].Config.Labels[compose.ServiceLabelKey] = fixture.containers[i].ID
+				fixture.containers[i].Config.Labels[docker.ComposeProjectLabelKey] = "app"
+				fixture.containers[i].Config.Labels[docker.ComposeServiceLabelKey] = fixture.containers[i].ID
 			}
 			if tt.conflict {
-				fixture.containers[1].Config.Labels[compose.ServiceLabelKey] = "one"
+				fixture.containers[1].Config.Labels[docker.ComposeServiceLabelKey] = "one"
 			}
 			dockerClient := newDockerClientForHandler(t, fixture.handler(t))
 			adapter := &targetedComposeAdapter{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}, fixture: fixture, fail: tt.fail}
@@ -368,8 +368,8 @@ func (p selectiveTargetPuller) PullImage(_ context.Context, ref string, _ io.Wri
 func TestApplyPendingTargetedFailedComposeDependencyRetained(t *testing.T) {
 	fixture := &targetedDocker{containers: []container.InspectResponse{newTargetedContainer("one", "1.x"), newTargetedContainer("two", "1.x")}, created: map[string]string{}}
 	for i := range fixture.containers {
-		fixture.containers[i].Config.Labels[compose.ProjectLabelKey] = "app"
-		fixture.containers[i].Config.Labels[compose.ServiceLabelKey] = fixture.containers[i].ID
+		fixture.containers[i].Config.Labels[docker.ComposeProjectLabelKey] = "app"
+		fixture.containers[i].Config.Labels[docker.ComposeServiceLabelKey] = fixture.containers[i].ID
 	}
 	fixture.containers[1].Config.Labels[labels.LabelDependsOn] = "one"
 	dockerClient := newDockerClientForHandler(t, fixture.handler(t))
@@ -593,7 +593,7 @@ func TestApplyPendingTargetedCancelAfterFirstUnit(t *testing.T) {
 
 func TestPartitionRestartUnits(t *testing.T) {
 	summary := func(project string) container.Summary {
-		return container.Summary{Labels: map[string]string{compose.ProjectLabelKey: project}}
+		return container.Summary{Labels: map[string]string{docker.ComposeProjectLabelKey: project}}
 	}
 	for _, tt := range []struct {
 		name       string

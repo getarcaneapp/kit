@@ -7,8 +7,9 @@ import (
 	"strings"
 
 	ref "github.com/distribution/reference"
-	"github.com/opencontainers/go-digest"
+
 	"kit.getarcane.app/registry"
+	"kit.getarcane.app/updater/digest"
 )
 
 type (
@@ -118,12 +119,8 @@ func IsImageIDLikeReference(imageRef string) bool {
 
 // IsDigestPinnedReference reports whether imageRef names an immutable repository digest.
 func IsDigestPinnedReference(imageRef string) bool {
-	_, digestValue, ok := strings.Cut(strings.TrimSpace(imageRef), "@")
-	if !ok {
-		return false
-	}
-	_, err := digest.Parse(strings.TrimSpace(digestValue))
-	return err == nil
+	_, ok := digest.FromReferenceSuffix(imageRef)
+	return ok
 }
 
 // PullableImageRef picks the reference to pull for a container: its config

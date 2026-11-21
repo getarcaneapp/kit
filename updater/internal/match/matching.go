@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
-	"kit.getarcane.app"
 
+	"kit.getarcane.app"
+	"kit.getarcane.app/docker"
 	"kit.getarcane.app/updater/digest"
-	"kit.getarcane.app/updater/internal/compose"
 	"kit.getarcane.app/updater/refs"
 )
 
@@ -50,7 +50,7 @@ func ShouldInspectUnmatchedContainerForImageMatch(c container.Summary) bool {
 	if _, isDigestRef := digest.FromReferenceSuffix(c.Image); !isDigestRef {
 		return false
 	}
-	return compose.ProjectLabel(c.Labels) != "" || compose.ServiceLabel(c.Labels) != ""
+	return docker.ComposeProjectLabel(c.Labels) != "" || docker.ComposeServiceLabel(c.Labels) != ""
 }
 
 // CurrentContainerImageID returns the best available image ID for a container.

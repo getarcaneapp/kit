@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"kit.getarcane.app"
-
 	"kit.getarcane.app/updater/labels"
 	"kit.getarcane.app/updater/types"
 )

@@ -6,8 +6,7 @@ import (
 	"slices"
 
 	"kit.getarcane.app"
-
-	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/docker"
 	"kit.getarcane.app/updater/internal/deps"
 	"kit.getarcane.app/updater/types"
 )
@@ -28,7 +27,7 @@ func (s *Service) buildComposeGroups(ctx context.Context, sorted []deps.Containe
 	for _, candidate := range sorted {
 		plan := kit.FromPtr(plansByName[candidate.Name])
 		labels := kit.FromPtr(kit.FromPtr(plan.inspect).Config).Labels
-		projectName, serviceName := compose.ProjectLabel(labels), compose.ServiceLabel(labels)
+		projectName, serviceName := docker.ComposeProjectLabel(labels), docker.ComposeServiceLabel(labels)
 		if plan.newRef == "" || kit.FromPtr(plan.inspect).Config == nil || s.config.LabelPolicy.IsSelfUpdateTarget(labels) || projectName == "" || serviceName == "" {
 			continue
 		}

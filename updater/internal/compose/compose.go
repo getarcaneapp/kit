@@ -1,14 +1,8 @@
-// Package compose reads the Docker Compose labels the updater relies on to
-// group containers into projects and services.
+// Package compose defines the additional Docker Compose label keys the updater
+// relies on beyond the project and service labels in kit.getarcane.app/docker.
 package compose
 
-import "strings"
-
 const (
-	// ProjectLabelKey is Docker Compose's project label key.
-	ProjectLabelKey = "com.docker.compose.project"
-	// ServiceLabelKey is Docker Compose's service label key.
-	ServiceLabelKey = "com.docker.compose.service"
 	// WorkingDirLabelKey is Docker Compose's project directory label key.
 	WorkingDirLabelKey = "com.docker.compose.project.working_dir"
 	// ConfigFilesLabelKey is Docker Compose's comma-separated config files label key.
@@ -20,13 +14,3 @@ const (
 	// ServiceContainerFilter excludes `docker compose run` one-off containers, as Compose does.
 	ServiceContainerFilter = "com.docker.compose.oneoff=False"
 )
-
-// ProjectLabel returns the trimmed Docker Compose project label.
-func ProjectLabel(labels map[string]string) string {
-	return strings.TrimSpace(labels[ProjectLabelKey])
-}
-
-// ServiceLabel returns the trimmed Docker Compose service label.
-func ServiceLabel(labels map[string]string) string {
-	return strings.TrimSpace(labels[ServiceLabelKey])
-}

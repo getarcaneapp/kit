@@ -10,7 +10,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 
-	"kit.getarcane.app/updater/internal/compose"
+	"kit.getarcane.app/docker"
 	updatetypes "kit.getarcane.app/updater/types"
 )
 
@@ -38,17 +38,20 @@ func TestPreflightComposeImage(t *testing.T) {
 		wantError bool
 	}{
 		{name: "standalone", newRef: "app:2"},
-		{name: "unsupported", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}, adapter: &fakeProjectUpdater{}, newRef: "app:2", wantError: true},
-		{name: "missing service", labels: map[string]string{compose.ProjectLabelKey: "app"}, newRef: "app:2", wantError: true},
-		{name: "self update exempt", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}, selfID: "self", newRef: "app:2"},
-		{name: "digest exempt", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}, newRef: "docker.io/library/app:1"},
-		{name: "unresolved", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}, adapter: &recordingProjectImages{}, newRef: "app:2", wantError: true},
+		{name: "unsupported", labels: map[string]string{docker.ComposeProjectLabelKey: "app", docker.ComposeServiceLabelKey: "web"}, adapter: &fakeProjectUpdater{}, newRef: "app:2", wantError: true},
+		{name: "missing service", labels: map[string]string{docker.ComposeProjectLabelKey: "app"}, newRef: "app:2", wantError: true},
+		{name: "self update exempt", labels: map[string]string{docker.ComposeProjectLabelKey: "app", docker.ComposeServiceLabelKey: "web"}, selfID: "self", newRef: "app:2"},
+		{name: "digest exempt", labels: map[string]string{docker.ComposeProjectLabelKey: "app", docker.ComposeServiceLabelKey: "web"}, newRef: "docker.io/library/app:1"},
 		{
-			name: "empty project ID", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"},
+			name: "unresolved", labels: map[string]string{docker.ComposeProjectLabelKey: "app", docker.ComposeServiceLabelKey: "web"},
+			adapter: &recordingProjectImages{}, newRef: "app:2", wantError: true,
+		},
+		{
+			name: "empty project ID", labels: map[string]string{docker.ComposeProjectLabelKey: "app", docker.ComposeServiceLabelKey: "web"},
 			adapter: &recordingProjectImages{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {}}}}, newRef: "app:2", wantError: true,
 		},
 		{
-			name: "supported", labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"},
+			name: "supported", labels: map[string]string{docker.ComposeProjectLabelKey: "app", docker.ComposeServiceLabelKey: "web"},
 			adapter: &recordingProjectImages{fakeProjectUpdater: fakeProjectUpdater{projects: map[string]ComposeProject{"app": {ID: "project-app"}}}}, newRef: "app:2",
 		},
 	} {
@@ -89,7 +92,7 @@ func TestUpdateComposeImage(t *testing.T) {
 			service := newServiceForTest(t, Config{ProjectUpdater: adapter, DockerClientProvider: &fakeDockerClientProvider{client: dockerClient}})
 			inspect := container.InspectResponse{
 				Image:  "sha256:same",
-				Config: &container.Config{Image: "app:1", Labels: map[string]string{compose.ProjectLabelKey: "app", compose.ServiceLabelKey: "web"}},
+				Config: &container.Config{Image: "app:1", Labels: map[string]string{docker.ComposeProjectLabelKey: "app", docker.ComposeServiceLabelKey: "web"}},
 			}
 			err := service.updateComposeOrStandalone(t.Context(), container.Summary{ID: "old"}, inspect, "app:2")
 			if (err != nil) != failed {

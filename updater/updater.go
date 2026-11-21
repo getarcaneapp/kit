@@ -8,7 +8,9 @@ import (
 	"sync/atomic"
 
 	"github.com/moby/moby/api/types/container"
+
 	"kit.getarcane.app"
+	"kit.getarcane.app/updater/types"
 )
 
 type (
@@ -48,13 +50,14 @@ func New(config Config) (*Service, error) {
 	}
 	owned := kit.Ternary(config.DockerClientProvider == nil, NewDockerClientProvider(), nil)
 	provider := cmp.Or[DockerClientProvider](config.DockerClientProvider, owned)
+	logger := cmp.Or(config.Logger, slog.Default())
 	service := &Service{
 		config: Config{
 			DockerClientProvider:   provider,
-			ImagePuller:            cmp.Or(config.ImagePuller, NewImagePuller(provider)),
+			ImagePuller:            cmp.Or[ImagePuller](config.ImagePuller, defaultImagePuller{dockerClientProvider: provider, logger: logger}),
 			PendingStore:           cmp.Or(config.PendingStore, NewMemoryPendingStore()),
-			RegistryDigestResolver: cmp.Or(config.RegistryDigestResolver, NewRegistryDigestResolver()),
-			RegistryTagLister:      cmp.Or(config.RegistryTagLister, NewRegistryTagLister()),
+			RegistryDigestResolver: cmp.Or[RegistryDigestResolver](config.RegistryDigestResolver, defaultRegistryDigestResolver{logger: logger}),
+			RegistryTagLister:      cmp.Or[types.RegistryTagLister](config.RegistryTagLister, defaultRegistryTagLister{logger: logger}),
 			ProjectUpdater:         cmp.Or(config.ProjectUpdater, NewDockerComposeProjectUpdater(provider)),
 			LabelPolicy:            DefaultLabelPolicy().Merge(config.LabelPolicy),
 			RunRecorder:            config.RunRecorder,
@@ -67,7 +70,7 @@ func New(config Config) (*Service, error) {
 			SelfContainerID:        config.SelfContainerID,
 			OperationTimeout:       config.OperationTimeout,
 		},
-		logger:            cmp.Or(config.Logger, slog.Default()),
+		logger:            logger,
 		ownedDockerClient: owned,
 	}
 	service.updatingContainers.Store(&[]string{})
