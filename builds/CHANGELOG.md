@@ -1,3 +1,13 @@
+## builds/v0.6.0
+
+### New features
+
+* add kit.getarcane.app/semver and migrate updater off Masterminds/semver([78c5df3](https://github.com/getarcaneapp/kit/commit/78c5df3c7dd267e04e78b5fd2fcd5800c81c7da0) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.5.6...builds/v0.6.0
+
 ## builds/v0.5.6
 
 ### Bug fixes
