@@ -36,17 +36,20 @@ type (
 		force           bool
 		override        bool
 		unchangedDigest bool
-		disabled        bool
-		wantSkipped     bool
+		// compareFails makes every image inspect fail, so the post-pull comparison errors.
+		compareFails bool
+		disabled     bool
+		wantSkipped  bool
 	}
 
 	// tagSelectionDocker serves a single container to the updater and
 	// records the images it recreates and every mutating request.
 	tagSelectionDocker struct {
-		current   string
-		values    map[string]string
-		created   []string
-		mutations int
+		current      string
+		values       map[string]string
+		created      []string
+		mutations    int
+		compareFails bool
 	}
 )
 
@@ -595,6 +598,7 @@ func TestUpdateContainerTagSelection(t *testing.T) {
 		{name: "override rejects invalid constraint", excluded: containerName, override: true, constraint: "bad", wantFailure: true},
 		{name: "override respects constraint", excluded: containerName, override: true, force: true, constraint: "1.0.x"},
 		{name: "override keeps unchanged digest", excluded: containerName, override: true, unchangedDigest: true},
+		{name: "failed digest comparison leaves container running", unchangedDigest: true, compareFails: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			runTagSelectionScenario(t, scenario)
@@ -621,7 +625,7 @@ func newTagSelectionDocker(scenario tagSelectionScenario) *tagSelectionDocker {
 		values["com.docker.compose.project"] = "project"
 		values["com.docker.compose.service"] = "web"
 	}
-	return &tagSelectionDocker{current: current, values: values}
+	return &tagSelectionDocker{current: current, values: values, compareFails: scenario.compareFails}
 }
 
 func (d *tagSelectionDocker) handler(t *testing.T) http.HandlerFunc {
@@ -641,6 +645,8 @@ func (d *tagSelectionDocker) handler(t *testing.T) http.HandlerFunc {
 				ID:    containerID, Name: "/" + containerName, Image: "same",
 				Config: &container.Config{Image: d.current, Labels: d.values}, HostConfig: &container.HostConfig{},
 			})
+		case strings.HasPrefix(path, "/images/") && d.compareFails:
+			http.Error(w, "inspect failed", http.StatusInternalServerError)
 		case strings.HasPrefix(path, "/images/"):
 			writeDockerJSON(t, w, map[string]any{"Id": "same", "Config": map[string]any{}})
 		case path == "/info":
@@ -694,6 +700,12 @@ func runTagSelectionScenario(t *testing.T, scenario tagSelectionScenario) {
 	if scenario.wantSkipped {
 		if result.Skipped != 1 || lister.calls != 0 || docker.mutations != 0 || len(puller.pulled) != 0 {
 			t.Fatalf("expected ineligible: %+v", result)
+		}
+		return
+	}
+	if scenario.compareFails {
+		if result.Failed != 1 || result.Updated != 0 || docker.mutations != 0 || len(puller.pulled) != 1 {
+			t.Fatalf("expected a failed comparison to leave the container running: %+v, pulls %v", result, puller.pulled)
 		}
 		return
 	}
