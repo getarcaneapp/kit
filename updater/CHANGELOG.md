@@ -1,3 +1,13 @@
+## updater/v0.14.0
+
+### New features
+
+* add TagCandidateFilter to skip unusable tag candidates([e1d20e3](https://github.com/getarcaneapp/kit/commit/e1d20e3759b8ec43c206d383ad70cb81472639da) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.13.0...updater/v0.14.0
+
 ## updater/v0.13.0
 
 ### New features
