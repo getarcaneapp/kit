@@ -90,7 +90,7 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 		return out, nil
 	}
 
-	selection, selectionErr := s.selectImageTag(ctx, "", normalizedRef, s.config.LabelPolicy.TagPolicy(containerLabels))
+	selection, selectionErr := s.selectImageTag(ctx, "", inspect.Image, normalizedRef, s.config.LabelPolicy.TagPolicy(containerLabels))
 	if selectionErr != nil {
 		appendResult(out, containerResult(target.ID, name, StatusFailed, selectionErr.Error()))
 		return out, nil

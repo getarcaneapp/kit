@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +18,12 @@ type (
 		tags  []string
 		calls int
 	}
+
+	testTagFilter struct {
+		err      error
+		rejected []string
+		seen     []types.TagCandidate
+	}
 )
 
 func (l *testTagLister) ListTags(ctx context.Context, _ string) ([]string, error) {
@@ -25,6 +32,63 @@ func (l *testTagLister) ListTags(ctx context.Context, _ string) ([]string, error
 		return nil, err
 	}
 	return l.tags, l.err
+}
+
+func (f *testTagFilter) AcceptTag(_ context.Context, candidate types.TagCandidate) (bool, error) {
+	f.seen = append(f.seen, candidate)
+	return !slices.Contains(f.rejected, candidate.TargetRef), f.err
+}
+
+func TestSelectImageTagSkipsRejectedCandidates(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		filter   *testTagFilter
+		wantRef  string
+		wantSeen int
+	}{
+		{
+			name:     "next best",
+			filter:   &testTagFilter{rejected: []string{"docker.io/example/app:3.2.0"}},
+			wantRef:  "docker.io/example/app:3.1.10",
+			wantSeen: 2,
+		},
+		{
+			name:     "every newer tag rejected",
+			filter:   &testTagFilter{rejected: []string{"docker.io/example/app:3.2.0", "docker.io/example/app:3.1.10"}},
+			wantRef:  "docker.io/example/app:3.1.9",
+			wantSeen: 2,
+		},
+		{
+			name: "filter error keeps candidate",
+			filter: &testTagFilter{
+				err:      errors.New("registry unavailable"),
+				rejected: []string{"docker.io/example/app:3.2.0"},
+			},
+			wantRef:  "docker.io/example/app:3.2.0",
+			wantSeen: 1,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tags := []string{"3.1.10", "3.2.0", "4.0.0"}
+			service := newServiceForTest(t, Config{
+				RegistryTagLister:  &testTagLister{tags: tags},
+				TagCandidateFilter: tt.filter,
+			})
+			result, err := service.selectImageTag(t.Context(), "", "sha256:image", "example/app:3.1.9", types.Policy{Strategy: "tag"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.TargetRef != tt.wantRef || result.UpdateAvailable != (tt.wantRef != result.CurrentRef) || len(tt.filter.seen) != tt.wantSeen {
+				t.Fatalf("result = %+v, filter calls = %+v", result, tt.filter.seen)
+			}
+			if tt.filter.seen[0].ImageID != "sha256:image" || tt.filter.seen[0].CurrentRef != "docker.io/example/app:3.1.9" {
+				t.Fatalf("candidate = %+v", tt.filter.seen[0])
+			}
+			if !slices.Equal(tags, []string{"3.1.10", "3.2.0", "4.0.0"}) {
+				t.Fatalf("tag listing mutated: %v", tags)
+			}
+		})
+	}
 }
 
 func TestCheckTagLabelDefaultsAndOverrides(t *testing.T) {

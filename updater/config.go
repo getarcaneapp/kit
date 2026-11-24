@@ -45,6 +45,8 @@ type (
 		// UsedImageCollector is optional. When nil, ApplyPending discovers active
 		// images by listing running containers.
 		UsedImageCollector UsedImageCollector
+		// TagCandidateFilter is optional; when nil, every selected tag is used.
+		TagCandidateFilter types.TagCandidateFilter
 
 		// Logger receives the updater's diagnostics. Defaults to slog.Default().
 		Logger *slog.Logger

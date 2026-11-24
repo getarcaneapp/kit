@@ -66,6 +66,7 @@ func New(config Config) (*Service, error) {
 			Notifier:               config.Notifier,
 			EventRecorder:          config.EventRecorder,
 			UsedImageCollector:     config.UsedImageCollector,
+			TagCandidateFilter:     config.TagCandidateFilter,
 			Logger:                 config.Logger,
 			SelfContainerID:        config.SelfContainerID,
 			OperationTimeout:       config.OperationTimeout,

@@ -21,7 +21,7 @@ import (
 // CheckImageUpdate discovers an image update without pulling or changing state.
 // CurrentDigest should describe the image in use, not a separately cached tag.
 func (s *Service) CheckImageUpdate(ctx context.Context, request types.CheckRequest) (types.CheckResult, error) {
-	result, err := s.selectImageTag(ctx, "", request.ImageRef, request.Policy)
+	result, err := s.selectImageTag(ctx, "", "", request.ImageRef, request.Policy)
 	if err != nil || result.Reason != "" || result.UpdateAvailable {
 		return result, err
 	}
@@ -64,7 +64,7 @@ func (s *Service) CheckImageUpdate(ctx context.Context, request types.CheckReque
 	return digestResult(check.LocalDigest, check.RemoteDigest, check.Error == nil && check.NeedsUpdate), check.Error
 }
 
-func (s *Service) selectImageTag(ctx context.Context, containerID, imageRef string, policy types.Policy) (types.CheckResult, error) {
+func (s *Service) selectImageTag(ctx context.Context, containerID, imageID, imageRef string, policy types.Policy) (types.CheckResult, error) {
 	if err := ctx.Err(); err != nil {
 		return types.CheckResult{
 			ContainerID: containerID,
@@ -107,6 +107,29 @@ func (s *Service) selectImageTag(ctx context.Context, containerID, imageRef stri
 	selected, err := tagpolicy.Select(parsed.Tag, tags, policy)
 	if err != nil {
 		return unchanged, err
+	}
+	if s.config.TagCandidateFilter != nil {
+		remaining := slices.Clone(tags)
+		for selected != parsed.Tag {
+			targetRef := parsed.RegistryHost + "/" + parsed.Repository + ":" + selected
+			accepted, acceptErr := s.config.TagCandidateFilter.AcceptTag(ctx, types.TagCandidate{
+				CurrentRef: parsed.NormalizedRef,
+				TargetRef:  targetRef,
+				ImageID:    imageID,
+			})
+			if acceptErr != nil {
+				s.logger.DebugContext(ctx, "tag candidate filter failed; keeping candidate", "targetRef", targetRef, "error", acceptErr)
+			}
+			if accepted || acceptErr != nil {
+				break
+			}
+			remaining = slices.DeleteFunc(remaining, func(tag string) bool {
+				return tag == selected
+			})
+			if selected, err = tagpolicy.Select(parsed.Tag, remaining, policy); err != nil {
+				return unchanged, err
+			}
+		}
 	}
 	currentVersion, err := tagpolicy.Version(parsed.Tag, policy)
 	if err != nil {
@@ -151,7 +174,7 @@ func (s *Service) CheckContainerUpdate(ctx context.Context, containerID string) 
 	if reason := s.containerEligibility(inspect, excluded, enforceSettingsExclusions); reason != "" {
 		return types.CheckResult{ContainerID: cmp.Or(inspect.ID, containerID), Reason: reason}, nil
 	}
-	result, err := s.selectImageTag(ctx, inspect.ID, inspect.Config.Image, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
+	result, err := s.selectImageTag(ctx, inspect.ID, inspect.Image, inspect.Config.Image, s.config.LabelPolicy.TagPolicy(inspect.Config.Labels))
 	if err != nil || result.Reason != "" || result.UpdateAvailable {
 		return result, err
 	}

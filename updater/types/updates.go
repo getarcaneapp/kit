@@ -17,6 +17,21 @@ type (
 		ListTags(ctx context.Context, imageRef string) ([]string, error)
 	}
 
+	// TagCandidate describes a newer tag that tag selection picked. ImageID is the image the container
+	// runs, or empty when the check has no container.
+	TagCandidate struct {
+		CurrentRef string `json:"currentRef"`
+		TargetRef  string `json:"targetRef"`
+		ImageID    string `json:"imageId,omitempty"`
+	}
+
+	// TagCandidateFilter reports whether a selected tag can be used, for example whether it has a
+	// manifest for the running platform. A rejected tag is dropped and selection runs again; an error
+	// keeps the candidate.
+	TagCandidateFilter interface {
+		AcceptTag(ctx context.Context, candidate TagCandidate) (bool, error)
+	}
+
 	// CheckRequest describes an image and the digest currently in use. CurrentDigest
 	// can be omitted when the local Docker engine has the image.
 	CheckRequest struct {
