@@ -11,7 +11,7 @@ require (
 	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/depot/depot-go v0.5.4
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v29.10.0+incompatible
+	github.com/docker/cli v29.10.1+incompatible
 	github.com/docker/go-units v0.5.0
 	github.com/moby/buildkit v0.35.1
 	github.com/moby/go-archive v0.3.3
