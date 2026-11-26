@@ -1,3 +1,13 @@
+## builds/v0.6.1
+
+### Bug fixes
+
+* bump deps([7b9c5d3](https://github.com/getarcaneapp/kit/commit/7b9c5d3a880cd278cbac4a96e08ac3fbff623e62) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/builds/v0.6.0...builds/v0.6.1
+
 ## builds/v0.6.0
 
 ### New features
