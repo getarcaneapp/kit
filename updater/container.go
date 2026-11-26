@@ -120,7 +120,8 @@ func (s *Service) UpdateContainer(ctx context.Context, containerID string, opts 
 	}
 
 	changed, compareErr := digestcheck.NewChecker(digestcheck.CheckerConfig{DockerClient: dockerClient, Logger: s.logger}).CompareWithPulled(ctx, inspect.Image, normalizedRef)
-	if compareErr != nil && tagChanged {
+	// Without a comparison nothing shows the container is stale, so only a forced digest update recreates it.
+	if compareErr != nil && (tagChanged || !opts.Force) {
 		appendResult(out, containerResult(target.ID, name, StatusFailed, compareErr.Error()))
 		return out, nil
 	}
