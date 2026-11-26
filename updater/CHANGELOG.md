@@ -1,3 +1,15 @@
+## updater/v0.14.1
+
+### Bug fixes
+
+* keep a container when the post-pull comparison fails ([#33](https://github.com/getarcaneapp/kit/pull/33) by @neurekadev)
+* update update types([71c8b2b](https://github.com/getarcaneapp/kit/commit/71c8b2bf63f67c55ee554d78e4731f0df54229d0) by @kmendell)
+* bump deps([7b9c5d3](https://github.com/getarcaneapp/kit/commit/7b9c5d3a880cd278cbac4a96e08ac3fbff623e62) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.14.0...updater/v0.14.1
+
 ## updater/v0.14.0
 
 ### New features
