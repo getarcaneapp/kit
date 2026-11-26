@@ -117,6 +117,9 @@ func (s *Service) selectImageTag(ctx context.Context, containerID, imageID, imag
 				TargetRef:  targetRef,
 				ImageID:    imageID,
 			})
+			if acceptErr != nil && ctx.Err() != nil {
+				return unchanged, ctx.Err()
+			}
 			if acceptErr != nil {
 				s.logger.DebugContext(ctx, "tag candidate filter failed; keeping candidate", "targetRef", targetRef, "error", acceptErr)
 			}

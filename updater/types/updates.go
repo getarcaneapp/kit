@@ -27,7 +27,7 @@ type (
 
 	// TagCandidateFilter reports whether a selected tag can be used, for example whether it has a
 	// manifest for the running platform. A rejected tag is dropped and selection runs again; an error
-	// keeps the candidate.
+	// keeps the candidate unless the check's context is done, which fails the check.
 	TagCandidateFilter interface {
 		AcceptTag(ctx context.Context, candidate TagCandidate) (bool, error)
 	}
