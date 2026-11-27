@@ -1,3 +1,13 @@
+## updater/v0.14.2
+
+### Bug fixes
+
+* report no limit when a registry sends no rate-limit headers([c2b1c9e](https://github.com/getarcaneapp/kit/commit/c2b1c9ec57e5da190996215ef9d2895ef2ca280e) by @kmendell)
+
+
+
+**Full Changelog**: https://github.com/getarcaneapp/kit/compare/updater/v0.14.1...updater/v0.14.2
+
 ## updater/v0.14.1
 
 ### Bug fixes
