@@ -83,7 +83,8 @@ func IsFallbackEligibleDaemonError(err error) bool {
 	return false
 }
 
-// FetchRegistryRateLimit fetches registry pull rate-limit information.
+// FetchRegistryRateLimit fetches registry pull rate-limit information. A registry that answers
+// without rate-limit headers reports no limit: the result has nil counts and an empty Source.
 func FetchRegistryRateLimit(ctx context.Context, req Request) (*RateLimitInfo, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -131,7 +132,8 @@ func FetchRegistryRateLimit(ctx context.Context, req Request) (*RateLimitInfo, e
 	limit, limitWindow := parseRateLimitHeader(resp.Header.Get("Ratelimit-Limit"))
 	remaining, remainingWindow := parseRateLimitHeader(resp.Header.Get("Ratelimit-Remaining"))
 	used, usedErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Docker-Ratelimit-Used")))
-	if limit == nil && remaining == nil && usedErr != nil {
+	if limit == nil && remaining == nil && usedErr != nil &&
+		resp.Header.Get("Ratelimit-Limit")+resp.Header.Get("Ratelimit-Remaining")+resp.Header.Get("Docker-Ratelimit-Used") != "" {
 		return nil, errors.New("no registry rate limit headers found")
 	}
 	return &RateLimitInfo{
